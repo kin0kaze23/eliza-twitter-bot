@@ -306,7 +306,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Test custom API endpoint
+  // Test custom API endpoint - with real HTTP request and JSON extraction
   app.post("/api/custom-apis/:id/test", async (req, res) => {
     try {
       const api = await storage.getCustomApi(req.params.id);
@@ -314,42 +314,151 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Custom API not found" });
       }
 
-      // Perform actual API call
+      // Build request headers
       const headers: Record<string, string> = { ...api.headers };
-      if (api.authType === "bearer" && api.authToken) {
-        headers["Authorization"] = `Bearer ${api.authToken}`;
-      } else if (api.authType === "api_key" && api.authToken) {
-        headers["X-API-Key"] = api.authToken;
-      }
 
-      const response = await fetch(api.baseUrl, {
-        method: api.method,
-        headers,
-      });
+      // Add authentication from environment variables
+      if (api.authType !== "none" && api.authKeyEnvVar) {
+        const apiKey = process.env[api.authKeyEnvVar];
+        if (!apiKey) {
+          return res.status(400).json({
+            success: false,
+            error: `API key not found. Please add ${api.authKeyEnvVar} to your Replit secrets.`,
+            hint: `Go to Secrets tab and add: ${api.authKeyEnvVar}=your_actual_key`,
+          });
+        }
 
-      const data = await response.json();
-      
-      // Extract data using JSONPath if specified
-      let extractedData = data;
-      if (api.jsonPath) {
-        try {
-          // Simple JSONPath extraction (for complex paths, use a library)
-          const paths = api.jsonPath.split(".");
-          extractedData = paths.reduce((obj, path) => obj?.[path], data);
-        } catch (error) {
-          console.error("JSONPath extraction error:", error);
+        if (api.authType === "bearer") {
+          headers["Authorization"] = `Bearer ${apiKey}`;
+        } else if (api.authType === "api_key" && api.authHeaderName) {
+          headers[api.authHeaderName] = apiKey;
+        } else if (api.authType === "basic") {
+          headers["Authorization"] = `Basic ${Buffer.from(apiKey).toString("base64")}`;
         }
       }
+
+      // Build URL with query parameters
+      const url = new URL(api.baseUrl);
+      if (api.queryParams) {
+        Object.entries(api.queryParams).forEach(([key, value]) => {
+          url.searchParams.append(key, String(value));
+        });
+      }
+
+      // Prepare fetch options
+      const fetchOptions: RequestInit = {
+        method: api.method,
+        headers,
+      };
+
+      if (api.requestBody && (api.method === "POST" || api.method === "PUT" || api.method === "PATCH")) {
+        fetchOptions.body = api.requestBody;
+        headers["Content-Type"] = "application/json";
+      }
+
+      const response = await fetch(url.toString(), fetchOptions);
+
+      const responseText = await response.text();
+      
+      let responseData;
+      try {
+        responseData = JSON.parse(responseText);
+      } catch {
+        responseData = responseText;
+      }
+
+      // Extract data using JSON paths
+      let extractedData: any[] = [];
+      let extractedTitle = null;
+      let extractedContent = null;
+      let extractionError = null;
+
+      if (api.jsonPath && typeof responseData === "object") {
+        try {
+          // Simple JSONPath extraction ($.data.articles[*].title)
+          const pathParts = api.jsonPath.replace("$.", "").split(".");
+          let current = responseData;
+          
+          for (const part of pathParts) {
+            if (part.includes("[*]")) {
+              const arrayKey = part.replace("[*]", "");
+              current = current[arrayKey] || [];
+            } else {
+              current = current[part];
+            }
+          }
+          
+          extractedData = Array.isArray(current) ? current : [current];
+          
+          // Extract title and content from first item if paths provided
+          if (extractedData.length > 0 && (api.titlePath || api.contentPath)) {
+            const firstItem = extractedData[0];
+            
+            if (api.titlePath) {
+              const titleParts = api.titlePath.replace("$.", "").split(".");
+              let title = firstItem;
+              for (const part of titleParts) {
+                title = title?.[part];
+              }
+              extractedTitle = title;
+            }
+            
+            if (api.contentPath) {
+              const contentParts = api.contentPath.replace("$.", "").split(".");
+              let content = firstItem;
+              for (const part of contentParts) {
+                content = content?.[part];
+              }
+              extractedContent = content;
+            }
+          }
+        } catch (err: any) {
+          extractionError = err.message;
+        }
+      }
+
+      // Update test status in database
+      await storage.updateCustomApi(api.id, {
+        lastTestedAt: new Date().toISOString() as any,
+        testStatus: response.ok ? "success" : "failed",
+        testError: response.ok ? null : `HTTP ${response.status}: ${response.statusText}`,
+      });
 
       res.json({
         success: response.ok,
         status: response.status,
-        data: extractedData,
-        rawData: data,
+        statusText: response.statusText,
+        rawResponse: responseData,
+        extractedData,
+        extractedTitle,
+        extractedContent,
+        extractedCount: extractedData.length,
+        extractionError,
+        previewKBEntry: extractedTitle && extractedContent ? {
+          title: extractedTitle,
+          content: extractedContent,
+        } : null,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error testing custom API:", error);
-      res.status(500).json({ error: "Failed to test custom API" });
+      
+      // Update test status as failed
+      try {
+        if (req.params.id) {
+          await storage.updateCustomApi(req.params.id, {
+            lastTestedAt: new Date().toISOString() as any,
+            testStatus: "failed",
+            testError: error.message,
+          });
+        }
+      } catch (updateError) {
+        console.error("Failed to update test status:", updateError);
+      }
+      
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to test custom API",
+      });
     }
   });
 

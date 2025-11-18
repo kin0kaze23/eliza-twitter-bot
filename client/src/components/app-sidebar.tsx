@@ -52,6 +52,13 @@ const menuItems = [
     group: "overview",
   },
   {
+    title: "API Management",
+    url: "/api-management",
+    icon: ExternalLink,
+    testId: "link-api-management",
+    group: "data",
+  },
+  {
     title: "API Keys",
     url: "/api-keys",
     icon: Key,

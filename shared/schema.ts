@@ -167,11 +167,20 @@ export const customApis = pgTable("custom_apis", {
   baseUrl: text("base_url").notNull(),
   method: text("method").notNull().default("GET"),
   headers: jsonb("headers").$type<Record<string, string>>().default(sql`'{}'`),
-  authType: text("auth_type").default("none"), // none, bearer, api_key, oauth2
-  authToken: text("auth_token"),
-  jsonPath: text("json_path"), // for data extraction
+  authType: text("auth_type").default("none"), // none, bearer, api_key, basic
+  authKeyEnvVar: text("auth_key_env_var"), // Name of environment variable storing API key
+  authHeaderName: text("auth_header_name"), // Header name for API key (e.g., "X-API-Key", "Authorization")
+  queryParams: jsonb("query_params").$type<Record<string, string>>().default(sql`'{}'`),
+  requestBody: text("request_body"), // JSON string for POST/PUT requests
+  jsonPath: text("json_path"), // JSONPath to extract data from response (e.g., "$.data.articles[*]")
+  titlePath: text("title_path"), // JSONPath for KB entry title
+  contentPath: text("content_path"), // JSONPath for KB entry content
+  responseFormat: text("response_format").default("json"), // json, xml, text
   refreshInterval: integer("refresh_interval").default(60), // minutes
   enabled: boolean("enabled").default(true),
+  lastTestedAt: timestamp("last_tested_at"),
+  testStatus: text("test_status"), // success, failed, never_tested
+  testError: text("test_error"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

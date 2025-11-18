@@ -11,6 +11,7 @@ import Agents from "@/pages/agents";
 import AgentConfigure from "@/pages/agent-configure";
 import Monitoring from "@/pages/monitoring";
 import KBSnippets from "@/pages/kb-snippets";
+import APIManagement from "@/pages/api-management";
 import ApiKeys from "@/pages/api-keys";
 import Integrations from "@/pages/integrations";
 import CustomAPIs from "@/pages/custom-apis";
@@ -26,6 +27,7 @@ function Router() {
       <Route path="/agent/:id/configure" component={AgentConfigure} />
       <Route path="/monitoring" component={Monitoring} />
       <Route path="/kb-snippets" component={KBSnippets} />
+      <Route path="/api-management" component={APIManagement} />
       <Route path="/api-keys" component={ApiKeys} />
       <Route path="/integrations" component={Integrations} />
       <Route path="/custom-apis" component={CustomAPIs} />
