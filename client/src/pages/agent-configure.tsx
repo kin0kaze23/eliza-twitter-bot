@@ -13,18 +13,34 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play } from "lucide-react";
+import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
+
+type KBEntry = {
+  id: string;
+  title: string;
+  content: string;
+  tags: string[];
+};
 
 export default function AgentConfigure() {
   const { toast } = useToast();
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
   
-  // Twitter API Credentials (All Required)
+  // Twitter API Credentials
   const [twitterConfig, setTwitterConfig] = useState({
     apiKey: "",
     apiKeySecret: "",
@@ -34,12 +50,20 @@ export default function AgentConfigure() {
     appId: "",
   });
   
-  // Character Configuration
+  // Character & Prompts (Combined)
   const [character, setCharacter] = useState({
     name: "CryptoAnalyst",
     username: "@cryptoanalyst_ai",
-    description: "AI-powered cryptocurrency analyst providing market insights and analysis",
     bio: "Cryptocurrency analyst powered by AI. Providing data-driven insights on Bitcoin, Ethereum, and DeFi. Not financial advice. DYOR.",
+    systemPrompt: "You are an AI agent with expertise in cryptocurrency markets, blockchain technology, and DeFi. Provide accurate, timely insights based on current market data and news. Always maintain a helpful and professional demeanor.",
+    personalityPrompt: "Personality: Knowledgeable, analytical, enthusiastic about innovation. Tone: Professional yet conversational. Style: Clear, concise, data-driven insights with occasional wit.",
+    messageExamples: [
+      "🚀 Bitcoin breaking above $45k resistance! On-chain metrics showing strong accumulation. This could be the start of the next leg up. #BTC",
+      "Interesting DeFi development: New L2 protocol launching with novel liquidity mechanism. Early data looks promising. Will monitor closely.",
+    ],
+    postStyle: "Mix of analysis, insights, and commentary with data-driven observations",
+    topics: "Cryptocurrency, DeFi, NFTs, Blockchain Technology, Market Analysis, Trading",
+    adjectives: "analytical, insightful, timely, professional, innovative",
   });
   
   // Model Configuration
@@ -52,39 +76,56 @@ export default function AgentConfigure() {
     topP: [0.9],
     frequencyPenalty: [0.5],
     presencePenalty: [0.5],
+    contextWindow: "8000",
   });
   
-  // Posting Configuration
-  const [postingConfig, setPostingConfig] = useState({
-    enabled: true,
-    frequency: "2",
-    interval: "hours",
+  // Behavior Configuration (Combined posting, replies, modules)
+  const [behavior, setBehavior] = useState({
+    // Posting
+    postingEnabled: true,
+    postFrequency: "2",
+    postInterval: "hours",
     maxPostsPerDay: "12",
     quietHoursEnabled: false,
     quietHoursStart: "22:00",
     quietHoursEnd: "08:00",
-  });
-  
-  // Reply Configuration
-  const [replyConfig, setReplyConfig] = useState({
-    enabled: true,
+    timezone: "UTC",
+    
+    // Replies
+    replyEnabled: true,
     replyRate: [70],
     replyDelay: [30],
     maxRepliesPerHour: "10",
     onlyVerified: false,
-    keywordTriggers: "bitcoin, crypto, defi, blockchain",
+    replyKeywords: "bitcoin, crypto, defi, blockchain",
     ignoreKeywords: "spam, scam, airdrop",
-  });
-  
-  // Content Modules
-  const [modules, setModules] = useState({
+    
+    // Modules
     cryptoCommentary: true,
     marketAnalysis: true,
     newsCommentary: true,
     technicalAnalysis: false,
     threads: true,
     memes: false,
+    
+    // Triggers
+    priceChangeThreshold: [5],
+    volumeChangeThreshold: [50],
+    autoTweetOnNews: true,
+    minNewsSentiment: [0.6],
   });
+
+  // Knowledge Base (Per-Agent)
+  const [knowledgeBase, setKnowledgeBase] = useState<KBEntry[]>([
+    {
+      id: "1",
+      title: "Bitcoin Basics",
+      content: "Bitcoin is a decentralized digital currency that operates on a peer-to-peer network without central authority. Key features: limited supply (21M), proof-of-work consensus, blockchain ledger.",
+      tags: ["bitcoin", "cryptocurrency", "blockchain"],
+    },
+  ]);
+  const [isAddKBDialogOpen, setIsAddKBDialogOpen] = useState(false);
+  const [newKBEntry, setNewKBEntry] = useState({ title: "", content: "", tags: "" });
 
   const toggleShowSecret = (key: string) => {
     setShowSecrets(prev => ({ ...prev, [key]: !prev[key] }));
@@ -96,33 +137,50 @@ export default function AgentConfigure() {
     return secret.substring(0, 8) + "•".repeat(Math.max(12, secret.length - 8));
   };
 
+  const handleAddKBEntry = () => {
+    if (!newKBEntry.title || !newKBEntry.content) return;
+    
+    const entry: KBEntry = {
+      id: Date.now().toString(),
+      title: newKBEntry.title,
+      content: newKBEntry.content,
+      tags: newKBEntry.tags.split(",").map(t => t.trim()).filter(Boolean),
+    };
+    
+    setKnowledgeBase([...knowledgeBase, entry]);
+    setNewKBEntry({ title: "", content: "", tags: "" });
+    setIsAddKBDialogOpen(false);
+    
+    toast({
+      title: "Knowledge entry added",
+      description: "Entry has been added to this agent's knowledge base.",
+    });
+  };
+
+  const handleDeleteKBEntry = (id: string) => {
+    setKnowledgeBase(knowledgeBase.filter(e => e.id !== id));
+    toast({ title: "Entry deleted" });
+  };
+
   const handleSave = () => {
-    console.log("Saving agent configuration:", {
+    console.log("Saving complete agent configuration:", {
       twitter: twitterConfig,
       character,
       model: modelConfig,
-      posting: postingConfig,
-      reply: replyConfig,
-      modules,
+      behavior,
+      knowledgeBase,
     });
     
     toast({
       title: "Configuration saved",
-      description: "Agent configuration has been updated successfully.",
+      description: "All agent settings have been updated successfully.",
     });
   };
 
-  const handleTestDeploy = () => {
-    toast({
-      title: "Deploying to test environment",
-      description: "Agent is being deployed to playground for testing...",
-    });
-  };
-
-  // Validation checks
+  // Validation
   const twitterComplete = Object.values(twitterConfig).every(v => v !== "");
   const modelComplete = modelConfig.apiKey !== "";
-  const characterComplete = character.name && character.username;
+  const characterComplete = character.name && character.username && character.systemPrompt;
   const isConfigurationComplete = twitterComplete && modelComplete && characterComplete;
 
   return (
@@ -135,10 +193,10 @@ export default function AgentConfigure() {
             </Link>
           </div>
           <h1 className="text-2xl font-semibold mt-2" data-testid="text-page-title">
-            Configure Agent: {character.name}
+            Configure: {character.name}
           </h1>
           <p className="text-sm text-muted-foreground">
-            Complete agent configuration for deployment
+            Complete configuration for this agent
           </p>
         </div>
         <div className="flex gap-2">
@@ -150,7 +208,7 @@ export default function AgentConfigure() {
           </Link>
           <Button onClick={handleSave} data-testid="button-save-config">
             <Save className="mr-2 h-4 w-4" />
-            Save Configuration
+            Save All
           </Button>
         </div>
       </div>
@@ -159,10 +217,10 @@ export default function AgentConfigure() {
         <Alert>
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            <strong>Configuration Incomplete:</strong> Please complete all required fields before deploying.
+            <strong>Configuration Incomplete:</strong> Complete all required fields before deploying.
             {!twitterComplete && <span className="block mt-1">• Twitter API credentials required</span>}
             {!modelComplete && <span className="block mt-1">• AI model API key required</span>}
-            {!characterComplete && <span className="block mt-1">• Character name and username required</span>}
+            {!characterComplete && <span className="block mt-1">• Character profile and prompts required</span>}
           </AlertDescription>
         </Alert>
       )}
@@ -173,44 +231,32 @@ export default function AgentConfigure() {
             Twitter API
             {twitterComplete ? <CheckCircle2 className="ml-2 h-3 w-3" /> : <XCircle className="ml-2 h-3 w-3" />}
           </TabsTrigger>
-          <TabsTrigger value="character">Character</TabsTrigger>
+          <TabsTrigger value="character">Character & Prompts</TabsTrigger>
           <TabsTrigger value="model">AI Model</TabsTrigger>
-          <TabsTrigger value="posting">Posting</TabsTrigger>
-          <TabsTrigger value="replies">Replies</TabsTrigger>
-          <TabsTrigger value="modules">Modules</TabsTrigger>
+          <TabsTrigger value="behavior">Behavior</TabsTrigger>
+          <TabsTrigger value="knowledge">Knowledge Base</TabsTrigger>
         </TabsList>
 
         <TabsContent value="twitter" className="space-y-6">
           <Alert>
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
-              <strong>Required:</strong> All Twitter API credentials are required for the agent to post and interact.
-              Get your credentials from{" "}
-              <a
-                href="https://developer.twitter.com/en/portal/dashboard"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline"
-              >
+              <strong>Required:</strong> Get credentials from{" "}
+              <a href="https://developer.twitter.com/en/portal/dashboard" target="_blank" rel="noopener noreferrer" className="underline">
                 Twitter Developer Portal
               </a>
-              .
+              . Create an app with Read and Write permissions.
             </AlertDescription>
           </Alert>
 
           <Card>
             <CardHeader>
               <CardTitle>Twitter API v2 Credentials</CardTitle>
-              <CardDescription>
-                All fields are required. Create an app with Read and Write permissions.
-              </CardDescription>
+              <CardDescription>All 6 credentials required for full functionality</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="twitter-app-id">App ID</Label>
-                  <Badge variant="outline" className="text-xs">Required</Badge>
-                </div>
+                <Label htmlFor="twitter-app-id">App ID</Label>
                 <Input
                   id="twitter-app-id"
                   value={twitterConfig.appId}
@@ -219,16 +265,10 @@ export default function AgentConfigure() {
                   className="font-mono text-sm"
                   data-testid="input-twitter-app-id"
                 />
-                <p className="text-xs text-muted-foreground">
-                  Found in Developer Portal → Your App → Keys and tokens
-                </p>
               </div>
 
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="twitter-api-key">API Key (Consumer Key)</Label>
-                  <Badge variant="outline" className="text-xs">Required</Badge>
-                </div>
+                <Label htmlFor="twitter-api-key">API Key (Consumer Key)</Label>
                 <div className="flex gap-2">
                   <Input
                     id="twitter-api-key"
@@ -239,22 +279,14 @@ export default function AgentConfigure() {
                     className="font-mono text-sm"
                     data-testid="input-twitter-api-key"
                   />
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => toggleShowSecret("apiKey")}
-                    data-testid="button-toggle-api-key"
-                  >
+                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("apiKey")}>
                     {showSecrets.apiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="twitter-api-secret">API Key Secret (Consumer Secret)</Label>
-                  <Badge variant="outline" className="text-xs">Required</Badge>
-                </div>
+                <Label htmlFor="twitter-api-secret">API Key Secret</Label>
                 <div className="flex gap-2">
                   <Input
                     id="twitter-api-secret"
@@ -265,21 +297,14 @@ export default function AgentConfigure() {
                     className="font-mono text-sm"
                     data-testid="input-twitter-api-secret"
                   />
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => toggleShowSecret("apiKeySecret")}
-                  >
+                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("apiKeySecret")}>
                     {showSecrets.apiKeySecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="twitter-access-token">Access Token</Label>
-                  <Badge variant="outline" className="text-xs">Required</Badge>
-                </div>
+                <Label htmlFor="twitter-access-token">Access Token</Label>
                 <div className="flex gap-2">
                   <Input
                     id="twitter-access-token"
@@ -290,24 +315,14 @@ export default function AgentConfigure() {
                     className="font-mono text-sm"
                     data-testid="input-twitter-access-token"
                   />
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => toggleShowSecret("accessToken")}
-                  >
+                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("accessToken")}>
                     {showSecrets.accessToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Generate with Read and Write permissions
-                </p>
               </div>
 
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="twitter-access-secret">Access Token Secret</Label>
-                  <Badge variant="outline" className="text-xs">Required</Badge>
-                </div>
+                <Label htmlFor="twitter-access-secret">Access Token Secret</Label>
                 <div className="flex gap-2">
                   <Input
                     id="twitter-access-secret"
@@ -318,21 +333,14 @@ export default function AgentConfigure() {
                     className="font-mono text-sm"
                     data-testid="input-twitter-access-secret"
                   />
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => toggleShowSecret("accessTokenSecret")}
-                  >
+                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("accessTokenSecret")}>
                     {showSecrets.accessTokenSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="twitter-bearer">Bearer Token</Label>
-                  <Badge variant="outline" className="text-xs">Required</Badge>
-                </div>
+                <Label htmlFor="twitter-bearer">Bearer Token</Label>
                 <div className="flex gap-2">
                   <Input
                     id="twitter-bearer"
@@ -343,53 +351,10 @@ export default function AgentConfigure() {
                     className="font-mono text-sm"
                     data-testid="input-twitter-bearer"
                   />
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => toggleShowSecret("bearerToken")}
-                  >
+                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("bearerToken")}>
                     {showSecrets.bearerToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Used for read-only operations and monitoring mentions
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Setup Instructions</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="space-y-1">
-                <p className="font-medium">1. Create a Twitter Developer Account</p>
-                <p className="text-muted-foreground">
-                  Go to{" "}
-                  <a href="https://developer.twitter.com" target="_blank" rel="noopener noreferrer" className="underline">
-                    developer.twitter.com
-                  </a>{" "}
-                  and sign up
-                </p>
-              </div>
-              <div className="space-y-1">
-                <p className="font-medium">2. Create a New App</p>
-                <p className="text-muted-foreground">
-                  In the Developer Portal, create a new app with "Read and Write" permissions
-                </p>
-              </div>
-              <div className="space-y-1">
-                <p className="font-medium">3. Generate Keys and Tokens</p>
-                <p className="text-muted-foreground">
-                  Navigate to "Keys and tokens" tab and generate all required credentials
-                </p>
-              </div>
-              <div className="space-y-1">
-                <p className="font-medium">4. Copy Credentials to This Form</p>
-                <p className="text-muted-foreground">
-                  Paste each credential into the corresponding field above
-                </p>
               </div>
             </CardContent>
           </Card>
@@ -398,8 +363,8 @@ export default function AgentConfigure() {
         <TabsContent value="character" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Character Profile</CardTitle>
-              <CardDescription>Define the agent's identity and personality</CardDescription>
+              <CardTitle>Character Identity</CardTitle>
+              <CardDescription>Define who this agent is</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -423,18 +388,7 @@ export default function AgentConfigure() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="char-desc">Description (Internal)</Label>
-                <Textarea
-                  id="char-desc"
-                  value={character.description}
-                  onChange={(e) => setCharacter({ ...character, description: e.target.value })}
-                  placeholder="Internal description of agent's purpose"
-                  className="min-h-[80px]"
-                  data-testid="input-char-desc"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="char-bio">Twitter Bio (Public)</Label>
+                <Label htmlFor="char-bio">Twitter Bio</Label>
                 <Textarea
                   id="char-bio"
                   value={character.bio}
@@ -445,6 +399,98 @@ export default function AgentConfigure() {
                 />
                 <p className="text-xs text-muted-foreground">{character.bio.length} / 160 characters</p>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>System Prompt</CardTitle>
+              <CardDescription>Core instructions defining the agent's purpose</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="system-prompt">System Prompt</Label>
+                <Textarea
+                  id="system-prompt"
+                  value={character.systemPrompt}
+                  onChange={(e) => setCharacter({ ...character, systemPrompt: e.target.value })}
+                  className="min-h-[150px] font-mono text-sm"
+                  data-testid="input-system-prompt"
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Personality & Style</CardTitle>
+              <CardDescription>Define tone, style, and personality</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="personality-prompt">Personality Prompt</Label>
+                <Textarea
+                  id="personality-prompt"
+                  value={character.personalityPrompt}
+                  onChange={(e) => setCharacter({ ...character, personalityPrompt: e.target.value })}
+                  className="min-h-[100px] font-mono text-sm"
+                  data-testid="input-personality-prompt"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="post-style">Post Style</Label>
+                <Textarea
+                  id="post-style"
+                  value={character.postStyle}
+                  onChange={(e) => setCharacter({ ...character, postStyle: e.target.value })}
+                  className="min-h-[60px]"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="topics">Topics (comma-separated)</Label>
+                <Input
+                  id="topics"
+                  value={character.topics}
+                  onChange={(e) => setCharacter({ ...character, topics: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="adjectives">Adjectives (comma-separated)</Label>
+                <Input
+                  id="adjectives"
+                  value={character.adjectives}
+                  onChange={(e) => setCharacter({ ...character, adjectives: e.target.value })}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Message Examples</CardTitle>
+              <CardDescription>Sample posts demonstrating the agent's style</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {character.messageExamples.map((example, idx) => (
+                <div key={idx} className="space-y-2">
+                  <Label>Example {idx + 1}</Label>
+                  <Textarea
+                    value={example}
+                    onChange={(e) => {
+                      const newExamples = [...character.messageExamples];
+                      newExamples[idx] = e.target.value;
+                      setCharacter({ ...character, messageExamples: newExamples });
+                    }}
+                    className="min-h-[80px] font-mono text-sm"
+                  />
+                </div>
+              ))}
+              <Button
+                variant="outline"
+                onClick={() => setCharacter({ ...character, messageExamples: [...character.messageExamples, ""] })}
+              >
+                Add Example
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>
@@ -480,26 +526,9 @@ export default function AgentConfigure() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {modelConfig.provider === "openai" && (
-                      <>
-                        <SelectItem value="gpt-4-turbo-preview">GPT-4 Turbo</SelectItem>
-                        <SelectItem value="gpt-4">GPT-4</SelectItem>
-                        <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
-                      </>
-                    )}
-                    {modelConfig.provider === "anthropic" && (
-                      <>
-                        <SelectItem value="claude-3-opus">Claude 3 Opus</SelectItem>
-                        <SelectItem value="claude-3-sonnet">Claude 3 Sonnet</SelectItem>
-                        <SelectItem value="claude-3-haiku">Claude 3 Haiku</SelectItem>
-                      </>
-                    )}
-                    {modelConfig.provider === "groq" && (
-                      <>
-                        <SelectItem value="mixtral-8x7b">Mixtral 8x7B</SelectItem>
-                        <SelectItem value="llama2-70b">Llama 2 70B</SelectItem>
-                      </>
-                    )}
+                    <SelectItem value="gpt-4-turbo-preview">GPT-4 Turbo</SelectItem>
+                    <SelectItem value="gpt-4">GPT-4</SelectItem>
+                    <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -516,11 +545,7 @@ export default function AgentConfigure() {
                     className="font-mono text-sm"
                     data-testid="input-model-api-key"
                   />
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => toggleShowSecret("modelApiKey")}
-                  >
+                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("modelApiKey")}>
                     {showSecrets.modelApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
@@ -536,7 +561,6 @@ export default function AgentConfigure() {
                   onValueChange={(v) => setModelConfig({ ...modelConfig, temperature: v })}
                   max={2}
                   step={0.1}
-                  data-testid="slider-temperature"
                 />
               </div>
 
@@ -551,30 +575,37 @@ export default function AgentConfigure() {
                   min={100}
                   max={4000}
                   step={100}
-                  data-testid="slider-max-tokens"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="context-window">Context Window (tokens)</Label>
+                <Input
+                  id="context-window"
+                  type="number"
+                  value={modelConfig.contextWindow}
+                  onChange={(e) => setModelConfig({ ...modelConfig, contextWindow: e.target.value })}
                 />
               </div>
             </CardContent>
           </Card>
         </TabsContent>
 
-        <TabsContent value="posting" className="space-y-6">
+        <TabsContent value="behavior" className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Posting Schedule</CardTitle>
-              <CardDescription>Configure when and how often the agent posts</CardDescription>
+              <CardDescription>Control when and how often this agent posts</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label htmlFor="posting-enabled">Enable Automated Posting</Label>
+                  <Label>Enable Automated Posting</Label>
                   <p className="text-xs text-muted-foreground">Allow agent to post automatically</p>
                 </div>
                 <Switch
-                  id="posting-enabled"
-                  checked={postingConfig.enabled}
-                  onCheckedChange={(v) => setPostingConfig({ ...postingConfig, enabled: v })}
-                  data-testid="switch-posting-enabled"
+                  checked={behavior.postingEnabled}
+                  onCheckedChange={(v) => setBehavior({ ...behavior, postingEnabled: v })}
                 />
               </div>
 
@@ -583,16 +614,15 @@ export default function AgentConfigure() {
                 <div className="flex gap-2">
                   <Input
                     type="number"
-                    value={postingConfig.frequency}
-                    onChange={(e) => setPostingConfig({ ...postingConfig, frequency: e.target.value })}
-                    min="1"
+                    value={behavior.postFrequency}
+                    onChange={(e) => setBehavior({ ...behavior, postFrequency: e.target.value })}
                     className="w-24"
-                    disabled={!postingConfig.enabled}
+                    disabled={!behavior.postingEnabled}
                   />
                   <Select
-                    value={postingConfig.interval}
-                    onValueChange={(v) => setPostingConfig({ ...postingConfig, interval: v })}
-                    disabled={!postingConfig.enabled}
+                    value={behavior.postInterval}
+                    onValueChange={(v) => setBehavior({ ...behavior, postInterval: v })}
+                    disabled={!behavior.postingEnabled}
                   >
                     <SelectTrigger className="w-32">
                       <SelectValue />
@@ -610,116 +640,197 @@ export default function AgentConfigure() {
                 <Input
                   id="max-posts"
                   type="number"
-                  value={postingConfig.maxPostsPerDay}
-                  onChange={(e) => setPostingConfig({ ...postingConfig, maxPostsPerDay: e.target.value })}
-                  min="1"
-                  max="100"
-                  disabled={!postingConfig.enabled}
+                  value={behavior.maxPostsPerDay}
+                  onChange={(e) => setBehavior({ ...behavior, maxPostsPerDay: e.target.value })}
+                  disabled={!behavior.postingEnabled}
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="timezone">Timezone</Label>
+                <Select
+                  value={behavior.timezone}
+                  onValueChange={(v) => setBehavior({ ...behavior, timezone: v })}
+                  disabled={!behavior.postingEnabled}
+                >
+                  <SelectTrigger id="timezone">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="UTC">UTC</SelectItem>
+                    <SelectItem value="America/New_York">Eastern (US)</SelectItem>
+                    <SelectItem value="America/Los_Angeles">Pacific (US)</SelectItem>
+                    <SelectItem value="Europe/London">London</SelectItem>
+                    <SelectItem value="Asia/Tokyo">Tokyo</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
 
-        <TabsContent value="replies" className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Reply Behavior</CardTitle>
-              <CardDescription>Configure how the agent responds to mentions</CardDescription>
+              <CardDescription>Configure how this agent responds to mentions</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label htmlFor="replies-enabled">Enable Auto-Reply</Label>
+                  <Label>Enable Auto-Reply</Label>
                   <p className="text-xs text-muted-foreground">Automatically respond to mentions</p>
                 </div>
                 <Switch
-                  id="replies-enabled"
-                  checked={replyConfig.enabled}
-                  onCheckedChange={(v) => setReplyConfig({ ...replyConfig, enabled: v })}
-                  data-testid="switch-replies-enabled"
+                  checked={behavior.replyEnabled}
+                  onCheckedChange={(v) => setBehavior({ ...behavior, replyEnabled: v })}
                 />
               </div>
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label>Reply Rate</Label>
-                  <span className="text-sm text-muted-foreground">{replyConfig.replyRate[0]}%</span>
+                  <span className="text-sm text-muted-foreground">{behavior.replyRate[0]}%</span>
                 </div>
                 <Slider
-                  value={replyConfig.replyRate}
-                  onValueChange={(v) => setReplyConfig({ ...replyConfig, replyRate: v })}
+                  value={behavior.replyRate}
+                  onValueChange={(v) => setBehavior({ ...behavior, replyRate: v })}
                   max={100}
                   step={5}
-                  disabled={!replyConfig.enabled}
+                  disabled={!behavior.replyEnabled}
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="keyword-triggers">Keyword Triggers (comma-separated)</Label>
+                <Label htmlFor="reply-keywords">Reply to Keywords (comma-separated)</Label>
                 <Textarea
-                  id="keyword-triggers"
-                  value={replyConfig.keywordTriggers}
-                  onChange={(e) => setReplyConfig({ ...replyConfig, keywordTriggers: e.target.value })}
-                  placeholder="bitcoin, crypto, defi"
-                  className="min-h-[80px]"
-                  disabled={!replyConfig.enabled}
+                  id="reply-keywords"
+                  value={behavior.replyKeywords}
+                  onChange={(e) => setBehavior({ ...behavior, replyKeywords: e.target.value })}
+                  className="min-h-[60px]"
+                  disabled={!behavior.replyEnabled}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Content Modules</CardTitle>
+              <CardDescription>Enable or disable content types for this agent</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>Crypto Commentary</Label>
+                <Switch
+                  checked={behavior.cryptoCommentary}
+                  onCheckedChange={(v) => setBehavior({ ...behavior, cryptoCommentary: v })}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <Label>Market Analysis</Label>
+                <Switch
+                  checked={behavior.marketAnalysis}
+                  onCheckedChange={(v) => setBehavior({ ...behavior, marketAnalysis: v })}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <Label>News Commentary</Label>
+                <Switch
+                  checked={behavior.newsCommentary}
+                  onCheckedChange={(v) => setBehavior({ ...behavior, newsCommentary: v })}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <Label>Long-form Threads</Label>
+                <Switch
+                  checked={behavior.threads}
+                  onCheckedChange={(v) => setBehavior({ ...behavior, threads: v })}
                 />
               </div>
             </CardContent>
           </Card>
         </TabsContent>
 
-        <TabsContent value="modules" className="space-y-6">
+        <TabsContent value="knowledge" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Content Modules</CardTitle>
-              <CardDescription>Enable or disable different content types</CardDescription>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <CardTitle>Knowledge Base</CardTitle>
+                  <CardDescription>Knowledge specific to this agent ({knowledgeBase.length} entries)</CardDescription>
+                </div>
+                <Dialog open={isAddKBDialogOpen} onOpenChange={setIsAddKBDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="sm">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add Entry
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                      <DialogTitle>Add Knowledge Entry</DialogTitle>
+                      <DialogDescription>Add knowledge specific to this agent</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="kb-title">Title</Label>
+                        <Input
+                          id="kb-title"
+                          value={newKBEntry.title}
+                          onChange={(e) => setNewKBEntry({ ...newKBEntry, title: e.target.value })}
+                          placeholder="Entry title..."
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="kb-content">Content</Label>
+                        <Textarea
+                          id="kb-content"
+                          value={newKBEntry.content}
+                          onChange={(e) => setNewKBEntry({ ...newKBEntry, content: e.target.value })}
+                          placeholder="Knowledge content..."
+                          className="min-h-[150px] font-mono text-sm"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="kb-tags">Tags (comma-separated)</Label>
+                        <Input
+                          id="kb-tags"
+                          value={newKBEntry.tags}
+                          onChange={(e) => setNewKBEntry({ ...newKBEntry, tags: e.target.value })}
+                          placeholder="tag1, tag2, tag3"
+                        />
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setIsAddKBDialogOpen(false)}>Cancel</Button>
+                      <Button onClick={handleAddKBEntry}>Add Entry</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Crypto Commentary</Label>
-                  <p className="text-xs text-muted-foreground">Market insights and analysis</p>
+            <CardContent className="space-y-3">
+              {knowledgeBase.map((entry) => (
+                <div key={entry.id} className="p-3 border rounded-lg space-y-2">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <h4 className="font-medium">{entry.title}</h4>
+                      <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{entry.content}</p>
+                      <div className="flex gap-2 mt-2 flex-wrap">
+                        {entry.tags.map(tag => (
+                          <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleDeleteKBEntry(entry.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-                <Switch
-                  checked={modules.cryptoCommentary}
-                  onCheckedChange={(v) => setModules({ ...modules, cryptoCommentary: v })}
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Market Analysis</Label>
-                  <p className="text-xs text-muted-foreground">Price trends and movements</p>
-                </div>
-                <Switch
-                  checked={modules.marketAnalysis}
-                  onCheckedChange={(v) => setModules({ ...modules, marketAnalysis: v })}
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>News Commentary</Label>
-                  <p className="text-xs text-muted-foreground">React to breaking news</p>
-                </div>
-                <Switch
-                  checked={modules.newsCommentary}
-                  onCheckedChange={(v) => setModules({ ...modules, newsCommentary: v })}
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Long-form Threads</Label>
-                  <p className="text-xs text-muted-foreground">Multi-tweet threads</p>
-                </div>
-                <Switch
-                  checked={modules.threads}
-                  onCheckedChange={(v) => setModules({ ...modules, threads: v })}
-                />
-              </div>
+              ))}
             </CardContent>
           </Card>
         </TabsContent>
@@ -740,15 +851,10 @@ export default function AgentConfigure() {
               </>
             )}
           </Badge>
-          {!isConfigurationComplete && (
-            <p className="text-sm text-muted-foreground">
-              Complete all required fields to enable deployment
-            </p>
-          )}
         </div>
         <Button onClick={handleSave} size="lg" data-testid="button-save-all">
           <Save className="mr-2 h-4 w-4" />
-          Save All Changes
+          Save All Configuration
         </Button>
       </div>
     </div>

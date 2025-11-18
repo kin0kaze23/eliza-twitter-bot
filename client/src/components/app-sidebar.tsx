@@ -1,9 +1,6 @@
 import {
   LayoutDashboard,
-  FileText,
-  BookOpen,
   Key,
-  Settings,
   Plug,
   Activity,
   Bot,
@@ -39,32 +36,11 @@ const menuItems = [
     group: "overview",
   },
   {
-    title: "Prompts",
-    url: "/prompts",
-    icon: FileText,
-    testId: "link-prompts",
-    group: "configuration",
-  },
-  {
-    title: "Knowledge Base",
-    url: "/knowledge-base",
-    icon: BookOpen,
-    testId: "link-knowledge-base",
-    group: "configuration",
-  },
-  {
     title: "API Keys",
     url: "/api-keys",
     icon: Key,
     testId: "link-api-keys",
-    group: "configuration",
-  },
-  {
-    title: "Behaviour",
-    url: "/behaviour",
-    icon: Settings,
-    testId: "link-behaviour",
-    group: "configuration",
+    group: "global",
   },
   {
     title: "Integrations",
@@ -101,7 +77,7 @@ export function AppSidebar() {
 
   const groupedItems = {
     overview: menuItems.filter(item => item.group === "overview"),
-    configuration: menuItems.filter(item => item.group === "configuration"),
+    global: menuItems.filter(item => item.group === "global"),
     data: menuItems.filter(item => item.group === "data"),
     testing: menuItems.filter(item => item.group === "testing"),
   };
@@ -143,10 +119,10 @@ export function AppSidebar() {
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel>Configuration</SidebarGroupLabel>
+          <SidebarGroupLabel>Global Settings</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {groupedItems.configuration.map((item) => (
+              {groupedItems.global.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild

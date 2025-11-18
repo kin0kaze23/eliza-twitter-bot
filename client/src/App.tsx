@@ -9,10 +9,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import Dashboard from "@/pages/dashboard";
 import Agents from "@/pages/agents";
 import AgentConfigure from "@/pages/agent-configure";
-import Prompts from "@/pages/prompts";
-import KnowledgeBase from "@/pages/knowledge-base";
 import ApiKeys from "@/pages/api-keys";
-import Behaviour from "@/pages/behaviour";
 import Integrations from "@/pages/integrations";
 import CustomAPIs from "@/pages/custom-apis";
 import LiveFeeds from "@/pages/live-feeds";
@@ -25,10 +22,7 @@ function Router() {
       <Route path="/" component={Dashboard} />
       <Route path="/agents" component={Agents} />
       <Route path="/agent/:id/configure" component={AgentConfigure} />
-      <Route path="/prompts" component={Prompts} />
-      <Route path="/knowledge-base" component={KnowledgeBase} />
       <Route path="/api-keys" component={ApiKeys} />
-      <Route path="/behaviour" component={Behaviour} />
       <Route path="/integrations" component={Integrations} />
       <Route path="/custom-apis" component={CustomAPIs} />
       <Route path="/live-feeds" component={LiveFeeds} />
