@@ -10,6 +10,24 @@ The dashboard enables users to manage every aspect of their AI agent including p
 
 Preferred communication style: Simple, everyday language.
 
+## Documentation
+
+**For End Users**: See [USER_GUIDE.md](./USER_GUIDE.md) for comprehensive usage instructions, examples, and troubleshooting
+
+**For Developers**: See [README.md](./README.md) for technical architecture, API documentation, and deployment instructions
+
+## Recent Updates (November 2024)
+
+**Production-Ready Release v1.0**:
+- ✅ Real LLM integration with OpenAI and Anthropic APIs (removed all mocked responses)
+- ✅ JSONPath extraction using `jsonpath` library for robust API data ingestion
+- ✅ Dynamic agent selection in Playground (no hardcoded IDs)
+- ✅ Proper numeric schema types for LLM parameters (temperature, topP, etc.)
+- ✅ Comprehensive error handling and validation throughout
+- ✅ Complete API workflow: Test → Extract → Ingest → KB → Conversation
+- ✅ Passed architect review - confirmed production-ready
+- ✅ Full documentation added (USER_GUIDE.md and README.md)
+
 ## System Architecture
 
 ### Frontend Architecture
