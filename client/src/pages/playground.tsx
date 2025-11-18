@@ -12,8 +12,10 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Play, RefreshCw, AlertCircle, CheckCircle2, XCircle } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { useQuery } from "@tanstack/react-query";
+import type { Agent } from "@shared/schema";
 
 type TestResult = {
   success: boolean;
@@ -32,7 +34,13 @@ type ConversationMessage = {
 
 export default function Playground() {
   const { toast } = useToast();
-  const [selectedAgent, setSelectedAgent] = useState("1");
+  
+  // Fetch all agents
+  const { data: agents, isLoading: agentsLoading } = useQuery<Agent[]>({
+    queryKey: ["/api/agents"],
+  });
+  
+  const [selectedAgent, setSelectedAgent] = useState<string | undefined>(agents?.[0]?.id);
   const [testPrompt, setTestPrompt] = useState("What's the current state of Bitcoin? Should I be bullish or bearish?");
   const [isGenerating, setIsGenerating] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
@@ -42,12 +50,19 @@ export default function Playground() {
   const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([]);
   const [conversationInput, setConversationInput] = useState("");
   
+  // Set first agent as selected when agents load
+  useEffect(() => {
+    if (agents && agents.length > 0 && !selectedAgent) {
+      setSelectedAgent(agents[0].id);
+    }
+  }, [agents, selectedAgent]);
+  
   const [configValidation, setConfigValidation] = useState({
     prompts: { valid: true, message: "All prompts configured" },
-    apiKeys: { valid: false, message: "Twitter API key missing" },
-    knowledge: { valid: true, message: "3 knowledge base entries" },
-    schedule: { valid: true, message: "Post every 2 hours" },
-    modules: { valid: true, message: "2 modules enabled" },
+    apiKeys: { valid: false, message: "Model API key may be missing" },
+    knowledge: { valid: true, message: "KB entries available" },
+    schedule: { valid: true, message: "Post schedule configured" },
+    modules: { valid: true, message: "Modules configured" },
   });
 
   const handleGenerate = () => {
@@ -77,7 +92,7 @@ export default function Playground() {
   };
 
   const handleSendConversation = async () => {
-    if (!conversationInput.trim()) return;
+    if (!conversationInput.trim() || !selectedAgent) return;
     
     setIsGenerating(true);
     
@@ -171,16 +186,26 @@ export default function Playground() {
           <CardDescription>Choose which agent configuration to test</CardDescription>
         </CardHeader>
         <CardContent>
-          <Select value={selectedAgent} onValueChange={setSelectedAgent}>
-            <SelectTrigger data-testid="select-test-agent">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="1">CryptoAnalyst (Active)</SelectItem>
-              <SelectItem value="2">DeFiExpert (Draft)</SelectItem>
-              <SelectItem value="3">NewsBot (Paused)</SelectItem>
-            </SelectContent>
-          </Select>
+          {agentsLoading ? (
+            <div className="text-sm text-muted-foreground">Loading agents...</div>
+          ) : agents && agents.length > 0 ? (
+            <Select value={selectedAgent} onValueChange={setSelectedAgent}>
+              <SelectTrigger data-testid="select-test-agent">
+                <SelectValue placeholder="Select an agent" />
+              </SelectTrigger>
+              <SelectContent>
+                {agents.map((agent) => (
+                  <SelectItem key={agent.id} value={agent.id}>
+                    {agent.name} ({agent.status})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="text-sm text-muted-foreground">
+              No agents found. Create an agent first.
+            </div>
+          )}
         </CardContent>
       </Card>
 

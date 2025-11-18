@@ -3,6 +3,8 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertAgentSchema, insertKnowledgeBaseSchema, insertCustomApiSchema, insertApiKeySchema, insertAgentActivitySchema } from "@shared/schema";
 import { z } from "zod";
+import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============= AGENTS ============= //
@@ -375,41 +377,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (api.jsonPath && typeof responseData === "object") {
         try {
-          // Simple JSONPath extraction ($.data.articles[*].title)
-          const pathParts = api.jsonPath.replace("$.", "").split(".");
-          let current = responseData;
-          
-          for (const part of pathParts) {
-            if (part.includes("[*]")) {
-              const arrayKey = part.replace("[*]", "");
-              current = current[arrayKey] || [];
-            } else {
-              current = current[part];
-            }
-          }
-          
-          extractedData = Array.isArray(current) ? current : [current];
+          // Use jsonpath library for proper JSONPath extraction
+          const jp = await import("jsonpath");
+          extractedData = jp.query(responseData, api.jsonPath);
           
           // Extract title and content from first item if paths provided
           if (extractedData.length > 0 && (api.titlePath || api.contentPath)) {
             const firstItem = extractedData[0];
             
             if (api.titlePath) {
-              const titleParts = api.titlePath.replace("$.", "").split(".");
-              let title = firstItem;
-              for (const part of titleParts) {
-                title = title?.[part];
+              const titles = jp.query(firstItem, api.titlePath);
+              if (titles.length > 0) {
+                extractedTitle = String(titles[0]);
               }
-              extractedTitle = title;
             }
             
             if (api.contentPath) {
-              const contentParts = api.contentPath.replace("$.", "").split(".");
-              let content = firstItem;
-              for (const part of contentParts) {
-                content = content?.[part];
+              const contents = jp.query(firstItem, api.contentPath);
+              if (contents.length > 0) {
+                extractedContent = String(contents[0]);
               }
-              extractedContent = content;
             }
           }
         } catch (err: any) {
@@ -480,38 +467,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Agent not found" });
       }
       
-      // Build context from conversation history
-      let context = agent.systemPrompt || "You are a helpful AI assistant.";
-      
-      if (conversationHistory && conversationHistory.length > 0) {
-        context += "\n\nConversation history:";
-        conversationHistory.forEach((msg: { role: string; content: string }) => {
-          context += `\n${msg.role === "user" ? "User" : "Assistant"}: ${msg.content}`;
+      // Determine API key to use
+      let apiKey = agent.modelApiKey || process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        return res.status(400).json({ 
+          error: "No API key configured", 
+          details: "Please add OPENAI_API_KEY or ANTHROPIC_API_KEY to your Replit secrets, or configure a model API key in the agent settings." 
         });
       }
       
-      context += `\n\nUser: ${message}\nAssistant:`;
+      // Build messages array from conversation history
+      const messages: Array<{role: string; content: string}> = [];
       
-      // In production, this would call the actual AI model
-      // For now, simulate a contextual response
-      const responses = [
-        `Based on our discussion about ${conversationHistory?.length > 0 ? "the previous topics" : "this topic"}, I think ${message.toLowerCase().includes("what") ? "the answer depends on market conditions" : "that's a great point"}. Let me elaborate...`,
-        `Following up on ${conversationHistory?.length > 0 ? "what we discussed" : "your question"}: ${message.includes("?") ? "The key factors to consider are timing, market sentiment, and on-chain metrics." : "I agree with your assessment."}`,
-        `In the context of ${conversationHistory?.length > 0 ? "our conversation" : "your query"}, I'd say the most important thing is to ${message.toLowerCase().includes("should") ? "analyze the risk-reward ratio" : "stay informed about market developments"}.`,
-        `That's an excellent question. ${conversationHistory?.length > 0 ? "Building on our previous discussion," : ""} I recommend looking at: 1) Historical patterns 2) Current market structure 3) Fundamental catalysts.`,
-      ];
+      // Add system prompt if available
+      if (agent.systemPrompt) {
+        messages.push({
+          role: "system",
+          content: agent.systemPrompt
+        });
+      }
       
-      const response = responses[Math.floor(Math.random() * responses.length)];
+      // Add conversation history
+      if (conversationHistory && conversationHistory.length > 0) {
+        messages.push(...conversationHistory);
+      }
+      
+      // Add current user message
+      messages.push({
+        role: "user",
+        content: message
+      });
+      
+      let response: string;
+      
+      // Call the appropriate AI provider
+      if (agent.modelProvider === "openai" || !agent.modelProvider) {
+        const openai = new OpenAI({ apiKey });
+        
+        const completion = await openai.chat.completions.create({
+          model: agent.modelName || "gpt-4-turbo-preview",
+          messages: messages as any,
+          temperature: Number(agent.temperature) || 0.7,
+          max_tokens: agent.maxTokens || 500,
+          top_p: Number(agent.topP) || 0.9,
+          frequency_penalty: Number(agent.frequencyPenalty) || 0.5,
+          presence_penalty: Number(agent.presencePenalty) || 0.5,
+        });
+        
+        response = completion.choices[0]?.message?.content || "No response generated";
+        
+      } else if (agent.modelProvider === "anthropic") {
+        const anthropic = new Anthropic({ apiKey });
+        
+        // Anthropic requires system message separately
+        const systemMessage = messages.find(m => m.role === "system");
+        const conversationMessages = messages.filter(m => m.role !== "system");
+        
+        const completion = await anthropic.messages.create({
+          model: agent.modelName || "claude-3-opus-20240229",
+          system: systemMessage?.content || "You are a helpful AI assistant.",
+          messages: conversationMessages.map(m => ({
+            role: m.role as "user" | "assistant",
+            content: m.content
+          })),
+          max_tokens: agent.maxTokens || 500,
+          temperature: Number(agent.temperature) || 0.7,
+          top_p: Number(agent.topP) || 0.9,
+        });
+        
+        const textContent = completion.content.find((c: any) => c.type === "text");
+        response = textContent?.text || "No response generated";
+        
+      } else {
+        return res.status(400).json({ error: `Unsupported model provider: ${agent.modelProvider}` });
+      }
       
       res.json({
         success: true,
         response,
         timestamp: new Date().toISOString(),
         contextUsed: conversationHistory?.length || 0,
+        modelUsed: `${agent.modelProvider}/${agent.modelName}`,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error in conversation test:", error);
-      res.status(500).json({ error: "Failed to process conversation" });
+      res.status(500).json({ 
+        error: "Failed to process conversation",
+        details: error.message 
+      });
     }
   });
 
@@ -521,65 +564,140 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/agents/:agentId/knowledge/ingest/:sourceId", async (req, res) => {
     try {
       const { agentId, sourceId } = req.params;
-      const { sourceType } = req.body; // "integration" or "custom_api"
+      const { sourceType } = req.body; // "custom_api"
       
-      // In production, this would:
-      // 1. Fetch the integration or custom API configuration
-      // 2. Make the API call to get fresh data
-      // 3. Parse the response using jsonPath
-      // 4. Create/update KB entries with the data
-      
-      let apiData: any;
-      let sourceUrl: string;
-      
-      if (sourceType === "integration") {
-        // Fetch from integration (this would use actual integration API in production)
-        apiData = {
-          title: "Latest Market Analysis",
-          content: "BTC showing strong momentum above $43k. Key resistance at $45.5k. On-chain metrics bullish.",
-        };
-        sourceUrl = "integration://crypto-data";
-      } else if (sourceType === "custom_api") {
-        // Fetch from custom API
-        const customApi = await storage.getCustomApi(sourceId);
-        if (!customApi) {
-          return res.status(404).json({ error: "Custom API not found" });
-        }
-        
-        // In production, make actual API call using customApi.url
-        // For now, simulate the response
-        apiData = {
-          title: customApi.name + " Data Update",
-          content: `Fresh data from ${customApi.url} fetched successfully.`,
-        };
-        sourceUrl = customApi.url;
-      } else {
-        return res.status(400).json({ error: "Invalid source type" });
+      if (sourceType !== "custom_api") {
+        return res.status(400).json({ error: "Only custom_api source type is supported" });
       }
       
-      // Create KB entry with fetched data
-      const entryData = {
-        title: apiData.title || "Auto-fetched Data",
-        content: apiData.content || JSON.stringify(apiData),
-        tags: ["auto-generated", sourceType],
-        source: sourceType,
-        sourceId: sourceId,
-        sourceUrl: sourceUrl,
-        category: "crypto",
-        priority: 7,
-        active: true,
-        refreshStrategy: "daily",
-        lastFetchedAt: new Date().toISOString(),
-        agentId: agentId,
-      };
+      // Fetch custom API configuration
+      const customApi = await storage.getCustomApi(sourceId);
+      if (!customApi) {
+        return res.status(404).json({ error: "Custom API not found" });
+      }
       
-      const validatedData = insertKnowledgeBaseSchema.parse(entryData);
-      const created = await storage.createKnowledgeBaseEntry(validatedData);
+      // Build request headers
+      const headers: Record<string, string> = { ...customApi.headers };
+      
+      // Add authentication from environment variables
+      if (customApi.authType !== "none" && customApi.authKeyEnvVar) {
+        const apiKey = process.env[customApi.authKeyEnvVar];
+        if (!apiKey) {
+          return res.status(400).json({
+            success: false,
+            error: `API key not found. Please add ${customApi.authKeyEnvVar} to your Replit secrets.`,
+          });
+        }
+        
+        if (customApi.authType === "bearer") {
+          headers["Authorization"] = `Bearer ${apiKey}`;
+        } else if (customApi.authType === "api_key" && customApi.authHeaderName) {
+          headers[customApi.authHeaderName] = apiKey;
+        } else if (customApi.authType === "basic") {
+          headers["Authorization"] = `Basic ${Buffer.from(apiKey).toString("base64")}`;
+        }
+      }
+      
+      // Build URL with query parameters
+      let url = customApi.url;
+      if (Object.keys(customApi.queryParams || {}).length > 0) {
+        const params = new URLSearchParams(customApi.queryParams || {});
+        url += `?${params.toString()}`;
+      }
+      
+      // Make API request
+      const response = await fetch(url, {
+        method: customApi.method || "GET",
+        headers,
+      });
+      
+      if (!response.ok) {
+        throw new Error(`API returned ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      // Extract data using JSON path
+      const jp = await import("jsonpath");
+      let extractedData: any[] = [];
+      
+      try {
+        if (customApi.jsonPath) {
+          extractedData = jp.query(data, customApi.jsonPath);
+          console.log(`JSONPath extraction: ${customApi.jsonPath} returned ${extractedData.length} items`);
+        } else {
+          extractedData = Array.isArray(data) ? data : [data];
+        }
+      } catch (jsonPathError: any) {
+        console.error("JSONPath extraction error:", jsonPathError);
+        return res.status(400).json({
+          error: "JSONPath extraction failed",
+          details: jsonPathError.message,
+          jsonPath: customApi.jsonPath,
+        });
+      }
+      
+      if (!extractedData || extractedData.length === 0) {
+        console.warn(`No data extracted from ${customApi.url} using path: ${customApi.jsonPath}`);
+        return res.status(400).json({
+          error: "No data extracted",
+          details: "JSONPath query returned no results. Please verify the path is correct.",
+          jsonPath: customApi.jsonPath,
+          hint: "Use the Test button to preview extraction results before ingesting",
+        });
+      }
+      
+      // Create KB entries from extracted data
+      const createdEntries = [];
+      for (const item of extractedData.slice(0, 20)) { // Limit to 20 entries per ingestion
+        let title = "Untitled";
+        let content = JSON.stringify(item);
+        
+        // Extract title and content using paths
+        if (customApi.titlePath) {
+          const titles = jp.query(item, customApi.titlePath);
+          if (titles.length > 0) {
+            title = String(titles[0]);
+          }
+        }
+        
+        if (customApi.contentPath) {
+          const contents = jp.query(item, customApi.contentPath);
+          if (contents.length > 0) {
+            content = String(contents[0]);
+          }
+        }
+        
+        // Create KB entry
+        const entryData = {
+          title: title.substring(0, 500), // Limit title length
+          content: content.substring(0, 10000), // Limit content length
+          tags: ["auto-generated", "api-ingestion"],
+          source: customApi.name,
+          sourceId: sourceId,
+          sourceUrl: customApi.url,
+          category: customApi.category || "general",
+          priority: 5,
+          active: true,
+          refreshStrategy: "manual",
+          lastFetchedAt: new Date().toISOString(),
+          agentId: agentId,
+        };
+        
+        try {
+          const validatedData = insertKnowledgeBaseSchema.parse(entryData);
+          const created = await storage.createKnowledgeBaseEntry(validatedData);
+          createdEntries.push(created);
+        } catch (err) {
+          console.error("Error creating KB entry:", err);
+        }
+      }
       
       res.status(201).json({
         success: true,
-        message: `Ingested 1 entry from ${sourceType}`,
-        entry: created,
+        message: `Ingested ${createdEntries.length} entries from ${customApi.name}`,
+        count: createdEntries.length,
+        entries: createdEntries.slice(0, 5), // Return first 5 as sample
       });
     } catch (error) {
       if (error instanceof z.ZodError) {
