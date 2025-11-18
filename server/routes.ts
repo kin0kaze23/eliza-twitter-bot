@@ -640,6 +640,171 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Test AI Model API key and fetch available models
+  app.post("/api/agents/:agentId/test/model", async (req, res) => {
+    try {
+      const { agentId } = req.params;
+      const { provider, apiKey } = req.body;
+
+      if (!provider || !apiKey) {
+        return res.status(400).json({
+          success: false,
+          error: "Missing required fields",
+          details: "Both provider and apiKey are required"
+        });
+      }
+
+      let models: any[] = [];
+      let testResult: any = {};
+
+      // Test OpenAI
+      if (provider === "openai") {
+        const response = await fetch("https://api.openai.com/v1/models", {
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          return res.status(response.status).json({
+            success: false,
+            error: "OpenAI API authentication failed",
+            statusCode: response.status,
+            hint: response.status === 401
+              ? "API key is invalid. Please check your OpenAI API key."
+              : "Failed to connect to OpenAI. Please verify your API key."
+          });
+        }
+
+        const data = await response.json();
+        
+        // Filter for GPT models and sort by creation date (newest first)
+        const gptModels = data.data
+          .filter((m: any) => m.id.includes('gpt') || m.id.includes('o1') || m.id.includes('o3'))
+          .sort((a: any, b: any) => b.created - a.created);
+
+        models = gptModels.map((m: any) => ({
+          id: m.id,
+          name: m.id,
+          created: m.created,
+          owned_by: m.owned_by
+        }));
+
+        testResult = {
+          success: true,
+          provider: "openai",
+          modelCount: models.length,
+          latestModel: models[0]?.id || null,
+          models: models
+        };
+      }
+      
+      // Test Google Gemini
+      else if (provider === "google" || provider === "gemini") {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          return res.status(response.status).json({
+            success: false,
+            error: "Google AI API authentication failed",
+            statusCode: response.status,
+            hint: response.status === 400 || response.status === 403
+              ? "API key is invalid. Please check your Google AI API key."
+              : "Failed to connect to Google AI. Please verify your API key."
+          });
+        }
+
+        const data = await response.json();
+        
+        // Filter for Gemini models
+        const geminiModels = data.models
+          ?.filter((m: any) => m.name.includes('gemini'))
+          .map((m: any) => ({
+            id: m.name.split('/').pop(), // Extract model ID from full path
+            name: m.displayName || m.name,
+            description: m.description,
+            supportedGenerationMethods: m.supportedGenerationMethods
+          })) || [];
+
+        models = geminiModels;
+
+        testResult = {
+          success: true,
+          provider: "google",
+          modelCount: models.length,
+          latestModel: models[0]?.id || null,
+          models: models
+        };
+      }
+      
+      // Test Anthropic Claude
+      else if (provider === "anthropic") {
+        // Anthropic doesn't have a public models list endpoint
+        // Test by making a minimal API call
+        const response = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "claude-3-5-sonnet-20241022",
+            max_tokens: 1,
+            messages: [{ role: "user", content: "Hi" }]
+          })
+        });
+
+        if (!response.ok && response.status === 401) {
+          return res.status(401).json({
+            success: false,
+            error: "Anthropic API authentication failed",
+            hint: "API key is invalid. Please check your Anthropic API key."
+          });
+        }
+
+        // Provide known Claude models (hardcoded since no list endpoint)
+        models = [
+          { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet (Latest)", family: "claude-3.5" },
+          { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku", family: "claude-3.5" },
+          { id: "claude-3-opus-20240229", name: "Claude 3 Opus", family: "claude-3" },
+          { id: "claude-3-sonnet-20240229", name: "Claude 3 Sonnet", family: "claude-3" },
+          { id: "claude-3-haiku-20240307", name: "Claude 3 Haiku", family: "claude-3" },
+        ];
+
+        testResult = {
+          success: true,
+          provider: "anthropic",
+          modelCount: models.length,
+          latestModel: models[0].id,
+          models: models,
+          note: "Anthropic doesn't provide a models list API. These are the latest known Claude models."
+        };
+      }
+      
+      else {
+        return res.status(400).json({
+          success: false,
+          error: "Unsupported provider",
+          details: `Provider "${provider}" is not supported for automatic model discovery. Supported: openai, google, anthropic`
+        });
+      }
+
+      res.json(testResult);
+
+    } catch (error: any) {
+      console.error("Error testing AI model API:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to test AI model API",
+        details: error.message
+      });
+    }
+  });
+
   // ============= KB AUTO-INGESTION ============= //
 
   // Manually trigger KB ingestion from an integration or custom API
