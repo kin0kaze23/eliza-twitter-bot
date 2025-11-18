@@ -1,0 +1,110 @@
+import {
+  LayoutDashboard,
+  FileText,
+  BookOpen,
+  Key,
+  Settings,
+  Plug,
+  Activity,
+  Bot,
+} from "lucide-react";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarHeader,
+} from "@/components/ui/sidebar";
+import { Link, useLocation } from "wouter";
+
+const menuItems = [
+  {
+    title: "Dashboard",
+    url: "/",
+    icon: LayoutDashboard,
+    testId: "link-dashboard",
+  },
+  {
+    title: "Prompts",
+    url: "/prompts",
+    icon: FileText,
+    testId: "link-prompts",
+  },
+  {
+    title: "Knowledge Base",
+    url: "/knowledge-base",
+    icon: BookOpen,
+    testId: "link-knowledge-base",
+  },
+  {
+    title: "API Keys",
+    url: "/api-keys",
+    icon: Key,
+    testId: "link-api-keys",
+  },
+  {
+    title: "Behaviour",
+    url: "/behaviour",
+    icon: Settings,
+    testId: "link-behaviour",
+  },
+  {
+    title: "Integrations",
+    url: "/integrations",
+    icon: Plug,
+    testId: "link-integrations",
+  },
+  {
+    title: "Live Feeds",
+    url: "/live-feeds",
+    icon: Activity,
+    testId: "link-live-feeds",
+  },
+];
+
+export function AppSidebar() {
+  const [location] = useLocation();
+
+  return (
+    <Sidebar>
+      <SidebarHeader className="p-6">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary">
+            <Bot className="h-6 w-6 text-primary-foreground" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold">ElizaOS</h2>
+            <p className="text-xs text-muted-foreground">Agent Dashboard</p>
+          </div>
+        </div>
+      </SidebarHeader>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {menuItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={location === item.url}
+                    data-testid={item.testId}
+                  >
+                    <Link href={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+    </Sidebar>
+  );
+}
