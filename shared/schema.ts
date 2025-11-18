@@ -97,6 +97,13 @@ export const agents = pgTable("agents", {
   requireApproval: boolean("require_approval").default(false),
   webhookUrl: text("webhook_url"), // for monitoring/alerts
   
+  // Knowledge Base Selection Settings
+  kbMaxEntries: integer("kb_max_entries").default(5), // max KB entries per generation
+  kbMaxTokens: integer("kb_max_tokens").default(2000), // max tokens from KB
+  kbCategoryWeights: jsonb("kb_category_weights").$type<Record<string, number>>().default(sql`'{}'`), // category priority weights
+  kbPriorityBias: text("kb_priority_bias").default("0.5"), // 0-1, how much to favor high-priority
+  kbInjectionMethod: text("kb_injection_method").default("prepend"), // prepend, append, context
+  
   // Metadata
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -113,13 +120,24 @@ export const insertAgentSchema = createInsertSchema(agents).omit({
 export type InsertAgent = z.infer<typeof insertAgentSchema>;
 export type Agent = typeof agents.$inferSelect;
 
-// Knowledge Base entries (per-agent)
+// Knowledge Base entries (per-agent) - Enhanced with categories and refresh logic
 export const knowledgeBase = pgTable("knowledge_base", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  
+  // Core fields
   title: text("title").notNull(),
   content: text("content").notNull(),
   tags: jsonb("tags").$type<string[]>().default(sql`'[]'`),
+  
+  // Enhanced management
+  category: text("category").notNull().default("general"), // crypto, theology, narratives, solana, mental_models, memes, general
+  priority: integer("priority").default(5).notNull(), // 1-10, higher = more important
+  active: boolean("active").default(true).notNull(), // toggle on/off
+  refreshStrategy: text("refresh_strategy").default("static").notNull(), // static, daily, weekly, on_demand
+  lastRefreshedAt: timestamp("last_refreshed_at"),
+  
+  // Metadata
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -178,3 +196,38 @@ export const insertApiKeySchema = createInsertSchema(apiKeys).omit({
 
 export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
 export type ApiKey = typeof apiKeys.$inferSelect;
+
+// Agent Activity Tracking (monitoring/analytics)
+export const agentActivity = pgTable("agent_activity", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  
+  // Time window
+  date: text("date").notNull(), // YYYY-MM-DD format for daily aggregation
+  hour: integer("hour"), // 0-23 for hourly granularity (optional)
+  
+  // Activity metrics
+  postsGenerated: integer("posts_generated").default(0).notNull(),
+  repliesSent: integer("replies_sent").default(0).notNull(),
+  twitterApiCalls: integer("twitter_api_calls").default(0).notNull(),
+  aiModelCalls: integer("ai_model_calls").default(0).notNull(),
+  tokensUsed: integer("tokens_used").default(0).notNull(),
+  errorsCount: integer("errors_count").default(0).notNull(),
+  
+  // Knowledge base usage
+  kbEntriesUsed: jsonb("kb_entries_used").$type<string[]>().default(sql`'[]'`), // IDs of KB entries actually used
+  kbCategoriesUsed: jsonb("kb_categories_used").$type<Record<string, number>>().default(sql`'{}'`), // category usage counts
+  
+  // Timestamps
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertAgentActivitySchema = createInsertSchema(agentActivity).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAgentActivity = z.infer<typeof insertAgentActivitySchema>;
+export type AgentActivity = typeof agentActivity.$inferSelect;
