@@ -49,6 +49,8 @@ export const agents = pgTable("agents", {
   // AI Model configuration
   modelProvider: text("model_provider").notNull().default("openai"),
   modelName: text("model_name").notNull().default("gpt-4-turbo-preview"),
+  modelFamily: text("model_family").default("gpt-4"), // gpt-4, gpt-5, claude-3, claude-4
+  autoDetectLatest: boolean("auto_detect_latest").default(true), // auto-use latest in family
   modelApiKey: text("model_api_key"),
   temperature: text("temperature").default("0.7"),
   maxTokens: integer("max_tokens").default(500),
@@ -129,6 +131,12 @@ export const knowledgeBase = pgTable("knowledge_base", {
   title: text("title").notNull(),
   content: text("content").notNull(),
   tags: jsonb("tags").$type<string[]>().default(sql`'[]'`),
+  
+  // Source tracking
+  source: text("source").notNull().default("manual"), // manual, api, integration, custom_api
+  sourceId: text("source_id"), // ID of integration/custom_api if applicable
+  sourceUrl: text("source_url"), // Original URL if from API
+  lastFetchedAt: timestamp("last_fetched_at"), // For API-sourced entries
   
   // Enhanced management
   category: text("category").notNull().default("general"), // crypto, theology, narratives, solana, mental_models, memes, general

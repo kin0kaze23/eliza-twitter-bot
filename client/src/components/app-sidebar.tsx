@@ -7,6 +7,7 @@ import {
   FlaskConical,
   Blocks,
   BarChart3,
+  Database,
 } from "lucide-react";
 import {
   Sidebar,
@@ -41,6 +42,13 @@ const menuItems = [
     url: "/monitoring",
     icon: BarChart3,
     testId: "link-monitoring",
+    group: "overview",
+  },
+  {
+    title: "KB Snippets",
+    url: "/kb-snippets",
+    icon: Database,
+    testId: "link-kb-snippets",
     group: "overview",
   },
   {

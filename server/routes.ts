@@ -353,6 +353,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ============= AI MODELS ============= //
+
+  // Get available AI models from providers
+  app.get("/api/ai-models", async (req, res) => {
+    try {
+      const provider = (req.query.provider as string) || "all";
+      
+      const models: any = {
+        openai: [
+          { id: "gpt-4-turbo-preview", name: "GPT-4 Turbo", family: "gpt-4", contextWindow: 128000, pricing: { input: 0.01, output: 0.03 } },
+          { id: "gpt-4", name: "GPT-4", family: "gpt-4", contextWindow: 8192, pricing: { input: 0.03, output: 0.06 } },
+          { id: "gpt-4-0125-preview", name: "GPT-4 0125 Preview", family: "gpt-4", contextWindow: 128000, pricing: { input: 0.01, output: 0.03 } },
+          { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo", family: "gpt-3.5", contextWindow: 16385, pricing: { input: 0.0005, output: 0.0015 } },
+          { id: "gpt-3.5-turbo-16k", name: "GPT-3.5 Turbo 16K", family: "gpt-3.5", contextWindow: 16385, pricing: { input: 0.001, output: 0.002 } },
+        ],
+        anthropic: [
+          { id: "claude-3-opus-20240229", name: "Claude 3 Opus", family: "claude-3", contextWindow: 200000, pricing: { input: 0.015, output: 0.075 } },
+          { id: "claude-3-sonnet-20240229", name: "Claude 3 Sonnet", family: "claude-3", contextWindow: 200000, pricing: { input: 0.003, output: 0.015 } },
+          { id: "claude-3-haiku-20240307", name: "Claude 3 Haiku", family: "claude-3", contextWindow: 200000, pricing: { input: 0.00025, output: 0.00125 } },
+        ],
+      };
+      
+      if (provider === "all") {
+        res.json({ ...models });
+      } else if (models[provider]) {
+        res.json({ [provider]: models[provider] });
+      } else {
+        res.status(404).json({ error: "Provider not found" });
+      }
+    } catch (error) {
+      console.error("Error fetching AI models:", error);
+      res.status(500).json({ error: "Failed to fetch AI models" });
+    }
+  });
+
+  // Auto-detect latest model in a family
+  app.get("/api/ai-models/latest", async (req, res) => {
+    try {
+      const { provider, family } = req.query;
+      
+      // In production, this would call the actual API to get latest models
+      // For now, return static latest versions
+      const latestModels: Record<string, Record<string, string>> = {
+        openai: {
+          "gpt-4": "gpt-4-turbo-preview",
+          "gpt-3.5": "gpt-3.5-turbo",
+        },
+        anthropic: {
+          "claude-3": "claude-3-opus-20240229",
+        },
+      };
+      
+      if (provider && family && latestModels[provider as string]) {
+        const latest = latestModels[provider as string][family as string];
+        if (latest) {
+          res.json({ modelId: latest });
+        } else {
+          res.status(404).json({ error: "Model family not found" });
+        }
+      } else {
+        res.json(latestModels);
+      }
+    } catch (error) {
+      console.error("Error detecting latest model:", error);
+      res.status(500).json({ error: "Failed to detect latest model" });
+    }
+  });
+
   // ============= API KEYS ============= //
 
   // Get all API keys
