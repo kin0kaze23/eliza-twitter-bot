@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -19,90 +20,178 @@ import {
   DialogTrigger,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Plus, Play, Pause, Settings, Copy, Trash2, Edit, CheckCircle2 } from "lucide-react";
+import { Plus, Play, Pause, Settings, Copy, Trash2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
-
-type Agent = {
-  id: string;
-  name: string;
-  description: string;
-  status: "draft" | "active" | "paused";
-  model: string;
-  lastActive: Date | null;
-  postsToday: number;
-  createdAt: Date;
-};
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import type { Agent } from "@shared/schema";
 
 export default function Agents() {
   const { toast } = useToast();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [newAgent, setNewAgent] = useState({ name: "", description: "", model: "openai" });
+  const [newAgent, setNewAgent] = useState({
+    name: "",
+    username: "",
+    bio: "",
+    systemPrompt: "",
+    personalityPrompt: "",
+  });
   
-  const [agents, setAgents] = useState<Agent[]>([
-    {
-      id: "1",
-      name: "CryptoAnalyst",
-      description: "Main crypto commentary agent focused on Bitcoin and Ethereum analysis",
-      status: "active",
-      model: "openai",
-      lastActive: new Date(),
-      postsToday: 24,
-      createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+  // Fetch agents from backend
+  const { data: agents, isLoading, error } = useQuery<Agent[]>({
+    queryKey: ["/api/agents"],
+  });
+
+  // Create agent mutation
+  const createMutation = useMutation({
+    mutationFn: async (agent: typeof newAgent) => {
+      return apiRequest("POST", "/api/agents", {
+        name: agent.name,
+        username: agent.username,
+        bio: agent.bio,
+        systemPrompt: agent.systemPrompt,
+        personalityPrompt: agent.personalityPrompt,
+        status: "draft",
+      });
     },
-    {
-      id: "2",
-      name: "DeFiExpert",
-      description: "DeFi protocols and yield farming specialist",
-      status: "draft",
-      model: "anthropic",
-      lastActive: null,
-      postsToday: 0,
-      createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
+      setNewAgent({
+        name: "",
+        username: "",
+        bio: "",
+        systemPrompt: "",
+        personalityPrompt: "",
+      });
+      setIsCreateDialogOpen(false);
+      toast({
+        title: "Agent created",
+        description: "New agent has been created as a draft. Configure it before deploying.",
+      });
     },
-    {
-      id: "3",
-      name: "NewsBot",
-      description: "Breaking crypto news aggregator and commentator",
-      status: "paused",
-      model: "groq",
-      lastActive: new Date(Date.now() - 4 * 60 * 60 * 1000),
-      postsToday: 8,
-      createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to create agent",
+        variant: "destructive",
+      });
     },
-  ]);
+  });
+
+  // Update status mutation
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: string }) => {
+      return apiRequest("PATCH", `/api/agents/${id}/status`, { status });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
+    },
+  });
+
+  // Delete agent mutation
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("DELETE", `/api/agents/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
+      toast({
+        title: "Agent deleted",
+        description: "Agent has been removed.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to delete agent",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Duplicate agent mutation
+  const duplicateMutation = useMutation({
+    mutationFn: async (originalAgent: Agent) => {
+      // Only copy configuration fields, not IDs or timestamps
+      return apiRequest("POST", "/api/agents", {
+        name: `${originalAgent.name} (Copy)`,
+        username: `${originalAgent.username}_copy_${Date.now()}`,
+        bio: originalAgent.bio,
+        systemPrompt: originalAgent.systemPrompt,
+        personalityPrompt: originalAgent.personalityPrompt,
+        postStyle: originalAgent.postStyle,
+        topics: originalAgent.topics,
+        adjectives: originalAgent.adjectives,
+        messageExamples: originalAgent.messageExamples,
+        customPrompts: originalAgent.customPrompts,
+        modelProvider: originalAgent.modelProvider,
+        modelName: originalAgent.modelName,
+        temperature: originalAgent.temperature,
+        maxTokens: originalAgent.maxTokens,
+        topP: originalAgent.topP,
+        frequencyPenalty: originalAgent.frequencyPenalty,
+        presencePenalty: originalAgent.presencePenalty,
+        contextWindow: originalAgent.contextWindow,
+        postingEnabled: originalAgent.postingEnabled,
+        postFrequency: originalAgent.postFrequency,
+        postInterval: originalAgent.postInterval,
+        maxPostsPerDay: originalAgent.maxPostsPerDay,
+        quietHoursEnabled: originalAgent.quietHoursEnabled,
+        quietHoursStart: originalAgent.quietHoursStart,
+        quietHoursEnd: originalAgent.quietHoursEnd,
+        timezone: originalAgent.timezone,
+        replyEnabled: originalAgent.replyEnabled,
+        replyRate: originalAgent.replyRate,
+        replyDelay: originalAgent.replyDelay,
+        maxRepliesPerHour: originalAgent.maxRepliesPerHour,
+        onlyReplyVerified: originalAgent.onlyReplyVerified,
+        replyKeywords: originalAgent.replyKeywords,
+        ignoreKeywords: originalAgent.ignoreKeywords,
+        cryptoCommentary: originalAgent.cryptoCommentary,
+        marketAnalysis: originalAgent.marketAnalysis,
+        newsCommentary: originalAgent.newsCommentary,
+        technicalAnalysis: originalAgent.technicalAnalysis,
+        threads: originalAgent.threads,
+        memes: originalAgent.memes,
+        priceChangeThreshold: originalAgent.priceChangeThreshold,
+        volumeChangeThreshold: originalAgent.volumeChangeThreshold,
+        autoTweetOnNews: originalAgent.autoTweetOnNews,
+        minNewsSentiment: originalAgent.minNewsSentiment,
+        status: "draft",
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
+      toast({
+        title: "Agent duplicated",
+        description: "New draft agent created with same configuration.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to duplicate agent",
+        variant: "destructive",
+      });
+    },
+  });
 
   const handleCreateAgent = () => {
-    if (!newAgent.name) return;
-    
-    const agent: Agent = {
-      id: Date.now().toString(),
-      name: newAgent.name,
-      description: newAgent.description,
-      status: "draft",
-      model: newAgent.model,
-      lastActive: null,
-      postsToday: 0,
-      createdAt: new Date(),
-    };
-    
-    setAgents([agent, ...agents]);
-    setNewAgent({ name: "", description: "", model: "openai" });
-    setIsCreateDialogOpen(false);
-    
-    toast({
-      title: "Agent created",
-      description: `${agent.name} has been created as a draft. Configure it before deploying.`,
-    });
+    if (!newAgent.name || !newAgent.username) {
+      toast({
+        title: "Validation error",
+        description: "Name and username are required",
+        variant: "destructive",
+      });
+      return;
+    }
+    createMutation.mutate(newAgent);
   };
 
   const handleDeploy = (id: string) => {
-    setAgents(prev =>
-      prev.map(agent =>
-        agent.id === id ? { ...agent, status: "active" as const, lastActive: new Date() } : agent
-      )
-    );
+    updateStatusMutation.mutate({ id, status: "deployed" });
     toast({
       title: "Agent deployed",
       description: "Agent is now active and will start posting according to its schedule.",
@@ -110,11 +199,7 @@ export default function Agents() {
   };
 
   const handlePause = (id: string) => {
-    setAgents(prev =>
-      prev.map(agent =>
-        agent.id === id ? { ...agent, status: "paused" as const } : agent
-      )
-    );
+    updateStatusMutation.mutate({ id, status: "paused" });
     toast({
       title: "Agent paused",
       description: "Agent has been paused and will not post until resumed.",
@@ -122,50 +207,25 @@ export default function Agents() {
   };
 
   const handleResume = (id: string) => {
-    setAgents(prev =>
-      prev.map(agent =>
-        agent.id === id ? { ...agent, status: "active" as const, lastActive: new Date() } : agent
-      )
-    );
+    updateStatusMutation.mutate({ id, status: "deployed" });
     toast({
       title: "Agent resumed",
       description: "Agent is now active again.",
     });
   };
 
-  const handleDuplicate = (id: string) => {
-    const original = agents.find(a => a.id === id);
-    if (!original) return;
-    
-    const duplicate: Agent = {
-      ...original,
-      id: Date.now().toString(),
-      name: `${original.name} (Copy)`,
-      status: "draft",
-      lastActive: null,
-      postsToday: 0,
-      createdAt: new Date(),
-    };
-    
-    setAgents([duplicate, ...agents]);
-    toast({
-      title: "Agent duplicated",
-      description: "New draft agent created with same configuration.",
-    });
+  const handleDuplicate = (agent: Agent) => {
+    duplicateMutation.mutate(agent);
   };
 
   const handleDelete = (id: string) => {
-    const agent = agents.find(a => a.id === id);
-    setAgents(prev => prev.filter(a => a.id !== id));
-    toast({
-      title: "Agent deleted",
-      description: `${agent?.name} has been removed.`,
-    });
+    deleteMutation.mutate(id);
   };
 
-  const formatDate = (date: Date | null) => {
+  const formatDate = (date: Date | string | null) => {
     if (!date) return "Never";
-    const diff = Date.now() - date.getTime();
+    const dateObj = typeof date === "string" ? new Date(date) : date;
+    const diff = Date.now() - dateObj.getTime();
     const minutes = Math.floor(diff / 60000);
     if (minutes < 1) return "Just now";
     if (minutes < 60) return `${minutes}m ago`;
@@ -174,16 +234,60 @@ export default function Agents() {
     return `${Math.floor(hours / 24)}d ago`;
   };
 
-  const activeAgents = agents.filter(a => a.status === "active").length;
-  const draftAgents = agents.filter(a => a.status === "draft").length;
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "deployed":
+        return <Badge className="gap-1"><CheckCircle2 className="h-3 w-3" />Deployed</Badge>;
+      case "testing":
+        return <Badge variant="secondary" className="gap-1"><Play className="h-3 w-3" />Testing</Badge>;
+      case "paused":
+        return <Badge variant="outline" className="gap-1"><Pause className="h-3 w-3" />Paused</Badge>;
+      default:
+        return <Badge variant="outline">Draft</Badge>;
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-8">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-semibold">Agents</h1>
+          <Skeleton className="h-10 w-32" />
+        </div>
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-64" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-8">
+        <h1 className="text-2xl font-semibold">Agents</h1>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2 text-destructive">
+              <AlertCircle className="h-5 w-5" />
+              <p>Failed to load agents. Please try again.</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold" data-testid="text-page-title">Agents</h1>
+          <h1 className="text-2xl font-semibold" data-testid="text-page-title">
+            AI Agents
+          </h1>
           <p className="text-sm text-muted-foreground">
-            Manage multiple AI agents with different configurations and purposes
+            Manage your Twitter AI agents ({agents?.length || 0} total)
           </p>
         </div>
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
@@ -196,11 +300,13 @@ export default function Agents() {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Create New Agent</DialogTitle>
-              <DialogDescription>Set up a new AI agent with custom configuration</DialogDescription>
+              <DialogDescription>
+                Create a new Twitter AI agent. You can configure it fully after creation.
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="agent-name">Agent Name</Label>
+                <Label htmlFor="agent-name">Agent Name *</Label>
                 <Input
                   id="agent-name"
                   value={newAgent.name}
@@ -210,174 +316,182 @@ export default function Agents() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="agent-desc">Description</Label>
+                <Label htmlFor="agent-username">Twitter Username *</Label>
                 <Input
-                  id="agent-desc"
-                  value={newAgent.description}
-                  onChange={(e) => setNewAgent({ ...newAgent, description: e.target.value })}
-                  placeholder="Brief description of agent's purpose"
-                  data-testid="input-agent-description"
+                  id="agent-username"
+                  value={newAgent.username}
+                  onChange={(e) => setNewAgent({ ...newAgent, username: e.target.value })}
+                  placeholder="@username"
+                  data-testid="input-agent-username"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="agent-model">Primary AI Model</Label>
-                <Select value={newAgent.model} onValueChange={(v) => setNewAgent({ ...newAgent, model: v })}>
-                  <SelectTrigger id="agent-model" data-testid="select-agent-model">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="openai">OpenAI (GPT-4)</SelectItem>
-                    <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
-                    <SelectItem value="groq">Groq</SelectItem>
-                    <SelectItem value="together">Together AI</SelectItem>
-                    <SelectItem value="mistral">Mistral</SelectItem>
-                    <SelectItem value="ollama">Ollama (Local)</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="agent-bio">Bio (optional)</Label>
+                <Input
+                  id="agent-bio"
+                  value={newAgent.bio}
+                  onChange={(e) => setNewAgent({ ...newAgent, bio: e.target.value })}
+                  placeholder="Brief description..."
+                  data-testid="input-agent-bio"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="agent-system-prompt">System Prompt (optional)</Label>
+                <Input
+                  id="agent-system-prompt"
+                  value={newAgent.systemPrompt}
+                  onChange={(e) => setNewAgent({ ...newAgent, systemPrompt: e.target.value })}
+                  placeholder="You are an AI agent..."
+                  data-testid="input-agent-system-prompt"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="agent-personality">Personality Prompt (optional)</Label>
+                <Input
+                  id="agent-personality"
+                  value={newAgent.personalityPrompt}
+                  onChange={(e) => setNewAgent({ ...newAgent, personalityPrompt: e.target.value })}
+                  placeholder="Professional, analytical..."
+                  data-testid="input-agent-personality"
+                />
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleCreateAgent} data-testid="button-save-agent">
-                Create Agent
+              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreateAgent}
+                disabled={createMutation.isPending}
+                data-testid="button-save-agent"
+              >
+                {createMutation.isPending ? "Creating..." : "Create Agent"}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      {agents && agents.length === 0 ? (
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Agents</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-semibold">{agents.length}</div>
-            <p className="text-xs text-muted-foreground">
-              {activeAgents} active, {draftAgents} draft
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Posts Today</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-semibold">
-              {agents.reduce((sum, a) => sum + a.postsToday, 0)}
+          <CardContent className="pt-12 pb-12">
+            <div className="text-center space-y-4">
+              <div className="mx-auto w-12 h-12 rounded-full bg-muted flex items-center justify-center">
+                <Plus className="h-6 w-6 text-muted-foreground" />
+              </div>
+              <div>
+                <h3 className="font-medium">No agents yet</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Create your first Twitter AI agent to get started
+                </p>
+              </div>
+              <Button onClick={() => setIsCreateDialogOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Create First Agent
+              </Button>
             </div>
-            <p className="text-xs text-muted-foreground">Across all active agents</p>
           </CardContent>
         </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Agents</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-semibold">{activeAgents}</div>
-            <p className="text-xs text-muted-foreground">Currently running</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="space-y-4">
-        {agents.map((agent) => (
-          <Card key={agent.id} data-testid={`card-agent-${agent.id}`}>
-            <CardHeader>
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 space-y-2">
-                  <div className="flex items-center gap-3 flex-wrap">
+      ) : (
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {agents?.map((agent) => (
+            <Card key={agent.id} className="hover-elevate" data-testid={`card-agent-${agent.id}`}>
+              <CardHeader>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
                     <CardTitle className="text-lg">{agent.name}</CardTitle>
-                    <Badge
-                      variant={
-                        agent.status === "active" ? "default" :
-                        agent.status === "draft" ? "secondary" : "outline"
-                      }
-                    >
-                      {agent.status === "active" && <CheckCircle2 className="h-3 w-3 mr-1" />}
-                      {agent.status.charAt(0).toUpperCase() + agent.status.slice(1)}
-                    </Badge>
-                    <Badge variant="outline" className="text-xs">
-                      {agent.model}
-                    </Badge>
+                    <CardDescription className="mt-1 text-xs">
+                      {agent.username}
+                    </CardDescription>
                   </div>
-                  <CardDescription>{agent.description}</CardDescription>
-                  <div className="flex gap-4 text-xs text-muted-foreground">
-                    <span>Last active: {formatDate(agent.lastActive)}</span>
-                    <span>•</span>
-                    <span>Posts today: {agent.postsToday}</span>
-                    <span>•</span>
-                    <span>Created: {formatDate(agent.createdAt)}</span>
+                  {getStatusBadge(agent.status)}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Model:</span>
+                    <span className="font-mono text-xs">{agent.modelProvider}/{agent.modelName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Last Deployed:</span>
+                    <span>{formatDate(agent.lastDeployedAt)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Created:</span>
+                    <span className="text-xs">{new Date(agent.createdAt).toLocaleDateString()}</span>
                   </div>
                 </div>
+
                 <div className="flex gap-2 flex-wrap">
-                  {agent.status === "draft" && (
+                  <Link href={`/agent/${agent.id}/configure`}>
+                    <Button variant="outline" size="sm" className="flex-1" data-testid={`button-configure-${agent.id}`}>
+                      <Settings className="mr-2 h-4 w-4" />
+                      Configure
+                    </Button>
+                  </Link>
+
+                  {agent.status === "draft" || agent.status === "testing" ? (
                     <Button
-                      variant="default"
                       size="sm"
                       onClick={() => handleDeploy(agent.id)}
+                      disabled={updateStatusMutation.isPending}
                       data-testid={`button-deploy-${agent.id}`}
                     >
                       <Play className="mr-2 h-4 w-4" />
                       Deploy
                     </Button>
-                  )}
-                  {agent.status === "active" && (
+                  ) : agent.status === "paused" ? (
+                    <Button
+                      size="sm"
+                      onClick={() => handleResume(agent.id)}
+                      disabled={updateStatusMutation.isPending}
+                      data-testid={`button-resume-${agent.id}`}
+                    >
+                      <Play className="mr-2 h-4 w-4" />
+                      Resume
+                    </Button>
+                  ) : (
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => handlePause(agent.id)}
+                      disabled={updateStatusMutation.isPending}
                       data-testid={`button-pause-${agent.id}`}
                     >
                       <Pause className="mr-2 h-4 w-4" />
                       Pause
                     </Button>
                   )}
-                  {agent.status === "paused" && (
-                    <Button
-                      variant="default"
-                      size="sm"
-                      onClick={() => handleResume(agent.id)}
-                      data-testid={`button-resume-${agent.id}`}
-                    >
-                      <Play className="mr-2 h-4 w-4" />
-                      Resume
-                    </Button>
-                  )}
-                  <Link href={`/agent/${agent.id}/configure`}>
-                    <Button variant="outline" size="sm" data-testid={`button-configure-${agent.id}`}>
-                      <Settings className="mr-2 h-4 w-4" />
-                      Configure
-                    </Button>
-                  </Link>
+                </div>
+
+                <div className="flex gap-2">
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => handleDuplicate(agent.id)}
+                    onClick={() => handleDuplicate(agent)}
+                    disabled={duplicateMutation.isPending}
+                    className="flex-1"
                     data-testid={`button-duplicate-${agent.id}`}
                   >
-                    <Copy className="h-4 w-4" />
+                    <Copy className="mr-2 h-4 w-4" />
+                    Duplicate
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => handleDelete(agent.id)}
+                    disabled={deleteMutation.isPending}
+                    className="flex-1 text-destructive hover:text-destructive"
                     data-testid={`button-delete-${agent.id}`}
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete
                   </Button>
                 </div>
-              </div>
-            </CardHeader>
-          </Card>
-        ))}
-      </div>
-
-      {agents.length === 0 && (
-        <div className="text-center py-12">
-          <p className="text-muted-foreground">No agents created yet. Create your first agent to get started.</p>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       )}
     </div>

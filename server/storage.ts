@@ -1,38 +1,218 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
-
-// modify the interface with any CRUD methods
-// you might need
+import { db } from "./db";
+import {
+  type User,
+  type InsertUser,
+  type Agent,
+  type InsertAgent,
+  type KnowledgeBase,
+  type InsertKnowledgeBase,
+  type CustomApi,
+  type InsertCustomApi,
+  type ApiKey,
+  type InsertApiKey,
+  users,
+  agents,
+  knowledgeBase,
+  customApis,
+  apiKeys,
+} from "@shared/schema";
+import { eq, desc } from "drizzle-orm";
 
 export interface IStorage {
+  // Users
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  
+  // Agents
+  getAgent(id: string): Promise<Agent | undefined>;
+  getAllAgents(): Promise<Agent[]>;
+  createAgent(agent: InsertAgent): Promise<Agent>;
+  updateAgent(id: string, agent: Partial<InsertAgent>): Promise<Agent | undefined>;
+  deleteAgent(id: string): Promise<boolean>;
+  updateAgentStatus(id: string, status: string): Promise<Agent | undefined>;
+  
+  // Knowledge Base
+  getKnowledgeBaseEntries(agentId: string): Promise<KnowledgeBase[]>;
+  getKnowledgeBaseEntry(id: string): Promise<KnowledgeBase | undefined>;
+  createKnowledgeBaseEntry(entry: InsertKnowledgeBase): Promise<KnowledgeBase>;
+  updateKnowledgeBaseEntry(id: string, entry: Partial<InsertKnowledgeBase>): Promise<KnowledgeBase | undefined>;
+  deleteKnowledgeBaseEntry(id: string): Promise<boolean>;
+  
+  // Custom APIs
+  getAllCustomApis(): Promise<CustomApi[]>;
+  getCustomApi(id: string): Promise<CustomApi | undefined>;
+  createCustomApi(api: InsertCustomApi): Promise<CustomApi>;
+  updateCustomApi(id: string, api: Partial<InsertCustomApi>): Promise<CustomApi | undefined>;
+  deleteCustomApi(id: string): Promise<boolean>;
+  
+  // API Keys
+  getAllApiKeys(): Promise<ApiKey[]>;
+  getApiKey(id: string): Promise<ApiKey | undefined>;
+  getApiKeysByProvider(provider: string): Promise<ApiKey[]>;
+  createApiKey(key: InsertApiKey): Promise<ApiKey>;
+  updateApiKey(id: string, key: Partial<InsertApiKey>): Promise<ApiKey | undefined>;
+  deleteApiKey(id: string): Promise<boolean>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-
-  constructor() {
-    this.users = new Map();
-  }
-
+export class DbStorage implements IStorage {
+  // Users
   async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+    const result = await db.select().from(users).where(eq(users.id, id));
+    return result[0];
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+    const result = await db.select().from(users).where(eq(users.username, username));
+    return result[0];
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+    const result = await db.insert(users).values(insertUser).returning();
+    return result[0];
+  }
+
+  // Agents
+  async getAgent(id: string): Promise<Agent | undefined> {
+    const result = await db.select().from(agents).where(eq(agents.id, id));
+    return result[0];
+  }
+
+  async getAllAgents(): Promise<Agent[]> {
+    return await db.select().from(agents).orderBy(desc(agents.createdAt));
+  }
+
+  async createAgent(agent: InsertAgent): Promise<Agent> {
+    const result = await db.insert(agents).values(agent as any).returning();
+    return result[0];
+  }
+
+  async updateAgent(id: string, agent: Partial<InsertAgent>): Promise<Agent | undefined> {
+    const updateData: any = { ...agent, updatedAt: new Date() };
+    const result = await db
+      .update(agents)
+      .set(updateData)
+      .where(eq(agents.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteAgent(id: string): Promise<boolean> {
+    const result = await db.delete(agents).where(eq(agents.id, id)).returning();
+    return result.length > 0;
+  }
+
+  async updateAgentStatus(id: string, status: string): Promise<Agent | undefined> {
+    const updateData: any = { status, updatedAt: new Date() };
+    if (status === "deployed") {
+      updateData.lastDeployedAt = new Date();
+    }
+    const result = await db
+      .update(agents)
+      .set(updateData)
+      .where(eq(agents.id, id))
+      .returning();
+    return result[0];
+  }
+
+  // Knowledge Base
+  async getKnowledgeBaseEntries(agentId: string): Promise<KnowledgeBase[]> {
+    return await db
+      .select()
+      .from(knowledgeBase)
+      .where(eq(knowledgeBase.agentId, agentId))
+      .orderBy(desc(knowledgeBase.createdAt));
+  }
+
+  async getKnowledgeBaseEntry(id: string): Promise<KnowledgeBase | undefined> {
+    const result = await db.select().from(knowledgeBase).where(eq(knowledgeBase.id, id));
+    return result[0];
+  }
+
+  async createKnowledgeBaseEntry(entry: InsertKnowledgeBase): Promise<KnowledgeBase> {
+    const result = await db.insert(knowledgeBase).values(entry as any).returning();
+    return result[0];
+  }
+
+  async updateKnowledgeBaseEntry(
+    id: string,
+    entry: Partial<InsertKnowledgeBase>
+  ): Promise<KnowledgeBase | undefined> {
+    const updateData: any = { ...entry, updatedAt: new Date() };
+    const result = await db
+      .update(knowledgeBase)
+      .set(updateData)
+      .where(eq(knowledgeBase.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteKnowledgeBaseEntry(id: string): Promise<boolean> {
+    const result = await db.delete(knowledgeBase).where(eq(knowledgeBase.id, id)).returning();
+    return result.length > 0;
+  }
+
+  // Custom APIs
+  async getAllCustomApis(): Promise<CustomApi[]> {
+    return await db.select().from(customApis).orderBy(desc(customApis.createdAt));
+  }
+
+  async getCustomApi(id: string): Promise<CustomApi | undefined> {
+    const result = await db.select().from(customApis).where(eq(customApis.id, id));
+    return result[0];
+  }
+
+  async createCustomApi(api: InsertCustomApi): Promise<CustomApi> {
+    const result = await db.insert(customApis).values(api).returning();
+    return result[0];
+  }
+
+  async updateCustomApi(id: string, api: Partial<InsertCustomApi>): Promise<CustomApi | undefined> {
+    const result = await db
+      .update(customApis)
+      .set({ ...api, updatedAt: new Date() })
+      .where(eq(customApis.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteCustomApi(id: string): Promise<boolean> {
+    const result = await db.delete(customApis).where(eq(customApis.id, id)).returning();
+    return result.length > 0;
+  }
+
+  // API Keys
+  async getAllApiKeys(): Promise<ApiKey[]> {
+    return await db.select().from(apiKeys).orderBy(desc(apiKeys.createdAt));
+  }
+
+  async getApiKey(id: string): Promise<ApiKey | undefined> {
+    const result = await db.select().from(apiKeys).where(eq(apiKeys.id, id));
+    return result[0];
+  }
+
+  async getApiKeysByProvider(provider: string): Promise<ApiKey[]> {
+    return await db.select().from(apiKeys).where(eq(apiKeys.provider, provider));
+  }
+
+  async createApiKey(key: InsertApiKey): Promise<ApiKey> {
+    const result = await db.insert(apiKeys).values(key).returning();
+    return result[0];
+  }
+
+  async updateApiKey(id: string, key: Partial<InsertApiKey>): Promise<ApiKey | undefined> {
+    const result = await db
+      .update(apiKeys)
+      .set({ ...key, updatedAt: new Date() })
+      .where(eq(apiKeys.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async deleteApiKey(id: string): Promise<boolean> {
+    const result = await db.delete(apiKeys).where(eq(apiKeys.id, id)).returning();
+    return result.length > 0;
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DbStorage();

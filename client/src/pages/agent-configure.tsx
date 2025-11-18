@@ -25,9 +25,13 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { Link } from "wouter";
+import { Link, useParams } from "wouter";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import type { Agent, KnowledgeBase } from "@shared/schema";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type KBEntry = {
   id: string;
@@ -44,7 +48,20 @@ type CustomPrompt = {
 
 export default function AgentConfigure() {
   const { toast } = useToast();
+  const { id } = useParams<{ id: string }>();
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
+
+  // Fetch agent data from backend
+  const { data: agent, isLoading, error } = useQuery<Agent>({
+    queryKey: ["/api/agents", id],
+    enabled: !!id,
+  });
+
+  // Fetch knowledge base
+  const { data: kbData } = useQuery<KnowledgeBase[]>({
+    queryKey: ["/api/agents", id, "knowledge"],
+    enabled: !!id,
+  });
   
   // Twitter API Credentials
   const [twitterConfig, setTwitterConfig] = useState({
@@ -164,29 +181,63 @@ export default function AgentConfigure() {
     return secret.substring(0, 8) + "•".repeat(Math.max(12, secret.length - 8));
   };
 
+  // Knowledge base mutations
+  const addKBMutation = useMutation({
+    mutationFn: async (entry: { title: string; content: string; tags: string[] }) => {
+      return apiRequest("POST", `/api/agents/${id}/knowledge`, {
+        title: entry.title,
+        content: entry.content,
+        tags: entry.tags,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
+      setNewKBEntry({ title: "", content: "", tags: "" });
+      setIsAddKBDialogOpen(false);
+      toast({
+        title: "Knowledge entry added",
+        description: "Entry has been added to this agent's knowledge base.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to add knowledge entry",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const deleteKBMutation = useMutation({
+    mutationFn: async (entryId: string) => {
+      return apiRequest("DELETE", `/api/knowledge/${entryId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
+      toast({ title: "Knowledge entry deleted" });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to delete knowledge entry",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleAddKBEntry = () => {
     if (!newKBEntry.title || !newKBEntry.content) return;
     
-    const entry: KBEntry = {
-      id: Date.now().toString(),
+    const tags = newKBEntry.tags.split(",").map(t => t.trim()).filter(Boolean);
+    addKBMutation.mutate({
       title: newKBEntry.title,
       content: newKBEntry.content,
-      tags: newKBEntry.tags.split(",").map(t => t.trim()).filter(Boolean),
-    };
-    
-    setKnowledgeBase([...knowledgeBase, entry]);
-    setNewKBEntry({ title: "", content: "", tags: "" });
-    setIsAddKBDialogOpen(false);
-    
-    toast({
-      title: "Knowledge entry added",
-      description: "Entry has been added to this agent's knowledge base.",
+      tags,
     });
   };
 
-  const handleDeleteKBEntry = (id: string) => {
-    setKnowledgeBase(knowledgeBase.filter(e => e.id !== id));
-    toast({ title: "Entry deleted" });
+  const handleDeleteKBEntry = (entryId: string) => {
+    deleteKBMutation.mutate(entryId);
   };
 
   const handleAddCustomPrompt = () => {
@@ -213,26 +264,184 @@ export default function AgentConfigure() {
     toast({ title: "Custom prompt deleted" });
   };
 
+  // Update agent mutation
+  const updateAgentMutation = useMutation({
+    mutationFn: async () => {
+      const customPromptsObj = customPrompts.reduce((acc, prompt) => {
+        acc[prompt.key] = prompt.value;
+        return acc;
+      }, {} as Record<string, string>);
+      
+      return apiRequest("PATCH", `/api/agents/${id}`, {
+        // Twitter API
+        twitterApiKey: twitterConfig.apiKey,
+        twitterApiSecret: twitterConfig.apiKeySecret,
+        twitterAccessToken: twitterConfig.accessToken,
+        twitterAccessSecret: twitterConfig.accessTokenSecret,
+        twitterBearerToken: twitterConfig.bearerToken,
+        twitterAppId: twitterConfig.appId,
+        // Character
+        name: character.name,
+        username: character.username,
+        bio: character.bio,
+        systemPrompt: character.systemPrompt,
+        personalityPrompt: character.personalityPrompt,
+        postStyle: character.postStyle,
+        topics: character.topics,
+        adjectives: character.adjectives,
+        messageExamples: character.messageExamples,
+        customPrompts: customPromptsObj,
+        // Model
+        modelProvider: modelConfig.provider,
+        modelName: modelConfig.model,
+        modelApiKey: modelConfig.apiKey,
+        temperature: modelConfig.temperature[0].toString(),
+        maxTokens: modelConfig.maxTokens[0],
+        topP: modelConfig.topP[0].toString(),
+        frequencyPenalty: modelConfig.frequencyPenalty[0].toString(),
+        presencePenalty: modelConfig.presencePenalty[0].toString(),
+        contextWindow: parseInt(modelConfig.contextWindow),
+        // Behavior
+        postingEnabled: behavior.postingEnabled,
+        postFrequency: parseInt(behavior.postFrequency),
+        postInterval: behavior.postInterval,
+        maxPostsPerDay: parseInt(behavior.maxPostsPerDay),
+        quietHoursEnabled: behavior.quietHoursEnabled,
+        quietHoursStart: behavior.quietHoursStart,
+        quietHoursEnd: behavior.quietHoursEnd,
+        timezone: behavior.timezone,
+        replyEnabled: behavior.replyEnabled,
+        replyRate: behavior.replyRate[0],
+        replyDelay: behavior.replyDelay[0],
+        maxRepliesPerHour: parseInt(behavior.maxRepliesPerHour),
+        onlyReplyVerified: behavior.onlyVerified,
+        replyKeywords: behavior.replyKeywords,
+        ignoreKeywords: behavior.ignoreKeywords,
+        cryptoCommentary: behavior.cryptoCommentary,
+        marketAnalysis: behavior.marketAnalysis,
+        newsCommentary: behavior.newsCommentary,
+        technicalAnalysis: behavior.technicalAnalysis,
+        threads: behavior.threads,
+        memes: behavior.memes,
+        priceChangeThreshold: behavior.priceChangeThreshold[0],
+        volumeChangeThreshold: behavior.volumeChangeThreshold[0],
+        autoTweetOnNews: behavior.autoTweetOnNews,
+        minNewsSentiment: behavior.minNewsSentiment[0].toString(),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id] });
+      toast({
+        title: "Configuration saved",
+        description: "All agent settings have been updated successfully.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to save configuration",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Load agent data into state when fetched
+  useEffect(() => {
+    if (!agent) return;
+    
+    // Load Twitter config
+    setTwitterConfig({
+      apiKey: agent.twitterApiKey || "",
+      apiKeySecret: agent.twitterApiSecret || "",
+      accessToken: agent.twitterAccessToken || "",
+      accessTokenSecret: agent.twitterAccessSecret || "",
+      bearerToken: agent.twitterBearerToken || "",
+      appId: agent.twitterAppId || "",
+    });
+    
+    // Load character
+    setCharacter({
+      name: agent.name,
+      username: agent.username,
+      bio: agent.bio || "",
+      systemPrompt: agent.systemPrompt,
+      personalityPrompt: agent.personalityPrompt,
+      postStyle: agent.postStyle || "",
+      topics: agent.topics || "",
+      adjectives: agent.adjectives || "",
+      messageExamples: agent.messageExamples || [],
+    });
+    
+    // Load custom prompts
+    if (agent.customPrompts && typeof agent.customPrompts === "object") {
+      const prompts = Object.entries(agent.customPrompts).map(([key, value], idx) => ({
+        id: `${idx}`,
+        key,
+        value: value as string,
+      }));
+      setCustomPrompts(prompts);
+    }
+    
+    // Load model config
+    setModelConfig({
+      provider: agent.modelProvider,
+      model: agent.modelName,
+      apiKey: agent.modelApiKey || "",
+      temperature: [parseFloat(agent.temperature || "0.7")],
+      maxTokens: [agent.maxTokens || 500],
+      topP: [parseFloat(agent.topP || "0.9")],
+      frequencyPenalty: [parseFloat(agent.frequencyPenalty || "0.5")],
+      presencePenalty: [parseFloat(agent.presencePenalty || "0.5")],
+      contextWindow: (agent.contextWindow || 8000).toString(),
+    });
+    
+    // Load behavior
+    setBehavior({
+      postingEnabled: agent.postingEnabled ?? true,
+      postFrequency: (agent.postFrequency || 2).toString(),
+      postInterval: agent.postInterval || "hours",
+      maxPostsPerDay: (agent.maxPostsPerDay || 12).toString(),
+      quietHoursEnabled: agent.quietHoursEnabled ?? false,
+      quietHoursStart: agent.quietHoursStart || "22:00",
+      quietHoursEnd: agent.quietHoursEnd || "08:00",
+      timezone: agent.timezone || "UTC",
+      replyEnabled: agent.replyEnabled ?? true,
+      replyRate: [agent.replyRate || 70],
+      replyDelay: [agent.replyDelay || 30],
+      maxRepliesPerHour: (agent.maxRepliesPerHour || 10).toString(),
+      onlyVerified: agent.onlyReplyVerified ?? false,
+      replyKeywords: agent.replyKeywords || "",
+      ignoreKeywords: agent.ignoreKeywords || "",
+      cryptoCommentary: agent.cryptoCommentary ?? true,
+      marketAnalysis: agent.marketAnalysis ?? true,
+      newsCommentary: agent.newsCommentary ?? true,
+      technicalAnalysis: agent.technicalAnalysis ?? false,
+      threads: agent.threads ?? true,
+      memes: agent.memes ?? false,
+      priceChangeThreshold: [agent.priceChangeThreshold || 5],
+      volumeChangeThreshold: [agent.volumeChangeThreshold || 50],
+      autoTweetOnNews: agent.autoTweetOnNews ?? true,
+      minNewsSentiment: [parseFloat(agent.minNewsSentiment || "0.6")],
+    });
+  }, [agent]);
+
+  // Sync knowledge base from backend data
+  useEffect(() => {
+    if (!kbData) {
+      setKnowledgeBase([]);
+      return;
+    }
+    const entries: KBEntry[] = kbData.map(kb => ({
+      id: kb.id,
+      title: kb.title,
+      content: kb.content,
+      tags: kb.tags || [],
+    }));
+    setKnowledgeBase(entries);
+  }, [kbData]);
+
   const handleSave = () => {
-    // Convert custom prompts to JSON format
-    const customPromptsObj = customPrompts.reduce((acc, prompt) => {
-      acc[prompt.key] = prompt.value;
-      return acc;
-    }, {} as Record<string, string>);
-    
-    console.log("Saving complete agent configuration:", {
-      twitter: twitterConfig,
-      character,
-      custom_prompts: customPromptsObj,
-      model: modelConfig,
-      behavior,
-      knowledgeBase,
-    });
-    
-    toast({
-      title: "Configuration saved",
-      description: "All agent settings have been updated successfully.",
-    });
+    updateAgentMutation.mutate();
   };
 
   // Validation
@@ -240,6 +449,30 @@ export default function AgentConfigure() {
   const modelComplete = modelConfig.apiKey !== "";
   const characterComplete = character.name && character.username && character.systemPrompt;
   const isConfigurationComplete = twitterComplete && modelComplete && characterComplete;
+
+  if (isLoading) {
+    return (
+      <div className="space-y-8">
+        <Skeleton className="h-20 w-full" />
+        <Skeleton className="h-[600px] w-full" />
+      </div>
+    );
+  }
+
+  if (error || !agent) {
+    return (
+      <div className="space-y-8">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2 text-destructive">
+              <AlertCircle className="h-5 w-5" />
+              <p>Failed to load agent configuration. Please try again.</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -1020,9 +1253,14 @@ export default function AgentConfigure() {
             )}
           </Badge>
         </div>
-        <Button onClick={handleSave} size="lg" data-testid="button-save-all">
+        <Button
+          onClick={handleSave}
+          size="lg"
+          disabled={updateAgentMutation.isPending}
+          data-testid="button-save-all"
+        >
           <Save className="mr-2 h-4 w-4" />
-          Save All Configuration
+          {updateAgentMutation.isPending ? "Saving..." : "Save All Configuration"}
         </Button>
       </div>
     </div>
