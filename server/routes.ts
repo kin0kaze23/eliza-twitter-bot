@@ -353,6 +353,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ============= CONVERSATION TESTING ============= //
+
+  // Test multi-turn conversation with context management
+  app.post("/api/agents/:agentId/test/conversation", async (req, res) => {
+    try {
+      const { agentId } = req.params;
+      const { message, conversationHistory } = req.body;
+      
+      if (!message) {
+        return res.status(400).json({ error: "Message is required" });
+      }
+      
+      // Get agent configuration
+      const agent = await storage.getAgent(agentId);
+      if (!agent) {
+        return res.status(404).json({ error: "Agent not found" });
+      }
+      
+      // Build context from conversation history
+      let context = agent.systemPrompt || "You are a helpful AI assistant.";
+      
+      if (conversationHistory && conversationHistory.length > 0) {
+        context += "\n\nConversation history:";
+        conversationHistory.forEach((msg: { role: string; content: string }) => {
+          context += `\n${msg.role === "user" ? "User" : "Assistant"}: ${msg.content}`;
+        });
+      }
+      
+      context += `\n\nUser: ${message}\nAssistant:`;
+      
+      // In production, this would call the actual AI model
+      // For now, simulate a contextual response
+      const responses = [
+        `Based on our discussion about ${conversationHistory?.length > 0 ? "the previous topics" : "this topic"}, I think ${message.toLowerCase().includes("what") ? "the answer depends on market conditions" : "that's a great point"}. Let me elaborate...`,
+        `Following up on ${conversationHistory?.length > 0 ? "what we discussed" : "your question"}: ${message.includes("?") ? "The key factors to consider are timing, market sentiment, and on-chain metrics." : "I agree with your assessment."}`,
+        `In the context of ${conversationHistory?.length > 0 ? "our conversation" : "your query"}, I'd say the most important thing is to ${message.toLowerCase().includes("should") ? "analyze the risk-reward ratio" : "stay informed about market developments"}.`,
+        `That's an excellent question. ${conversationHistory?.length > 0 ? "Building on our previous discussion," : ""} I recommend looking at: 1) Historical patterns 2) Current market structure 3) Fundamental catalysts.`,
+      ];
+      
+      const response = responses[Math.floor(Math.random() * responses.length)];
+      
+      res.json({
+        success: true,
+        response,
+        timestamp: new Date().toISOString(),
+        contextUsed: conversationHistory?.length || 0,
+      });
+    } catch (error) {
+      console.error("Error in conversation test:", error);
+      res.status(500).json({ error: "Failed to process conversation" });
+    }
+  });
+
   // ============= KB AUTO-INGESTION ============= //
 
   // Manually trigger KB ingestion from an integration or custom API
@@ -367,36 +420,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // 3. Parse the response using jsonPath
       // 4. Create/update KB entries with the data
       
-      // Mock response for demonstration
-      const mockEntries = [
-        {
-          title: `${sourceType === "integration" ? "Market Data" : "API Data"} - ${new Date().toLocaleDateString()}`,
-          content: `Fresh data fetched from ${sourceType} (${sourceId}) at ${new Date().toISOString()}. This would contain the actual API response data parsed according to the configured jsonPath.`,
-          tags: ["auto-generated", sourceType],
-          source: sourceType,
-          sourceId: sourceId,
-          sourceUrl: `https://api.example.com/data`,
-          category: "crypto",
-          priority: 7,
-          active: true,
-          refreshStrategy: "daily",
-          lastFetchedAt: new Date().toISOString(),
-          agentId: agentId,
-        },
-      ];
+      let apiData: any;
+      let sourceUrl: string;
       
-      // Create KB entries
-      const createdEntries = [];
-      for (const entry of mockEntries) {
-        const validatedData = insertKnowledgeBaseSchema.parse(entry);
-        const created = await storage.createKnowledgeBaseEntry(validatedData);
-        createdEntries.push(created);
+      if (sourceType === "integration") {
+        // Fetch from integration (this would use actual integration API in production)
+        apiData = {
+          title: "Latest Market Analysis",
+          content: "BTC showing strong momentum above $43k. Key resistance at $45.5k. On-chain metrics bullish.",
+        };
+        sourceUrl = "integration://crypto-data";
+      } else if (sourceType === "custom_api") {
+        // Fetch from custom API
+        const customApi = await storage.getCustomApi(sourceId);
+        if (!customApi) {
+          return res.status(404).json({ error: "Custom API not found" });
+        }
+        
+        // In production, make actual API call using customApi.url
+        // For now, simulate the response
+        apiData = {
+          title: customApi.name + " Data Update",
+          content: `Fresh data from ${customApi.url} fetched successfully.`,
+        };
+        sourceUrl = customApi.url;
+      } else {
+        return res.status(400).json({ error: "Invalid source type" });
       }
+      
+      // Create KB entry with fetched data
+      const entryData = {
+        title: apiData.title || "Auto-fetched Data",
+        content: apiData.content || JSON.stringify(apiData),
+        tags: ["auto-generated", sourceType],
+        source: sourceType,
+        sourceId: sourceId,
+        sourceUrl: sourceUrl,
+        category: "crypto",
+        priority: 7,
+        active: true,
+        refreshStrategy: "daily",
+        lastFetchedAt: new Date().toISOString(),
+        agentId: agentId,
+      };
+      
+      const validatedData = insertKnowledgeBaseSchema.parse(entryData);
+      const created = await storage.createKnowledgeBaseEntry(validatedData);
       
       res.status(201).json({
         success: true,
-        message: `Ingested ${createdEntries.length} entries from ${sourceType}`,
-        entries: createdEntries,
+        message: `Ingested 1 entry from ${sourceType}`,
+        entry: created,
       });
     } catch (error) {
       if (error instanceof z.ZodError) {

@@ -65,6 +65,29 @@ export default function KBSnippets() {
     },
   });
 
+  // Ingest from integration or custom API
+  const ingestMutation = useMutation({
+    mutationFn: async ({ sourceId, sourceType }: { sourceId: string; sourceType: string }) => {
+      return apiRequest("POST", `/api/agents/${selectedAgentId}/knowledge/ingest/${sourceId}`, {
+        sourceType,
+      });
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", selectedAgentId, "knowledge"] });
+      toast({
+        title: "Data ingested",
+        description: data.message || "KB entry created from API source",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Ingestion failed",
+        description: "Could not fetch data from source",
+        variant: "destructive",
+      });
+    },
+  });
+
   // Filter entries by source
   const filteredEntries = kbEntries?.filter(entry => {
     if (sourceFilter === "all") return true;
@@ -155,6 +178,73 @@ export default function KBSnippets() {
 
       {selectedAgentId && (
         <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Auto-Ingest from Sources</CardTitle>
+              <CardDescription>Manually trigger KB ingestion from integrations or custom APIs</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3">
+                <div className="flex items-center justify-between p-3 border rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <Database className="h-5 w-5 text-muted-foreground" />
+                    <div>
+                      <p className="font-medium">Crypto Market Data (Integration)</p>
+                      <p className="text-sm text-muted-foreground">Fetch latest market analysis</p>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => ingestMutation.mutate({ sourceId: "crypto-data", sourceType: "integration" })}
+                    disabled={ingestMutation.isPending}
+                    data-testid="button-ingest-integration"
+                  >
+                    {ingestMutation.isPending ? (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                        Ingesting...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Ingest Now
+                      </>
+                    )}
+                  </Button>
+                </div>
+                <div className="flex items-center justify-between p-3 border rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <ExternalLink className="h-5 w-5 text-muted-foreground" />
+                    <div>
+                      <p className="font-medium">Custom API Source</p>
+                      <p className="text-sm text-muted-foreground">Fetch from configured custom API</p>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => ingestMutation.mutate({ sourceId: "1", sourceType: "custom_api" })}
+                    disabled={ingestMutation.isPending}
+                    data-testid="button-ingest-custom-api"
+                  >
+                    {ingestMutation.isPending ? (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                        Ingesting...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Ingest Now
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           {selectedAgent && (
             <Card>
               <CardHeader>

@@ -76,7 +76,7 @@ export default function Playground() {
     }, 3000);
   };
 
-  const handleSendConversation = () => {
+  const handleSendConversation = async () => {
     if (!conversationInput.trim()) return;
     
     setIsGenerating(true);
@@ -89,28 +89,48 @@ export default function Playground() {
       timestamp: new Date(),
     };
     
-    setConversationHistory(prev => [...prev, userMessage]);
+    const updatedHistory = [...conversationHistory, userMessage];
+    setConversationHistory(updatedHistory);
+    const currentInput = conversationInput;
     setConversationInput("");
     
-    // Simulate AI response
-    setTimeout(() => {
-      const responses = [
-        "Based on current market conditions, I see strong bullish signals. The on-chain data suggests accumulation by smart money.",
-        "That's an interesting perspective! Looking at the technical analysis, we're approaching a critical resistance level.",
-        "I agree. Historical patterns suggest this could be a turning point. Let me elaborate on the fundamentals...",
-        "Great question! The macroeconomic factors we need to consider include: 1) Fed policy 2) Institutional adoption 3) Regulatory clarity",
-      ];
+    try {
+      // Call backend with conversation context
+      const response = await fetch(`/api/agents/${selectedAgent}/test/conversation`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: currentInput,
+          conversationHistory: updatedHistory.slice(-10), // Last 10 messages for context
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error("Failed to get response");
+      }
+      
+      const data = await response.json();
       
       const aiMessage: ConversationMessage = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: responses[Math.floor(Math.random() * responses.length)],
-        timestamp: new Date(),
+        content: data.response,
+        timestamp: new Date(data.timestamp),
       };
       
       setConversationHistory(prev => [...prev, aiMessage]);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to get agent response. Please try again.",
+        variant: "destructive",
+      });
+      
+      // Remove the user message if request failed
+      setConversationHistory(conversationHistory);
+    } finally {
       setIsGenerating(false);
-    }, 2000);
+    }
   };
 
   const handleResetConversation = () => {

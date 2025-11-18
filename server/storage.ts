@@ -43,6 +43,7 @@ export interface IStorage {
   createKnowledgeBaseEntry(entry: InsertKnowledgeBase): Promise<KnowledgeBase>;
   updateKnowledgeBaseEntry(id: string, entry: Partial<InsertKnowledgeBase>): Promise<KnowledgeBase | undefined>;
   deleteKnowledgeBaseEntry(id: string): Promise<boolean>;
+  refreshKnowledgeBaseEntry(id: string): Promise<KnowledgeBase | undefined>;
   
   // Agent Activity (Monitoring)
   getAgentActivity(agentId: string, startDate?: string, endDate?: string): Promise<AgentActivity[]>;
@@ -161,6 +162,19 @@ export class DbStorage implements IStorage {
   async deleteKnowledgeBaseEntry(id: string): Promise<boolean> {
     const result = await db.delete(knowledgeBase).where(eq(knowledgeBase.id, id)).returning();
     return result.length > 0;
+  }
+
+  async refreshKnowledgeBaseEntry(id: string): Promise<KnowledgeBase | undefined> {
+    const updateData: any = {
+      lastFetchedAt: new Date(),
+      lastRefreshedAt: new Date(),
+    };
+    const result = await db
+      .update(knowledgeBase)
+      .set(updateData)
+      .where(eq(knowledgeBase.id, id))
+      .returning();
+    return result[0];
   }
 
   async getKnowledgeBaseByCategory(agentId: string, category: string): Promise<KnowledgeBase[]> {
