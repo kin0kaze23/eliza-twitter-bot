@@ -8,6 +8,7 @@ import {
   Blocks,
   BarChart3,
   Database,
+  ExternalLink,
 } from "lucide-react";
 import {
   Sidebar,

@@ -98,10 +98,27 @@ export default function APIManagement() {
   // Create API mutation
   const createApiMutation = useMutation({
     mutationFn: async (data: any) => {
+      // Validate and parse JSON strings before sending to backend
+      let headers = {};
+      let queryParams = {};
+      
+      try {
+        headers = JSON.parse(data.headers || "{}");
+      } catch (e: any) {
+        throw new Error(`Invalid JSON in headers: ${e.message}`);
+      }
+      
+      try {
+        queryParams = JSON.parse(data.queryParams || "{}");
+      } catch (e: any) {
+        throw new Error(`Invalid JSON in query parameters: ${e.message}`);
+      }
+
       return apiRequest("POST", "/api/custom-apis", {
         ...data,
-        headers: JSON.parse(data.headers || "{}"),
-        queryParams: JSON.parse(data.queryParams || "{}"),
+        headers,
+        queryParams,
+        refreshInterval: parseInt(data.refreshInterval) || 60,
       });
     },
     onSuccess: () => {
@@ -113,10 +130,54 @@ export default function APIManagement() {
         description: "Custom API has been added successfully",
       });
     },
-    onError: () => {
+    onError: (error: any) => {
       toast({
         title: "Error",
-        description: "Failed to create API",
+        description: error.message || "Failed to create API",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Update API mutation
+  const updateApiMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: any }) => {
+      // Validate and parse JSON strings before sending to backend
+      let headers = {};
+      let queryParams = {};
+      
+      try {
+        headers = JSON.parse(data.headers || "{}");
+      } catch (e: any) {
+        throw new Error(`Invalid JSON in headers: ${e.message}`);
+      }
+      
+      try {
+        queryParams = JSON.parse(data.queryParams || "{}");
+      } catch (e: any) {
+        throw new Error(`Invalid JSON in query parameters: ${e.message}`);
+      }
+
+      return apiRequest("PATCH", `/api/custom-apis/${id}`, {
+        ...data,
+        headers,
+        queryParams,
+        refreshInterval: parseInt(data.refreshInterval) || 60,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/custom-apis"] });
+      setIsAddDialogOpen(false);
+      resetForm();
+      toast({
+        title: "API Updated",
+        description: "Custom API has been updated successfully",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update API",
         variant: "destructive",
       });
     },
@@ -159,7 +220,33 @@ export default function APIManagement() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    createApiMutation.mutate(formData);
+    if (editingApi) {
+      updateApiMutation.mutate({ id: editingApi.id, data: formData });
+    } else {
+      createApiMutation.mutate(formData);
+    }
+  };
+
+  const handleEdit = (api: CustomApi) => {
+    setEditingApi(api);
+    setFormData({
+      name: api.name,
+      description: api.description || "",
+      baseUrl: api.baseUrl,
+      method: api.method,
+      authType: api.authType,
+      authKeyEnvVar: api.authKeyEnvVar || "",
+      authHeaderName: api.authHeaderName || "",
+      headers: JSON.stringify(api.headers || {}, null, 2),
+      queryParams: JSON.stringify(api.queryParams || {}, null, 2),
+      requestBody: api.requestBody || "",
+      jsonPath: api.jsonPath || "",
+      titlePath: api.titlePath || "",
+      contentPath: api.contentPath || "",
+      responseFormat: api.responseFormat || "json",
+      refreshInterval: api.refreshInterval || 60,
+    });
+    setIsAddDialogOpen(true);
   };
 
   const getStatusBadge = (api: CustomApi) => {
@@ -202,9 +289,11 @@ export default function APIManagement() {
           </DialogTrigger>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Add New API Source</DialogTitle>
+              <DialogTitle>{editingApi ? "Edit API Source" : "Add New API Source"}</DialogTitle>
               <DialogDescription>
-                Configure a new API for automatic KB ingestion. API keys are stored securely in Replit Secrets.
+                {editingApi 
+                  ? "Update API configuration and test the connection."
+                  : "Configure a new API for automatic KB ingestion. API keys are stored securely in Replit Secrets."}
               </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -382,8 +471,14 @@ export default function APIManagement() {
                 <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={createApiMutation.isPending} data-testid="button-save-api">
-                  {createApiMutation.isPending ? "Creating..." : "Create API"}
+                <Button 
+                  type="submit" 
+                  disabled={createApiMutation.isPending || updateApiMutation.isPending} 
+                  data-testid="button-save-api"
+                >
+                  {editingApi
+                    ? (updateApiMutation.isPending ? "Updating..." : "Update API")
+                    : (createApiMutation.isPending ? "Creating..." : "Create API")}
                 </Button>
               </div>
             </form>
@@ -425,6 +520,14 @@ export default function APIManagement() {
                     >
                       <PlayCircle className="mr-2 h-4 w-4" />
                       {testingApiId === api.id ? "Testing..." : "Test"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleEdit(api)}
+                      data-testid={`button-edit-${api.id}`}
+                    >
+                      <Edit className="h-4 w-4" />
                     </Button>
                     <Button
                       size="sm"
