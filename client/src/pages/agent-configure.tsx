@@ -418,8 +418,8 @@ export default function AgentConfigure() {
       name: agent.name,
       username: agent.username,
       bio: agent.bio || "",
-      systemPrompt: agent.systemPrompt,
-      personalityPrompt: agent.personalityPrompt,
+      systemPrompt: agent.systemPrompt || "",
+      personalityPrompt: agent.personalityPrompt || "",
       postStyle: agent.postStyle || "",
       topics: agent.topics || "",
       adjectives: agent.adjectives || "",
@@ -438,14 +438,14 @@ export default function AgentConfigure() {
     
     // Load model config
     setModelConfig({
-      provider: agent.modelProvider,
-      model: agent.modelName,
+      provider: agent.modelProvider || "openai",
+      model: agent.modelName || "gpt-4-turbo-preview",
       apiKey: agent.modelApiKey || "",
-      temperature: [parseFloat(agent.temperature || "0.7")],
+      temperature: [typeof agent.temperature === 'number' ? agent.temperature : 0.7],
       maxTokens: [agent.maxTokens || 500],
-      topP: [parseFloat(agent.topP || "0.9")],
-      frequencyPenalty: [parseFloat(agent.frequencyPenalty || "0.5")],
-      presencePenalty: [parseFloat(agent.presencePenalty || "0.5")],
+      topP: [typeof agent.topP === 'number' ? agent.topP : 0.9],
+      frequencyPenalty: [typeof agent.frequencyPenalty === 'number' ? agent.frequencyPenalty : 0.5],
+      presencePenalty: [typeof agent.presencePenalty === 'number' ? agent.presencePenalty : 0.5],
       contextWindow: (agent.contextWindow || 8000).toString(),
     });
     
