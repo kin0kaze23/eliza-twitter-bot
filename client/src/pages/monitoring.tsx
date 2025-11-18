@@ -1,23 +1,61 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentActivity } from "@shared/schema";
 import { useState } from "react";
-import { BarChart, Activity, TrendingUp, Zap, AlertCircle, Database } from "lucide-react";
+import { BarChart, Activity, TrendingUp, Zap, AlertCircle, Database, Calendar } from "lucide-react";
+
+const DATE_RANGES = {
+  today: "Today",
+  last7days: "Last 7 Days",
+  last30days: "Last 30 Days",
+  all: "All Time",
+} as const;
+
+type DateRange = keyof typeof DATE_RANGES;
+
+function getDateRange(range: DateRange): { startDate?: string; endDate?: string } {
+  const today = new Date();
+  const formatDate = (date: Date) => date.toISOString().split("T")[0];
+
+  switch (range) {
+    case "today":
+      return { startDate: formatDate(today), endDate: formatDate(today) };
+    case "last7days":
+      const sevenDaysAgo = new Date(today);
+      sevenDaysAgo.setDate(today.getDate() - 7);
+      return { startDate: formatDate(sevenDaysAgo), endDate: formatDate(today) };
+    case "last30days":
+      const thirtyDaysAgo = new Date(today);
+      thirtyDaysAgo.setDate(today.getDate() - 30);
+      return { startDate: formatDate(thirtyDaysAgo), endDate: formatDate(today) };
+    case "all":
+    default:
+      return {};
+  }
+}
 
 export default function Monitoring() {
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
+  const [dateRange, setDateRange] = useState<DateRange>("last7days");
 
   // Fetch all agents for selector
   const { data: agents, isLoading: agentsLoading } = useQuery<Agent[]>({
     queryKey: ["/api/agents"],
   });
 
-  // Fetch activity for selected agent
+  // Fetch activity for selected agent with date filtering
+  const { startDate, endDate } = getDateRange(dateRange);
+  
+  const activityUrl = startDate && endDate
+    ? `/api/agents/${selectedAgentId}/activity?startDate=${startDate}&endDate=${endDate}`
+    : `/api/agents/${selectedAgentId}/activity`;
+
   const { data: activity, isLoading: activityLoading } = useQuery<AgentActivity[]>({
-    queryKey: ["/api/agents", selectedAgentId, "activity"],
+    queryKey: [activityUrl],
     enabled: !!selectedAgentId,
   });
 
@@ -52,30 +90,55 @@ export default function Monitoring() {
         <p className="text-sm text-muted-foreground">Track performance metrics and activity</p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Select Agent</CardTitle>
-          <CardDescription>View detailed metrics for a specific agent</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {agentsLoading ? (
-            <Skeleton className="h-10 w-full" />
-          ) : (
-            <Select value={selectedAgentId} onValueChange={setSelectedAgentId}>
-              <SelectTrigger data-testid="select-agent">
-                <SelectValue placeholder="Choose an agent..." />
-              </SelectTrigger>
-              <SelectContent>
-                {agents?.map((agent) => (
-                  <SelectItem key={agent.id} value={agent.id}>
-                    {agent.name} (@{agent.username})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </CardContent>
-      </Card>
+      <div className="grid gap-6 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Select Agent</CardTitle>
+            <CardDescription>View detailed metrics for a specific agent</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {agentsLoading ? (
+              <Skeleton className="h-10 w-full" />
+            ) : (
+              <Select value={selectedAgentId} onValueChange={setSelectedAgentId}>
+                <SelectTrigger data-testid="select-agent">
+                  <SelectValue placeholder="Choose an agent..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {agents?.map((agent) => (
+                    <SelectItem key={agent.id} value={agent.id}>
+                      {agent.name} (@{agent.username})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Time Range</CardTitle>
+            <CardDescription>Filter metrics by date range</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-2 flex-wrap">
+              {(Object.keys(DATE_RANGES) as DateRange[]).map((range) => (
+                <Button
+                  key={range}
+                  variant={dateRange === range ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setDateRange(range)}
+                  data-testid={`button-date-${range}`}
+                >
+                  <Calendar className="mr-2 h-3 w-3" />
+                  {DATE_RANGES[range]}
+                </Button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       {selectedAgentId && (
         <>
