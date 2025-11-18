@@ -1,4 +1,4 @@
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -75,6 +75,39 @@ export default function AgentConfigure() {
     accessTokenSecret: "",
     bearerToken: "",
     appId: "",
+  });
+  
+  const [twitterTestResult, setTwitterTestResult] = useState<{ success: boolean; message?: string; error?: string; hint?: string; user?: any } | null>(null);
+  
+  // Twitter API Test Mutation
+  const testTwitter = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`/api/agents/${id}/test/twitter`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(JSON.stringify(errorData));
+      }
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      setTwitterTestResult(data);
+      toast({
+        title: "Success!",
+        description: data.user ? `Connected as @${data.user.username}` : data.message,
+      });
+    },
+    onError: (error: any) => {
+      const errorData = error.message ? JSON.parse(error.message) : error;
+      setTwitterTestResult(errorData);
+      toast({
+        title: "Twitter API Test Failed",
+        description: errorData.hint || errorData.error || "Failed to test Twitter credentials",
+        variant: "destructive",
+      });
+    },
   });
   
   // Character & Prompts (Combined)
@@ -673,6 +706,42 @@ export default function AgentConfigure() {
                 </div>
               </div>
             </CardContent>
+            <CardFooter className="flex flex-col gap-4">
+              <div className="flex items-center justify-between w-full">
+                <div className="flex-1">
+                  {twitterTestResult && (
+                    <div className={`flex items-center gap-2 text-sm ${twitterTestResult.success ? 'text-green-600' : 'text-destructive'}`}>
+                      {twitterTestResult.success ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4" />
+                          <span>Connected as @{twitterTestResult.user?.username}</span>
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="h-4 w-4" />
+                          <span>{twitterTestResult.error || 'Connection failed'}</span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => testTwitter.mutate()}
+                  disabled={!twitterConfig.bearerToken || testTwitter.isPending}
+                  data-testid="button-test-twitter"
+                >
+                  {testTwitter.isPending ? "Testing..." : "Test Connection"}
+                  <Play className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
+              {twitterTestResult && !twitterTestResult.success && twitterTestResult.hint && (
+                <Alert className="bg-destructive/10">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription className="text-sm">{twitterTestResult.hint}</AlertDescription>
+                </Alert>
+              )}
+            </CardFooter>
           </Card>
         </TabsContent>
 
