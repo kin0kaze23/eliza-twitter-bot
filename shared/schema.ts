@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, jsonb, boolean, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, jsonb, boolean, integer, timestamp, real } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -52,11 +52,11 @@ export const agents = pgTable("agents", {
   modelFamily: text("model_family").default("gpt-4"), // gpt-4, gpt-5, claude-3, claude-4
   autoDetectLatest: boolean("auto_detect_latest").default(true), // auto-use latest in family
   modelApiKey: text("model_api_key"),
-  temperature: text("temperature").default("0.7"),
+  temperature: real("temperature").default(0.7),
   maxTokens: integer("max_tokens").default(500),
-  topP: text("top_p").default("0.9"),
-  frequencyPenalty: text("frequency_penalty").default("0.5"),
-  presencePenalty: text("presence_penalty").default("0.5"),
+  topP: real("top_p").default(0.9),
+  frequencyPenalty: real("frequency_penalty").default(0.5),
+  presencePenalty: real("presence_penalty").default(0.5),
   contextWindow: integer("context_window").default(8000),
   
   // Posting behavior
