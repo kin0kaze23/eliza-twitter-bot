@@ -1,0 +1,320 @@
+Build a full-stack admin dashboard that controls a Twitter AI agent powered by ElizaOS. The dashboard should allow me to configure, expand, and update every part of the agent (prompts, KB, API feeds, behaviour, posting schedule, integrations) without editing code. All settings must be stored in a database and loaded dynamically at runtime so I can enable/disable or customise the bot instantly from the UI.
+
+1. Tech Stack
+
+Frontend: React + TailwindCSS
+
+Backend: Node.js + Express
+
+Database: SQLite or JSON (whichever is easiest)
+
+Everything must live inside a single Replit project
+
+2. Core Purpose
+
+I want a no-code admin interface to:
+
+Build, tune, and customise my Twitter AI agent
+
+Feed it the latest crypto news & token updates (AIXBT-style)
+
+Expand the AI’s knowledge base
+
+Manage prompts and personality
+
+Manage all API keys
+
+Manage schedules and behaviours
+
+Toggle modules on/off instantly
+
+Restart the agent whenever needed
+
+3. Required Dashboard Features
+A. System & Prompt Controls
+
+Create a “Prompts” page where I can edit:
+
+System prompt
+
+Personality prompt
+
+Tweet templates
+
+Reply templates
+
+Safety filters
+
+“Devotional” prompts
+
+“Crypto commentary” prompts
+
+“News commentary” prompts
+
+All editable fields saved in database.
+
+B. Expandable Knowledge Base (KB)
+
+The KB must be fully dynamic and expandable.
+
+Include:
+
+“Add entry” (text area)
+
+“Delete entry”
+
+“Edit entry”
+
+“Category selector”
+
+Support for long KB text (up to 50k chars)
+
+Ability to import bulk text
+
+Tagging (optional)
+
+Most important:
+Agent must always load KB dynamically at runtime.
+No hardcoded texts inside the code.
+
+C. Live Crypto & News Feeds (AIXBT-style)
+
+Create an “Integrations” page that allows me to add and configure:
+
+1. Crypto Data Sources
+
+CoinGecko APIs
+
+CoinMarketCap APIs
+
+DexScreener
+
+Jupiter API
+
+Solana RPC providers
+
+Any external URL (JSON)
+
+I should be able to:
+
+Add/remove data sources
+
+Toggle ON/OFF
+
+Set fetch interval
+
+Save parsing instructions (e.g., which fields to extract)
+
+2. News Data Sources
+
+Support:
+
+Crypto news APIs
+
+RSS feeds
+
+Custom URLs
+
+Twitter/X search keywords
+
+Should be configurable:
+
+ON/OFF
+
+Fetch interval
+
+Sentiment thresholds
+
+Keyword filters
+
+3. Data Pipeline
+
+Backend should run schedulers or timers that:
+
+Fetch live data
+
+Store results in /database/feeds.json
+
+Make them available to the agent via a simple API endpoint like /feeds/latest
+
+Agent must use this live feed data when generating tweets, similar to AIXBT.
+
+D. API Keys Management
+
+Create a page for:
+
+Twitter API keys
+
+OpenAI / Anthropic / Groq / Together keys
+
+Crypto data API keys (if needed)
+
+News API keys
+
+Custom keys
+
+All editable from UI, stored in database, loaded dynamically.
+
+E. Behaviour & Schedules
+
+Add a page where I can configure:
+
+Post frequency
+
+Post interval (min/hr)
+
+Auto-reply behaviour
+
+Keyword triggers
+
+Reply rate limit
+
+Toggle modules:
+
+Daily devotional ON/OFF
+
+Crypto commentary ON/OFF
+
+News commentary ON/OFF
+
+Meme/fun mode ON/OFF
+
+Bible-verse mode ON/OFF
+
+Long-form threads ON/OFF
+
+All settings must save to database.
+
+F. Navigation
+
+Left sidebar:
+
+Dashboard
+
+Prompts
+
+Knowledge Base
+
+API Keys
+
+Behaviour
+
+Integrations
+
+Live Feeds Viewer
+
+Logs (optional)
+
+4. Backend Requirements
+REST Endpoints
+
+Implement:
+
+GET /config
+POST /config/update
+
+GET /prompts
+POST /prompts/update
+
+GET /kb
+POST /kb/add
+POST /kb/update
+POST /kb/delete
+
+GET /apikeys
+POST /apikeys/update
+
+GET /schedule
+POST /schedule/update
+
+GET /integrations
+POST /integrations/update
+
+GET /feeds/latest
+
+
+All reading/writing from SQLite or JSON.
+
+5. Agent Integration
+
+Place ElizaOS-related scripts inside /agent.
+
+Create a runtime script:
+/agent/runAgent.js
+
+This script must:
+
+Load all data (prompts, KB, keys, behaviours, live feeds)
+
+Generate posts or replies
+
+Execute according to schedule
+
+Never depend on hardcoded values
+
+Always fetch config from the backend or database
+
+Agent Restart Mechanism
+
+Create backend route:
+
+POST /agent/restart
+
+
+This should:
+
+Kill current agent process
+
+Start it again
+
+Load fresh config
+
+Allow a “Restart Agent” button in UI.
+
+6. Dynamic Config (Critical)
+
+The agent must not require code changes when I update prompts, KB, or settings.
+
+Everything must be loaded dynamically from:
+
+/database/config.json
+
+/database/kb.json
+
+/database/schedule.json
+
+/database/integrations.json
+
+/database/feeds.json
+
+or SQLite equivalents.
+
+7. Live Crypto/News Engine
+
+Backend must also include:
+
+Background job to fetch external data at intervals
+
+Store latest results in /database/feeds.json
+
+Agent uses it for context when generating tweets
+
+Admin dashboard displays the recent data (optional)
+
+This feature is what makes it AIXBT-style.
+
+8. Optional (Nice-to-have)
+
+If easy:
+
+Logs page (tweets, replies, errors)
+
+Engagement tracker
+
+“Simulate Tweet” preview tool
+
+“Test Prompt Output” button
+
+Final Summary for Replit
+
+Build a full-stack no-code dashboard for configuring an ElizaOS Twitter agent. The dashboard must allow me to edit all prompts, KB, API keys, behaviours, schedules, and data feed integrations. The agent must always load config dynamically and support live crypto/news feeds similar to AIXBT. All bot features (posting, replying, commentary modules) must be enable/disable toggled from the UI. No manual code changes required.
