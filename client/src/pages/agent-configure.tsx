@@ -78,6 +78,8 @@ export default function AgentConfigure() {
   });
   
   const [twitterTestResult, setTwitterTestResult] = useState<{ success: boolean; message?: string; error?: string; hint?: string; user?: any } | null>(null);
+  const [modelTestResult, setModelTestResult] = useState<{ success: boolean; provider?: string; modelCount?: number; latestModel?: string; models?: any[]; error?: string; hint?: string; note?: string } | null>(null);
+  const [availableModels, setAvailableModels] = useState<any[]>([]);
   
   // Twitter API Test Mutation
   const testTwitter = useMutation({
@@ -105,6 +107,43 @@ export default function AgentConfigure() {
       toast({
         title: "Twitter API Test Failed",
         description: errorData.hint || errorData.error || "Failed to test Twitter credentials",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // AI Model API Test Mutation
+  const testModel = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`/api/agents/${id}/test/model`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: modelConfig.provider,
+          apiKey: modelConfig.apiKey,
+        }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(JSON.stringify(errorData));
+      }
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      setModelTestResult(data);
+      setAvailableModels(data.models || []);
+      toast({
+        title: "Success!",
+        description: `Found ${data.modelCount} ${data.provider} models. Latest: ${data.latestModel}`,
+      });
+    },
+    onError: (error: any) => {
+      const errorData = error.message ? JSON.parse(error.message) : error;
+      setModelTestResult(errorData);
+      setAvailableModels([]);
+      toast({
+        title: "Model API Test Failed",
+        description: errorData.hint || errorData.error || "Failed to test model API key",
         variant: "destructive",
       });
     },
@@ -999,31 +1038,22 @@ export default function AgentConfigure() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="model-provider">Provider</Label>
-                <Select value={modelConfig.provider} onValueChange={(v) => setModelConfig({ ...modelConfig, provider: v })}>
+                <Select value={modelConfig.provider} onValueChange={(v) => {
+                  setModelConfig({ ...modelConfig, provider: v });
+                  setAvailableModels([]);
+                  setModelTestResult(null);
+                }}>
                   <SelectTrigger id="model-provider" data-testid="select-model-provider">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="openai">OpenAI</SelectItem>
-                    <SelectItem value="anthropic">Anthropic</SelectItem>
+                    <SelectItem value="openai">OpenAI (GPT)</SelectItem>
+                    <SelectItem value="google">Google (Gemini)</SelectItem>
+                    <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
                     <SelectItem value="groq">Groq</SelectItem>
                     <SelectItem value="together">Together AI</SelectItem>
                     <SelectItem value="mistral">Mistral</SelectItem>
                     <SelectItem value="ollama">Ollama (Local)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="model-name">Model</Label>
-                <Select value={modelConfig.model} onValueChange={(v) => setModelConfig({ ...modelConfig, model: v })}>
-                  <SelectTrigger id="model-name" data-testid="select-model-name">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="gpt-4-turbo-preview">GPT-4 Turbo</SelectItem>
-                    <SelectItem value="gpt-4">GPT-4</SelectItem>
-                    <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1036,7 +1066,7 @@ export default function AgentConfigure() {
                     type={showSecrets.modelApiKey ? "text" : "password"}
                     value={showSecrets.modelApiKey ? modelConfig.apiKey : maskSecret(modelConfig.apiKey)}
                     onChange={(e) => setModelConfig({ ...modelConfig, apiKey: e.target.value })}
-                    placeholder="Enter model API key..."
+                    placeholder={`Enter ${modelConfig.provider} API key...`}
                     className="font-mono text-sm"
                     data-testid="input-model-api-key"
                   />
@@ -1044,6 +1074,40 @@ export default function AgentConfigure() {
                     {showSecrets.modelApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  {modelConfig.provider === "google" && "Get your API key from Google AI Studio (https://makersuite.google.com/app/apikey)"}
+                  {modelConfig.provider === "openai" && "Get your API key from OpenAI Platform (https://platform.openai.com/api-keys)"}
+                  {modelConfig.provider === "anthropic" && "Get your API key from Anthropic Console (https://console.anthropic.com/)"}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="model-name">Model</Label>
+                {availableModels.length > 0 ? (
+                  <Select value={modelConfig.model} onValueChange={(v) => setModelConfig({ ...modelConfig, model: v })}>
+                    <SelectTrigger id="model-name" data-testid="select-model-name">
+                      <SelectValue placeholder="Select a model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableModels.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.name || m.id}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    id="model-name"
+                    value={modelConfig.model}
+                    onChange={(e) => setModelConfig({ ...modelConfig, model: e.target.value })}
+                    placeholder="Test API key to load models, or enter manually..."
+                    data-testid="input-model-name"
+                  />
+                )}
+                {modelTestResult?.note && (
+                  <p className="text-xs text-muted-foreground">{modelTestResult.note}</p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -1083,6 +1147,52 @@ export default function AgentConfigure() {
                 />
               </div>
             </CardContent>
+            <CardFooter className="flex flex-col gap-4">
+              <div className="flex items-center justify-between w-full">
+                <div className="flex-1">
+                  {modelTestResult && (
+                    <div className={`flex items-center gap-2 text-sm ${modelTestResult.success ? 'text-green-600' : 'text-destructive'}`}>
+                      {modelTestResult.success ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4" />
+                          <span>
+                            Found {modelTestResult.modelCount} models. Latest: {modelTestResult.latestModel}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="h-4 w-4" />
+                          <span>{modelTestResult.error || 'Connection failed'}</span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => testModel.mutate()}
+                  disabled={!modelConfig.apiKey || testModel.isPending || !["openai", "google", "anthropic"].includes(modelConfig.provider)}
+                  data-testid="button-test-model"
+                >
+                  {testModel.isPending ? "Testing..." : "Test API Key & Load Models"}
+                  <Play className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
+              {modelTestResult && !modelTestResult.success && modelTestResult.hint && (
+                <Alert className="bg-destructive/10">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription className="text-sm">{modelTestResult.hint}</AlertDescription>
+                </Alert>
+              )}
+              {!["openai", "google", "anthropic"].includes(modelConfig.provider) && (
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription className="text-sm">
+                    Automatic model discovery is only supported for OpenAI, Google, and Anthropic. Please enter the model name manually for other providers.
+                  </AlertDescription>
+                </Alert>
+              )}
+            </CardFooter>
           </Card>
         </TabsContent>
 
