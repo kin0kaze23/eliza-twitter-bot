@@ -558,6 +558,88 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Test Twitter API credentials
+  app.post("/api/agents/:agentId/test/twitter", async (req, res) => {
+    try {
+      const { agentId } = req.params;
+      
+      // Get agent configuration
+      const agent = await storage.getAgent(agentId);
+      if (!agent) {
+        return res.status(404).json({ error: "Agent not found" });
+      }
+      
+      // Check if all required Twitter credentials are present
+      const requiredFields = [
+        { key: 'twitterBearerToken', name: 'Bearer Token' },
+      ];
+      
+      const missingFields = requiredFields.filter(field => !agent[field.key as keyof typeof agent]);
+      
+      if (missingFields.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: "Missing Twitter credentials",
+          missingFields: missingFields.map(f => f.name),
+          details: "Please add all required Twitter API credentials in the Credentials tab"
+        });
+      }
+      
+      // Test Twitter API v2 - Get authenticated user
+      const bearerToken = agent.twitterBearerToken;
+      
+      const response = await fetch("https://api.twitter.com/2/users/me", {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${bearerToken}`,
+          "Content-Type": "application/json",
+        },
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorDetails;
+        try {
+          errorDetails = JSON.parse(errorText);
+        } catch {
+          errorDetails = { message: errorText };
+        }
+        
+        return res.status(response.status).json({
+          success: false,
+          error: "Twitter API authentication failed",
+          statusCode: response.status,
+          details: errorDetails,
+          hint: response.status === 401 
+            ? "Bearer token is invalid or expired. Please check your Twitter Developer Portal."
+            : "Please verify your Twitter API credentials are correct."
+        });
+      }
+      
+      const userData = await response.json();
+      
+      // Successfully authenticated
+      res.json({
+        success: true,
+        message: "Twitter API credentials are valid",
+        user: {
+          id: userData.data?.id,
+          name: userData.data?.name,
+          username: userData.data?.username,
+        },
+        testedAt: new Date().toISOString(),
+      });
+      
+    } catch (error: any) {
+      console.error("Error testing Twitter API:", error);
+      res.status(500).json({ 
+        success: false,
+        error: "Failed to test Twitter API",
+        details: error.message 
+      });
+    }
+  });
+
   // ============= KB AUTO-INGESTION ============= //
 
   // Manually trigger KB ingestion from an integration or custom API

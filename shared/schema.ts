@@ -24,7 +24,7 @@ export const agents = pgTable("agents", {
   // Basic info
   name: text("name").notNull(),
   username: text("username").notNull(),
-  bio: text("bio").notNull(),
+  bio: text("bio"),
   status: text("status").notNull().default("draft"), // draft, testing, deployed, paused
   
   // Twitter API credentials (encrypted in production)
@@ -36,8 +36,8 @@ export const agents = pgTable("agents", {
   twitterAppId: text("twitter_app_id"),
   
   // Character & Prompts
-  systemPrompt: text("system_prompt").notNull(),
-  personalityPrompt: text("personality_prompt").notNull(),
+  systemPrompt: text("system_prompt"),
+  personalityPrompt: text("personality_prompt"),
   postStyle: text("post_style"),
   topics: text("topics"),
   adjectives: text("adjectives"),
@@ -47,8 +47,8 @@ export const agents = pgTable("agents", {
   customPrompts: jsonb("custom_prompts").$type<Record<string, string>>().default(sql`'{}'`),
   
   // AI Model configuration
-  modelProvider: text("model_provider").notNull().default("openai"),
-  modelName: text("model_name").notNull().default("gpt-4-turbo-preview"),
+  modelProvider: text("model_provider").default("openai"),
+  modelName: text("model_name").default("gpt-4-turbo-preview"),
   modelFamily: text("model_family").default("gpt-4"), // gpt-4, gpt-5, claude-3, claude-4
   autoDetectLatest: boolean("auto_detect_latest").default(true), // auto-use latest in family
   modelApiKey: text("model_api_key"),
@@ -117,6 +117,11 @@ export const insertAgentSchema = createInsertSchema(agents).omit({
   createdAt: true,
   updatedAt: true,
   lastDeployedAt: true,
+}).extend({
+  systemPrompt: z.string().optional(),
+  personalityPrompt: z.string().optional(),
+  modelProvider: z.string().optional(),
+  modelName: z.string().optional(),
 });
 
 export type InsertAgent = z.infer<typeof insertAgentSchema>;
