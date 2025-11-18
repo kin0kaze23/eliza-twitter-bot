@@ -7,6 +7,8 @@ import {
   Plug,
   Activity,
   Bot,
+  FlaskConical,
+  Blocks,
 } from "lucide-react";
 import {
   Sidebar,
@@ -27,47 +29,82 @@ const menuItems = [
     url: "/",
     icon: LayoutDashboard,
     testId: "link-dashboard",
+    group: "overview",
+  },
+  {
+    title: "Agents",
+    url: "/agents",
+    icon: Bot,
+    testId: "link-agents",
+    group: "overview",
   },
   {
     title: "Prompts",
     url: "/prompts",
     icon: FileText,
     testId: "link-prompts",
+    group: "configuration",
   },
   {
     title: "Knowledge Base",
     url: "/knowledge-base",
     icon: BookOpen,
     testId: "link-knowledge-base",
+    group: "configuration",
   },
   {
     title: "API Keys",
     url: "/api-keys",
     icon: Key,
     testId: "link-api-keys",
+    group: "configuration",
   },
   {
     title: "Behaviour",
     url: "/behaviour",
     icon: Settings,
     testId: "link-behaviour",
+    group: "configuration",
   },
   {
     title: "Integrations",
     url: "/integrations",
     icon: Plug,
     testId: "link-integrations",
+    group: "data",
+  },
+  {
+    title: "Custom APIs",
+    url: "/custom-apis",
+    icon: Blocks,
+    testId: "link-custom-apis",
+    group: "data",
   },
   {
     title: "Live Feeds",
     url: "/live-feeds",
     icon: Activity,
     testId: "link-live-feeds",
+    group: "data",
+  },
+  {
+    title: "Playground",
+    url: "/playground",
+    icon: FlaskConical,
+    testId: "link-playground",
+    group: "testing",
   },
 ];
 
 export function AppSidebar() {
   const [location] = useLocation();
+
+  const groupedItems = {
+    overview: menuItems.filter(item => item.group === "overview"),
+    configuration: menuItems.filter(item => item.group === "configuration"),
+    data: menuItems.filter(item => item.group === "data"),
+    testing: menuItems.filter(item => item.group === "testing"),
+  };
 
   return (
     <Sidebar>
@@ -84,10 +121,76 @@ export function AppSidebar() {
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupLabel>Overview</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {menuItems.map((item) => (
+              {groupedItems.overview.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={location === item.url}
+                    data-testid={item.testId}
+                  >
+                    <Link href={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Configuration</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {groupedItems.configuration.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={location === item.url}
+                    data-testid={item.testId}
+                  >
+                    <Link href={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Data Sources</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {groupedItems.data.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={location === item.url}
+                    data-testid={item.testId}
+                  >
+                    <Link href={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Testing</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {groupedItems.testing.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild

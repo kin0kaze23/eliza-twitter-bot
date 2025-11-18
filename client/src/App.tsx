@@ -7,24 +7,30 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import Dashboard from "@/pages/dashboard";
+import Agents from "@/pages/agents";
 import Prompts from "@/pages/prompts";
 import KnowledgeBase from "@/pages/knowledge-base";
 import ApiKeys from "@/pages/api-keys";
 import Behaviour from "@/pages/behaviour";
 import Integrations from "@/pages/integrations";
+import CustomAPIs from "@/pages/custom-apis";
 import LiveFeeds from "@/pages/live-feeds";
+import Playground from "@/pages/playground";
 import NotFound from "@/pages/not-found";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
+      <Route path="/agents" component={Agents} />
       <Route path="/prompts" component={Prompts} />
       <Route path="/knowledge-base" component={KnowledgeBase} />
       <Route path="/api-keys" component={ApiKeys} />
       <Route path="/behaviour" component={Behaviour} />
       <Route path="/integrations" component={Integrations} />
+      <Route path="/custom-apis" component={CustomAPIs} />
       <Route path="/live-feeds" component={LiveFeeds} />
+      <Route path="/playground" component={Playground} />
       <Route component={NotFound} />
     </Switch>
   );
