@@ -28,6 +28,15 @@ Preferred communication style: Simple, everyday language.
 - ✅ Passed architect review - confirmed production-ready
 - ✅ Full documentation added (USER_GUIDE.md and README.md)
 
+**v1.1 - Draft Mode & Twitter Testing** (November 18, 2024):
+- ✅ Draft mode: Save agents with partial configurations (only name + username required)
+- ✅ Twitter API credential testing with real-time validation
+- ✅ Optional agent schema fields for systemPrompt, personalityPrompt, bio, modelProvider, modelName
+- ✅ Test endpoint at POST /api/agents/:id/test/twitter using Twitter API v2
+- ✅ Frontend test UI with success/error feedback and helpful hints
+- ✅ Proper null handling throughout for optional fields
+- ✅ E2E testing confirmed working via Playwright
+
 ## System Architecture
 
 ### Frontend Architecture
@@ -72,6 +81,8 @@ Preferred communication style: Simple, everyday language.
 
 **Key Routes**:
 - `/api/agents` - CRUD operations for AI agents
+- `/api/agents/:id/test/twitter` - Test Twitter API credentials (NEW)
+- `/api/agents/:id/conversation` - Test agent conversation with LLM
 - `/api/knowledge-base` - Manage agent knowledge entries
 - `/api/custom-apis` - Configure custom data sources
 - `/api/api-keys` - Store and retrieve API credentials
@@ -86,16 +97,18 @@ Preferred communication style: Simple, everyday language.
 **Schema Design** (`shared/schema.ts`):
 
 **Agents Table**: Comprehensive configuration storage including:
-- Basic metadata (name, username, bio, status)
-- Twitter API credentials (6 required fields: API key/secret, access token/secret, bearer token, app ID)
-- Character prompts (system, personality, style, topics, adjectives)
+- Basic metadata (name [required], username [required], bio [optional], status)
+- Twitter API credentials (6 fields: API key/secret, access token/secret, bearer token, app ID - all optional for draft mode)
+- Character prompts (system [optional], personality [optional], style, topics, adjectives)
 - Message examples and custom prompts (JSONB)
-- AI model configuration (11 supported providers: OpenAI, Anthropic, Groq, Together, Mistral, Cohere, Replicate, HuggingFace, Ollama, vLLM, LocalAI)
+- AI model configuration (provider [optional], modelName [optional], 11 supported providers: OpenAI, Anthropic, Groq, Together, Mistral, Cohere, Replicate, HuggingFace, Ollama, vLLM, LocalAI)
 - Model parameters (temperature, maxTokens, topP, frequency/presence penalties, context window)
 - Posting behavior (frequency, intervals, quiet hours with timezone support)
 - Reply behavior (rate, delay limits, verified-only filtering, keyword whitelists/blacklists)
 - Content modules (crypto commentary, market analysis, news, threads, memes)
 - Triggers (price/volume thresholds, auto-tweet on news)
+
+**Note**: Most fields are now optional to support draft mode. Only name and username are required, allowing users to save partial configurations and complete them incrementally.
 
 **Knowledge Base Table**: Agent-specific knowledge entries with categories, tags, priority levels, active status, and refresh strategies
 

@@ -84,6 +84,24 @@ Before using the dashboard, you need:
    - **Bio**: Short description
    - **Status**: Active/Inactive
 
+### Draft Mode - Save Partial Configurations
+
+**NEW FEATURE**: You can now save agents as drafts without filling in all required fields!
+
+**How it Works**:
+- Only **Name** and **Username** are required to save an agent
+- All other fields (prompts, credentials, model config) are optional
+- Click **Save Configuration** at any time to persist your progress
+- Return later to complete the configuration
+
+**Use Cases**:
+- Start configuring an agent and finish later
+- Test different configurations incrementally
+- Save Twitter credentials first, then add prompts
+- Build configurations step-by-step without pressure
+
+**Important**: Set status to "Active" only when you're ready to deploy. Keep it as "Draft" or "Inactive" while still configuring.
+
 ### Configuration Tabs
 
 #### 1. Prompts Tab
@@ -109,6 +127,16 @@ API authentication for Twitter and AI models:
 - Access Token Secret
 - Bearer Token
 - App ID
+
+**Testing Twitter Credentials**:
+1. Fill in your Twitter Bearer Token in the form
+2. Click **Save Configuration** to persist the credentials
+3. Click **Test Connection** button at the bottom of the Twitter Credentials section
+4. The system will authenticate with Twitter API v2 to verify your credentials
+5. Success: Shows your Twitter username and user ID
+6. Error: Displays helpful hints (e.g., "Bearer token is invalid or expired")
+
+**Note**: You must save your credentials before testing them. The test validates the saved credentials in the database, not just what's in the form.
 
 **AI Model Configuration**:
 - **Provider**: Select from 11 supported providers
