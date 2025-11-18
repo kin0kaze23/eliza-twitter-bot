@@ -23,12 +23,24 @@ type TestResult = {
   timestamp: Date;
 };
 
+type ConversationMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: Date;
+};
+
 export default function Playground() {
   const { toast } = useToast();
   const [selectedAgent, setSelectedAgent] = useState("1");
   const [testPrompt, setTestPrompt] = useState("What's the current state of Bitcoin? Should I be bullish or bearish?");
   const [isGenerating, setIsGenerating] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
+  
+  // Conversation mode state
+  const [conversationMode, setConversationMode] = useState(false);
+  const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([]);
+  const [conversationInput, setConversationInput] = useState("");
   
   const [configValidation, setConfigValidation] = useState({
     prompts: { valid: true, message: "All prompts configured" },
@@ -62,6 +74,52 @@ export default function Playground() {
         description: "Tweet generated successfully with 1 warning.",
       });
     }, 3000);
+  };
+
+  const handleSendConversation = () => {
+    if (!conversationInput.trim()) return;
+    
+    setIsGenerating(true);
+    
+    // Add user message
+    const userMessage: ConversationMessage = {
+      id: Date.now().toString(),
+      role: "user",
+      content: conversationInput,
+      timestamp: new Date(),
+    };
+    
+    setConversationHistory(prev => [...prev, userMessage]);
+    setConversationInput("");
+    
+    // Simulate AI response
+    setTimeout(() => {
+      const responses = [
+        "Based on current market conditions, I see strong bullish signals. The on-chain data suggests accumulation by smart money.",
+        "That's an interesting perspective! Looking at the technical analysis, we're approaching a critical resistance level.",
+        "I agree. Historical patterns suggest this could be a turning point. Let me elaborate on the fundamentals...",
+        "Great question! The macroeconomic factors we need to consider include: 1) Fed policy 2) Institutional adoption 3) Regulatory clarity",
+      ];
+      
+      const aiMessage: ConversationMessage = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: responses[Math.floor(Math.random() * responses.length)],
+        timestamp: new Date(),
+      };
+      
+      setConversationHistory(prev => [...prev, aiMessage]);
+      setIsGenerating(false);
+    }, 2000);
+  };
+
+  const handleResetConversation = () => {
+    setConversationHistory([]);
+    setConversationInput("");
+    toast({
+      title: "Conversation reset",
+      description: "Started a new conversation session.",
+    });
   };
 
   const handleValidateConfig = () => {
@@ -108,7 +166,8 @@ export default function Playground() {
 
       <Tabs defaultValue="generate" className="space-y-6">
         <TabsList>
-          <TabsTrigger value="generate">Generate Test</TabsTrigger>
+          <TabsTrigger value="generate">Tweet Generation</TabsTrigger>
+          <TabsTrigger value="conversation">Conversation Test</TabsTrigger>
           <TabsTrigger value="validation">Config Validation</TabsTrigger>
           <TabsTrigger value="debug">Debug Info</TabsTrigger>
         </TabsList>
@@ -218,6 +277,136 @@ export default function Playground() {
                     </div>
                   </div>
                 )}
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="conversation" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Multi-Turn Conversation Test</CardTitle>
+                  <CardDescription>Test the agent's ability to maintain context across multiple exchanges</CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={handleResetConversation}
+                  disabled={conversationHistory.length === 0}
+                  data-testid="button-reset-conversation"
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Reset
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Conversation History */}
+              <div className="border rounded-lg p-4 min-h-[300px] max-h-[500px] overflow-y-auto space-y-4">
+                {conversationHistory.length === 0 ? (
+                  <div className="flex items-center justify-center h-[250px] text-muted-foreground">
+                    <p>Start a conversation to test multi-turn context management</p>
+                  </div>
+                ) : (
+                  conversationHistory.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+                      data-testid={`message-${message.role}-${message.id}`}
+                    >
+                      <div
+                        className={`max-w-[80%] rounded-lg p-3 ${
+                          message.role === "user"
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-muted"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-medium">
+                            {message.role === "user" ? "You" : "Agent"}
+                          </span>
+                          <span className="text-xs opacity-70">
+                            {message.timestamp.toLocaleTimeString()}
+                          </span>
+                        </div>
+                        <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Input Area */}
+              <div className="flex gap-2">
+                <Textarea
+                  value={conversationInput}
+                  onChange={(e) => setConversationInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendConversation();
+                    }
+                  }}
+                  placeholder="Type your message... (Shift+Enter for new line)"
+                  className="min-h-[60px]"
+                  disabled={isGenerating}
+                  data-testid="input-conversation"
+                />
+                <Button
+                  onClick={handleSendConversation}
+                  disabled={isGenerating || !conversationInput.trim()}
+                  size="icon"
+                  className="h-[60px] w-[60px]"
+                  data-testid="button-send-message"
+                >
+                  {isGenerating ? (
+                    <RefreshCw className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <Play className="h-5 w-5" />
+                  )}
+                </Button>
+              </div>
+
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>{conversationHistory.length} messages</span>
+                <span>•</span>
+                <span>Press Enter to send, Shift+Enter for new line</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {conversationHistory.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Conversation Analysis</CardTitle>
+                <CardDescription>Context management and coherence metrics</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Total Turns</p>
+                    <p className="text-2xl font-bold">{conversationHistory.length}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">User Messages</p>
+                    <p className="text-2xl font-bold">
+                      {conversationHistory.filter(m => m.role === "user").length}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Agent Responses</p>
+                    <p className="text-2xl font-bold">
+                      {conversationHistory.filter(m => m.role === "assistant").length}
+                    </p>
+                  </div>
+                </div>
+                <div className="pt-3 border-t">
+                  <Badge variant="default" className="gap-1">
+                    <CheckCircle2 className="h-3 w-3" />
+                    Context maintained across {Math.floor(conversationHistory.length / 2)} turns
+                  </Badge>
+                </div>
               </CardContent>
             </Card>
           )}

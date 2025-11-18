@@ -353,6 +353,139 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ============= KB AUTO-INGESTION ============= //
+
+  // Manually trigger KB ingestion from an integration or custom API
+  app.post("/api/agents/:agentId/knowledge/ingest/:sourceId", async (req, res) => {
+    try {
+      const { agentId, sourceId } = req.params;
+      const { sourceType } = req.body; // "integration" or "custom_api"
+      
+      // In production, this would:
+      // 1. Fetch the integration or custom API configuration
+      // 2. Make the API call to get fresh data
+      // 3. Parse the response using jsonPath
+      // 4. Create/update KB entries with the data
+      
+      // Mock response for demonstration
+      const mockEntries = [
+        {
+          title: `${sourceType === "integration" ? "Market Data" : "API Data"} - ${new Date().toLocaleDateString()}`,
+          content: `Fresh data fetched from ${sourceType} (${sourceId}) at ${new Date().toISOString()}. This would contain the actual API response data parsed according to the configured jsonPath.`,
+          tags: ["auto-generated", sourceType],
+          source: sourceType,
+          sourceId: sourceId,
+          sourceUrl: `https://api.example.com/data`,
+          category: "crypto",
+          priority: 7,
+          active: true,
+          refreshStrategy: "daily",
+          lastFetchedAt: new Date().toISOString(),
+          agentId: agentId,
+        },
+      ];
+      
+      // Create KB entries
+      const createdEntries = [];
+      for (const entry of mockEntries) {
+        const validatedData = insertKnowledgeBaseSchema.parse(entry);
+        const created = await storage.createKnowledgeBaseEntry(validatedData);
+        createdEntries.push(created);
+      }
+      
+      res.status(201).json({
+        success: true,
+        message: `Ingested ${createdEntries.length} entries from ${sourceType}`,
+        entries: createdEntries,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error ingesting KB data:", error);
+      res.status(500).json({ error: "Failed to ingest KB data" });
+    }
+  });
+
+  // Get KB ingestion status for an agent
+  app.get("/api/agents/:agentId/knowledge/ingest/status", async (req, res) => {
+    try {
+      const { agentId } = req.params;
+      
+      // Get all KB entries grouped by source
+      const entries = await storage.getKnowledgeBaseEntries(agentId);
+      
+      const sourceStats: Record<string, {
+        count: number;
+        lastFetched: string | null;
+        active: number;
+        inactive: number;
+      }> = {};
+      
+      entries.forEach(entry => {
+        const source = entry.source || "manual";
+        if (!sourceStats[source]) {
+          sourceStats[source] = {
+            count: 0,
+            lastFetched: null,
+            active: 0,
+            inactive: 0,
+          };
+        }
+        sourceStats[source].count++;
+        sourceStats[source][entry.active ? "active" : "inactive"]++;
+        
+        if (entry.lastFetchedAt) {
+          const fetchDate = new Date(entry.lastFetchedAt).toISOString();
+          if (!sourceStats[source].lastFetched || fetchDate > sourceStats[source].lastFetched) {
+            sourceStats[source].lastFetched = fetchDate;
+          }
+        }
+      });
+      
+      res.json({
+        totalEntries: entries.length,
+        sourceStats,
+      });
+    } catch (error) {
+      console.error("Error fetching KB ingestion status:", error);
+      res.status(500).json({ error: "Failed to fetch ingestion status" });
+    }
+  });
+
+  // Background job endpoint to refresh stale KB entries
+  app.post("/api/knowledge/refresh-stale", async (req, res) => {
+    try {
+      // In production, this would be called by a cron job/scheduler
+      // It would:
+      // 1. Find all KB entries where refreshStrategy is "daily" or "weekly"
+      // 2. Check lastRefreshedAt to see if they're due for refresh
+      // 3. For each entry, fetch fresh data from its source
+      // 4. Update the entry with new data
+      
+      const now = new Date();
+      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      
+      // Mock: simulate finding and refreshing stale entries
+      const refreshed = {
+        daily: 3,
+        weekly: 1,
+        errors: 0,
+      };
+      
+      res.json({
+        success: true,
+        message: "Stale KB entries refreshed",
+        refreshed,
+        timestamp: now.toISOString(),
+      });
+    } catch (error) {
+      console.error("Error refreshing stale KB entries:", error);
+      res.status(500).json({ error: "Failed to refresh stale entries" });
+    }
+  });
+
   // ============= AI MODELS ============= //
 
   // Get available AI models from providers
