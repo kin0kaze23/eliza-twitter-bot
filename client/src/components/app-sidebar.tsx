@@ -74,13 +74,6 @@ const menuItems = [
     group: "data",
   },
   {
-    title: "Custom APIs",
-    url: "/custom-apis",
-    icon: Blocks,
-    testId: "link-custom-apis",
-    group: "data",
-  },
-  {
     title: "Live Feeds",
     url: "/live-feeds",
     icon: Activity,

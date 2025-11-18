@@ -14,7 +14,6 @@ import KBSnippets from "@/pages/kb-snippets";
 import APIManagement from "@/pages/api-management";
 import ApiKeys from "@/pages/api-keys";
 import Integrations from "@/pages/integrations";
-import CustomAPIs from "@/pages/custom-apis";
 import LiveFeeds from "@/pages/live-feeds";
 import Playground from "@/pages/playground";
 import NotFound from "@/pages/not-found";
@@ -30,7 +29,6 @@ function Router() {
       <Route path="/api-management" component={APIManagement} />
       <Route path="/api-keys" component={ApiKeys} />
       <Route path="/integrations" component={Integrations} />
-      <Route path="/custom-apis" component={CustomAPIs} />
       <Route path="/live-feeds" component={LiveFeeds} />
       <Route path="/playground" component={Playground} />
       <Route component={NotFound} />
