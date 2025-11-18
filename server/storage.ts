@@ -10,13 +10,16 @@ import {
   type InsertCustomApi,
   type ApiKey,
   type InsertApiKey,
+  type AgentActivity,
+  type InsertAgentActivity,
   users,
   agents,
   knowledgeBase,
   customApis,
   apiKeys,
+  agentActivity,
 } from "@shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, sql } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -35,9 +38,17 @@ export interface IStorage {
   // Knowledge Base
   getKnowledgeBaseEntries(agentId: string): Promise<KnowledgeBase[]>;
   getKnowledgeBaseEntry(id: string): Promise<KnowledgeBase | undefined>;
+  getKnowledgeBaseByCategory(agentId: string, category: string): Promise<KnowledgeBase[]>;
+  getActiveKnowledgeBase(agentId: string): Promise<KnowledgeBase[]>;
   createKnowledgeBaseEntry(entry: InsertKnowledgeBase): Promise<KnowledgeBase>;
   updateKnowledgeBaseEntry(id: string, entry: Partial<InsertKnowledgeBase>): Promise<KnowledgeBase | undefined>;
   deleteKnowledgeBaseEntry(id: string): Promise<boolean>;
+  
+  // Agent Activity (Monitoring)
+  getAgentActivity(agentId: string, startDate?: string, endDate?: string): Promise<AgentActivity[]>;
+  getAgentActivitySummary(agentId: string): Promise<AgentActivity | undefined>;
+  createOrUpdateActivity(activity: InsertAgentActivity): Promise<AgentActivity>;
+  getActivityByDate(agentId: string, date: string): Promise<AgentActivity | undefined>;
   
   // Custom APIs
   getAllCustomApis(): Promise<CustomApi[]>;
@@ -150,6 +161,85 @@ export class DbStorage implements IStorage {
   async deleteKnowledgeBaseEntry(id: string): Promise<boolean> {
     const result = await db.delete(knowledgeBase).where(eq(knowledgeBase.id, id)).returning();
     return result.length > 0;
+  }
+
+  async getKnowledgeBaseByCategory(agentId: string, category: string): Promise<KnowledgeBase[]> {
+    return await db
+      .select()
+      .from(knowledgeBase)
+      .where(and(eq(knowledgeBase.agentId, agentId), eq(knowledgeBase.category, category)))
+      .orderBy(desc(knowledgeBase.priority), desc(knowledgeBase.createdAt));
+  }
+
+  async getActiveKnowledgeBase(agentId: string): Promise<KnowledgeBase[]> {
+    return await db
+      .select()
+      .from(knowledgeBase)
+      .where(and(eq(knowledgeBase.agentId, agentId), eq(knowledgeBase.active, true)))
+      .orderBy(desc(knowledgeBase.priority), desc(knowledgeBase.createdAt));
+  }
+
+  // Agent Activity (Monitoring)
+  async getAgentActivity(agentId: string, startDate?: string, endDate?: string): Promise<AgentActivity[]> {
+    let query = db.select().from(agentActivity).where(eq(agentActivity.agentId, agentId));
+    
+    if (startDate && endDate) {
+      query = query.where(
+        and(
+          eq(agentActivity.agentId, agentId),
+          sql`${agentActivity.date} >= ${startDate}`,
+          sql`${agentActivity.date} <= ${endDate}`
+        )
+      );
+    }
+    
+    return await query.orderBy(desc(agentActivity.date), desc(agentActivity.hour));
+  }
+
+  async getAgentActivitySummary(agentId: string): Promise<AgentActivity | undefined> {
+    const result = await db
+      .select()
+      .from(agentActivity)
+      .where(eq(agentActivity.agentId, agentId))
+      .orderBy(desc(agentActivity.date), desc(agentActivity.hour))
+      .limit(1);
+    return result[0];
+  }
+
+  async createOrUpdateActivity(activity: InsertAgentActivity): Promise<AgentActivity> {
+    const existing = await this.getActivityByDate(activity.agentId, activity.date);
+    
+    if (existing) {
+      const updatedData: any = {
+        postsGenerated: existing.postsGenerated + (activity.postsGenerated || 0),
+        repliesSent: existing.repliesSent + (activity.repliesSent || 0),
+        twitterApiCalls: existing.twitterApiCalls + (activity.twitterApiCalls || 0),
+        aiModelCalls: existing.aiModelCalls + (activity.aiModelCalls || 0),
+        tokensUsed: existing.tokensUsed + (activity.tokensUsed || 0),
+        errorsCount: existing.errorsCount + (activity.errorsCount || 0),
+        kbEntriesUsed: activity.kbEntriesUsed || existing.kbEntriesUsed,
+        kbCategoriesUsed: activity.kbCategoriesUsed || existing.kbCategoriesUsed,
+        updatedAt: new Date(),
+      };
+      
+      const result = await db
+        .update(agentActivity)
+        .set(updatedData)
+        .where(eq(agentActivity.id, existing.id))
+        .returning();
+      return result[0];
+    } else {
+      const result = await db.insert(agentActivity).values(activity as any).returning();
+      return result[0];
+    }
+  }
+
+  async getActivityByDate(agentId: string, date: string): Promise<AgentActivity | undefined> {
+    const result = await db
+      .select()
+      .from(agentActivity)
+      .where(and(eq(agentActivity.agentId, agentId), eq(agentActivity.date, date)));
+    return result[0];
   }
 
   // Custom APIs

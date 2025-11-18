@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertAgentSchema, insertKnowledgeBaseSchema, insertCustomApiSchema, insertApiKeySchema } from "@shared/schema";
+import { insertAgentSchema, insertKnowledgeBaseSchema, insertCustomApiSchema, insertApiKeySchema, insertAgentActivitySchema } from "@shared/schema";
 import { z } from "zod";
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -159,6 +159,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting knowledge entry:", error);
       res.status(500).json({ error: "Failed to delete knowledge entry" });
+    }
+  });
+
+  // Get active knowledge base entries for an agent
+  app.get("/api/agents/:agentId/knowledge/active", async (req, res) => {
+    try {
+      const entries = await storage.getActiveKnowledgeBase(req.params.agentId);
+      res.json(entries);
+    } catch (error) {
+      console.error("Error fetching active knowledge base:", error);
+      res.status(500).json({ error: "Failed to fetch active knowledge base" });
+    }
+  });
+
+  // Get knowledge base entries by category
+  app.get("/api/agents/:agentId/knowledge/category/:category", async (req, res) => {
+    try {
+      const entries = await storage.getKnowledgeBaseByCategory(req.params.agentId, req.params.category);
+      res.json(entries);
+    } catch (error) {
+      console.error("Error fetching knowledge by category:", error);
+      res.status(500).json({ error: "Failed to fetch knowledge by category" });
+    }
+  });
+
+  // ============= AGENT MONITORING/ACTIVITY ============= //
+
+  // Get agent activity (with optional date range)
+  app.get("/api/agents/:agentId/activity", async (req, res) => {
+    try {
+      const { startDate, endDate } = req.query;
+      const activity = await storage.getAgentActivity(
+        req.params.agentId,
+        startDate as string | undefined,
+        endDate as string | undefined
+      );
+      res.json(activity);
+    } catch (error) {
+      console.error("Error fetching agent activity:", error);
+      res.status(500).json({ error: "Failed to fetch agent activity" });
+    }
+  });
+
+  // Get agent activity summary
+  app.get("/api/agents/:agentId/activity/summary", async (req, res) => {
+    try {
+      const summary = await storage.getAgentActivitySummary(req.params.agentId);
+      res.json(summary || null);
+    } catch (error) {
+      console.error("Error fetching activity summary:", error);
+      res.status(500).json({ error: "Failed to fetch activity summary" });
+    }
+  });
+
+  // Create or update agent activity
+  app.post("/api/agents/:agentId/activity", async (req, res) => {
+    try {
+      const validatedData = insertAgentActivitySchema.parse({
+        ...req.body,
+        agentId: req.params.agentId,
+      });
+      const activity = await storage.createOrUpdateActivity(validatedData);
+      res.status(201).json(activity);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ error: "Validation error", details: error.errors });
+      }
+      console.error("Error creating/updating activity:", error);
+      res.status(500).json({ error: "Failed to create/update activity" });
     }
   });
 
