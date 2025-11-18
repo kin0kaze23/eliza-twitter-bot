@@ -36,6 +36,12 @@ type KBEntry = {
   tags: string[];
 };
 
+type CustomPrompt = {
+  id: string;
+  key: string;
+  value: string;
+};
+
 export default function AgentConfigure() {
   const { toast } = useToast();
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
@@ -65,6 +71,27 @@ export default function AgentConfigure() {
     topics: "Cryptocurrency, DeFi, NFTs, Blockchain Technology, Market Analysis, Trading",
     adjectives: "analytical, insightful, timely, professional, innovative",
   });
+  
+  // Custom Prompts (Additional specialized instructions)
+  const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>([
+    {
+      id: "1",
+      key: "evaluation",
+      value: "Before finalizing output, rewrite to ensure clarity, accuracy, and professionalism. Remove any uncertain or speculative language unless explicitly discussing probabilities.",
+    },
+    {
+      id: "2",
+      key: "market_mode",
+      value: "If BTC 24h change > 3%, emphasize the significance and provide context. If change > 5%, create a thread analyzing the movement with on-chain data and market sentiment.",
+    },
+    {
+      id: "3",
+      key: "tone_mod",
+      value: "Always speak with a hopeful yet cautious tone. Be optimistic about innovation while warning about risks. Use wisdom from past market cycles.",
+    },
+  ]);
+  const [isAddCustomPromptOpen, setIsAddCustomPromptOpen] = useState(false);
+  const [newCustomPrompt, setNewCustomPrompt] = useState({ key: "", value: "" });
   
   // Model Configuration
   const [modelConfig, setModelConfig] = useState({
@@ -162,10 +189,41 @@ export default function AgentConfigure() {
     toast({ title: "Entry deleted" });
   };
 
+  const handleAddCustomPrompt = () => {
+    if (!newCustomPrompt.key || !newCustomPrompt.value) return;
+    
+    const prompt: CustomPrompt = {
+      id: Date.now().toString(),
+      key: newCustomPrompt.key,
+      value: newCustomPrompt.value,
+    };
+    
+    setCustomPrompts([...customPrompts, prompt]);
+    setNewCustomPrompt({ key: "", value: "" });
+    setIsAddCustomPromptOpen(false);
+    
+    toast({
+      title: "Custom prompt added",
+      description: "Additional prompt instruction has been added to this agent.",
+    });
+  };
+
+  const handleDeleteCustomPrompt = (id: string) => {
+    setCustomPrompts(customPrompts.filter(p => p.id !== id));
+    toast({ title: "Custom prompt deleted" });
+  };
+
   const handleSave = () => {
+    // Convert custom prompts to JSON format
+    const customPromptsObj = customPrompts.reduce((acc, prompt) => {
+      acc[prompt.key] = prompt.value;
+      return acc;
+    }, {} as Record<string, string>);
+    
     console.log("Saving complete agent configuration:", {
       twitter: twitterConfig,
       character,
+      custom_prompts: customPromptsObj,
       model: modelConfig,
       behavior,
       knowledgeBase,
@@ -491,6 +549,116 @@ export default function AgentConfigure() {
               >
                 Add Example
               </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <CardTitle>Custom Prompt Instructions</CardTitle>
+                  <CardDescription>
+                    Add specialized prompt layers on top of ElizaOS base prompts ({customPrompts.length} custom instructions)
+                  </CardDescription>
+                </div>
+                <Dialog open={isAddCustomPromptOpen} onOpenChange={setIsAddCustomPromptOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" data-testid="button-add-custom-prompt">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add Custom Prompt
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                      <DialogTitle>Add Custom Prompt Instruction</DialogTitle>
+                      <DialogDescription>
+                        Add a specialized prompt instruction that layers on top of the base ElizaOS prompts
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="custom-prompt-key">Prompt Key</Label>
+                        <Input
+                          id="custom-prompt-key"
+                          value={newCustomPrompt.key}
+                          onChange={(e) => setNewCustomPrompt({ ...newCustomPrompt, key: e.target.value })}
+                          placeholder="e.g., evaluation, market_mode, tone_mod"
+                          data-testid="input-custom-prompt-key"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Identifier for this prompt instruction (use lowercase with underscores)
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="custom-prompt-value">Prompt Instruction</Label>
+                        <Textarea
+                          id="custom-prompt-value"
+                          value={newCustomPrompt.value}
+                          onChange={(e) => setNewCustomPrompt({ ...newCustomPrompt, value: e.target.value })}
+                          placeholder="e.g., Before finalizing output, rewrite to ensure clarity..."
+                          className="min-h-[150px] font-mono text-sm"
+                          data-testid="input-custom-prompt-value"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          The actual instruction that will be applied during text generation
+                        </p>
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setIsAddCustomPromptOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button onClick={handleAddCustomPrompt} data-testid="button-save-custom-prompt">
+                        Add Instruction
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {customPrompts.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <p>No custom prompt instructions added yet.</p>
+                  <p className="text-xs mt-1">Custom prompts layer on top of ElizaOS base prompts without conflicts.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {customPrompts.map((prompt) => (
+                    <div key={prompt.id} className="p-4 border rounded-lg space-y-2" data-testid={`custom-prompt-${prompt.id}`}>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="font-mono text-xs">
+                              {prompt.key}
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground mt-2 whitespace-pre-wrap font-mono">
+                            {prompt.value}
+                          </p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteCustomPrompt(prompt.id)}
+                          data-testid={`button-delete-custom-prompt-${prompt.id}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <Alert className="mt-4">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="text-xs">
+                  <strong>How it works:</strong> Custom prompts are added as additional layers on top of the
+                  base ElizaOS system and personality prompts. They're applied in the order shown here and
+                  won't conflict with base functionality. Perfect for adding conditional logic, output refinement,
+                  or specialized behavior modes.
+                </AlertDescription>
+              </Alert>
             </CardContent>
           </Card>
         </TabsContent>
