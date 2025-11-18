@@ -181,19 +181,25 @@ export class DbStorage implements IStorage {
 
   // Agent Activity (Monitoring)
   async getAgentActivity(agentId: string, startDate?: string, endDate?: string): Promise<AgentActivity[]> {
-    let query = db.select().from(agentActivity).where(eq(agentActivity.agentId, agentId));
-    
     if (startDate && endDate) {
-      query = query.where(
-        and(
-          eq(agentActivity.agentId, agentId),
-          sql`${agentActivity.date} >= ${startDate}`,
-          sql`${agentActivity.date} <= ${endDate}`
+      return await db
+        .select()
+        .from(agentActivity)
+        .where(
+          and(
+            eq(agentActivity.agentId, agentId),
+            sql`${agentActivity.date} >= ${startDate}`,
+            sql`${agentActivity.date} <= ${endDate}`
+          )
         )
-      );
+        .orderBy(desc(agentActivity.date), desc(agentActivity.hour));
     }
     
-    return await query.orderBy(desc(agentActivity.date), desc(agentActivity.hour));
+    return await db
+      .select()
+      .from(agentActivity)
+      .where(eq(agentActivity.agentId, agentId))
+      .orderBy(desc(agentActivity.date), desc(agentActivity.hour));
   }
 
   async getAgentActivitySummary(agentId: string): Promise<AgentActivity | undefined> {

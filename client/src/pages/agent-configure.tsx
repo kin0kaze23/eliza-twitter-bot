@@ -38,6 +38,10 @@ type KBEntry = {
   title: string;
   content: string;
   tags: string[];
+  category: string;
+  priority: number;
+  active: boolean;
+  refreshStrategy: string;
 };
 
 type CustomPrompt = {
@@ -160,16 +164,17 @@ export default function AgentConfigure() {
   });
 
   // Knowledge Base (Per-Agent)
-  const [knowledgeBase, setKnowledgeBase] = useState<KBEntry[]>([
-    {
-      id: "1",
-      title: "Bitcoin Basics",
-      content: "Bitcoin is a decentralized digital currency that operates on a peer-to-peer network without central authority. Key features: limited supply (21M), proof-of-work consensus, blockchain ledger.",
-      tags: ["bitcoin", "cryptocurrency", "blockchain"],
-    },
-  ]);
+  const [knowledgeBase, setKnowledgeBase] = useState<KBEntry[]>([]);
   const [isAddKBDialogOpen, setIsAddKBDialogOpen] = useState(false);
-  const [newKBEntry, setNewKBEntry] = useState({ title: "", content: "", tags: "" });
+  const [newKBEntry, setNewKBEntry] = useState({
+    title: "",
+    content: "",
+    tags: "",
+    category: "general",
+    priority: 5,
+    active: true,
+    refreshStrategy: "static",
+  });
 
   const toggleShowSecret = (key: string) => {
     setShowSecrets(prev => ({ ...prev, [key]: !prev[key] }));
@@ -183,16 +188,28 @@ export default function AgentConfigure() {
 
   // Knowledge base mutations
   const addKBMutation = useMutation({
-    mutationFn: async (entry: { title: string; content: string; tags: string[] }) => {
+    mutationFn: async (entry: { title: string; content: string; tags: string[]; category: string; priority: number; active: boolean; refreshStrategy: string }) => {
       return apiRequest("POST", `/api/agents/${id}/knowledge`, {
         title: entry.title,
         content: entry.content,
         tags: entry.tags,
+        category: entry.category,
+        priority: entry.priority,
+        active: entry.active,
+        refreshStrategy: entry.refreshStrategy,
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
-      setNewKBEntry({ title: "", content: "", tags: "" });
+      setNewKBEntry({
+        title: "",
+        content: "",
+        tags: "",
+        category: "general",
+        priority: 5,
+        active: true,
+        refreshStrategy: "static",
+      });
       setIsAddKBDialogOpen(false);
       toast({
         title: "Knowledge entry added",
@@ -233,6 +250,10 @@ export default function AgentConfigure() {
       title: newKBEntry.title,
       content: newKBEntry.content,
       tags,
+      category: newKBEntry.category,
+      priority: newKBEntry.priority,
+      active: newKBEntry.active,
+      refreshStrategy: newKBEntry.refreshStrategy,
     });
   };
 
@@ -436,6 +457,10 @@ export default function AgentConfigure() {
       title: kb.title,
       content: kb.content,
       tags: kb.tags || [],
+      category: kb.category || "general",
+      priority: kb.priority || 5,
+      active: kb.active ?? true,
+      refreshStrategy: kb.refreshStrategy || "static",
     }));
     setKnowledgeBase(entries);
   }, [kbData]);
@@ -1166,21 +1191,45 @@ export default function AgentConfigure() {
                       Add Entry
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-2xl">
+                  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>Add Knowledge Entry</DialogTitle>
-                      <DialogDescription>Add knowledge specific to this agent</DialogDescription>
+                      <DialogDescription>Add knowledge specific to this agent with smart management</DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="kb-title">Title</Label>
-                        <Input
-                          id="kb-title"
-                          value={newKBEntry.title}
-                          onChange={(e) => setNewKBEntry({ ...newKBEntry, title: e.target.value })}
-                          placeholder="Entry title..."
-                        />
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="kb-title">Title</Label>
+                          <Input
+                            id="kb-title"
+                            value={newKBEntry.title}
+                            onChange={(e) => setNewKBEntry({ ...newKBEntry, title: e.target.value })}
+                            placeholder="Entry title..."
+                            data-testid="input-kb-title"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="kb-category">Category</Label>
+                          <Select
+                            value={newKBEntry.category}
+                            onValueChange={(value) => setNewKBEntry({ ...newKBEntry, category: value })}
+                          >
+                            <SelectTrigger data-testid="select-kb-category">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="general">General</SelectItem>
+                              <SelectItem value="crypto">Crypto</SelectItem>
+                              <SelectItem value="theology">Theology</SelectItem>
+                              <SelectItem value="narratives">Narratives</SelectItem>
+                              <SelectItem value="solana">Solana</SelectItem>
+                              <SelectItem value="mental_models">Mental Models</SelectItem>
+                              <SelectItem value="memes">Memes</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
+                      
                       <div className="space-y-2">
                         <Label htmlFor="kb-content">Content</Label>
                         <Textarea
@@ -1188,9 +1237,11 @@ export default function AgentConfigure() {
                           value={newKBEntry.content}
                           onChange={(e) => setNewKBEntry({ ...newKBEntry, content: e.target.value })}
                           placeholder="Knowledge content..."
-                          className="min-h-[150px] font-mono text-sm"
+                          className="min-h-[120px] font-mono text-sm"
+                          data-testid="textarea-kb-content"
                         />
                       </div>
+                      
                       <div className="space-y-2">
                         <Label htmlFor="kb-tags">Tags (comma-separated)</Label>
                         <Input
@@ -1198,12 +1249,63 @@ export default function AgentConfigure() {
                           value={newKBEntry.tags}
                           onChange={(e) => setNewKBEntry({ ...newKBEntry, tags: e.target.value })}
                           placeholder="tag1, tag2, tag3"
+                          data-testid="input-kb-tags"
+                        />
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <Label>Priority: {newKBEntry.priority}</Label>
+                            <span className="text-xs text-muted-foreground">1 (low) - 10 (high)</span>
+                          </div>
+                          <Slider
+                            value={[newKBEntry.priority]}
+                            onValueChange={([value]) => setNewKBEntry({ ...newKBEntry, priority: value })}
+                            min={1}
+                            max={10}
+                            step={1}
+                            data-testid="slider-kb-priority"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="kb-refresh">Refresh Strategy</Label>
+                          <Select
+                            value={newKBEntry.refreshStrategy}
+                            onValueChange={(value) => setNewKBEntry({ ...newKBEntry, refreshStrategy: value })}
+                          >
+                            <SelectTrigger data-testid="select-kb-refresh">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="static">Static (Never refresh)</SelectItem>
+                              <SelectItem value="daily">Daily</SelectItem>
+                              <SelectItem value="weekly">Weekly</SelectItem>
+                              <SelectItem value="on_demand">On Demand</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center justify-between py-2 px-3 bg-muted/50 rounded-lg">
+                        <Label htmlFor="kb-active" className="cursor-pointer">Active (Include in generations)</Label>
+                        <Switch
+                          id="kb-active"
+                          checked={newKBEntry.active}
+                          onCheckedChange={(checked) => setNewKBEntry({ ...newKBEntry, active: checked })}
+                          data-testid="switch-kb-active"
                         />
                       </div>
                     </div>
                     <DialogFooter>
                       <Button variant="outline" onClick={() => setIsAddKBDialogOpen(false)}>Cancel</Button>
-                      <Button onClick={handleAddKBEntry}>Add Entry</Button>
+                      <Button
+                        onClick={handleAddKBEntry}
+                        disabled={addKBMutation.isPending}
+                        data-testid="button-add-kb-entry"
+                      >
+                        {addKBMutation.isPending ? "Adding..." : "Add Entry"}
+                      </Button>
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>

@@ -6,6 +6,7 @@ import {
   Bot,
   FlaskConical,
   Blocks,
+  BarChart3,
 } from "lucide-react";
 import {
   Sidebar,
@@ -33,6 +34,13 @@ const menuItems = [
     url: "/agents",
     icon: Bot,
     testId: "link-agents",
+    group: "overview",
+  },
+  {
+    title: "Monitoring",
+    url: "/monitoring",
+    icon: BarChart3,
+    testId: "link-monitoring",
     group: "overview",
   },
   {

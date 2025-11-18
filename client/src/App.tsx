@@ -9,6 +9,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import Dashboard from "@/pages/dashboard";
 import Agents from "@/pages/agents";
 import AgentConfigure from "@/pages/agent-configure";
+import Monitoring from "@/pages/monitoring";
 import ApiKeys from "@/pages/api-keys";
 import Integrations from "@/pages/integrations";
 import CustomAPIs from "@/pages/custom-apis";
@@ -22,6 +23,7 @@ function Router() {
       <Route path="/" component={Dashboard} />
       <Route path="/agents" component={Agents} />
       <Route path="/agent/:id/configure" component={AgentConfigure} />
+      <Route path="/monitoring" component={Monitoring} />
       <Route path="/api-keys" component={ApiKeys} />
       <Route path="/integrations" component={Integrations} />
       <Route path="/custom-apis" component={CustomAPIs} />
