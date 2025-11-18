@@ -37,6 +37,18 @@ Preferred communication style: Simple, everyday language.
 - ✅ Proper null handling throughout for optional fields
 - ✅ E2E testing confirmed working via Playwright
 
+**v1.2 - Dynamic AI Model Discovery** (November 18, 2024):
+- ✅ Dynamic model fetching from OpenAI, Google Gemini, and Anthropic APIs
+- ✅ Test endpoint at POST /api/agents/:id/test/model for API key validation
+- ✅ OpenAI: Fetches all GPT/o1/o3 models via /v1/models, sorted by newest
+- ✅ Google Gemini: Fetches all Gemini models via Google AI generativelanguage API
+- ✅ Anthropic: Tests key validity, provides latest Claude model list
+- ✅ Frontend dynamic dropdown populated with fetched models
+- ✅ Fallback to manual model entry for unsupported providers
+- ✅ Normalized model response structure across all providers
+- ✅ Added Google (Gemini) provider to dropdown
+- ✅ Helpful API key source links for each provider
+
 ## System Architecture
 
 ### Frontend Architecture
@@ -81,7 +93,8 @@ Preferred communication style: Simple, everyday language.
 
 **Key Routes**:
 - `/api/agents` - CRUD operations for AI agents
-- `/api/agents/:id/test/twitter` - Test Twitter API credentials (NEW)
+- `/api/agents/:id/test/twitter` - Test Twitter API credentials
+- `/api/agents/:id/test/model` - Test AI model API key and fetch available models (NEW)
 - `/api/agents/:id/conversation` - Test agent conversation with LLM
 - `/api/knowledge-base` - Manage agent knowledge entries
 - `/api/custom-apis` - Configure custom data sources

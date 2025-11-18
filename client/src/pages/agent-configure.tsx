@@ -1089,11 +1089,17 @@ export default function AgentConfigure() {
                       <SelectValue placeholder="Select a model" />
                     </SelectTrigger>
                     <SelectContent>
-                      {availableModels.map((m) => (
-                        <SelectItem key={m.id} value={m.id}>
-                          {m.name || m.id}
-                        </SelectItem>
-                      ))}
+                      {availableModels
+                        .filter((m) => m.id || m.name) // Only show models with valid identifiers
+                        .map((m, index) => {
+                          const modelId = m.id || m.name || `model-${index}`;
+                          const modelName = m.name || m.id || `Model ${index + 1}`;
+                          return (
+                            <SelectItem key={modelId} value={modelId}>
+                              {modelName}
+                            </SelectItem>
+                          );
+                        })}
                     </SelectContent>
                   </Select>
                 ) : (

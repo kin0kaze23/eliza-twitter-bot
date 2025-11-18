@@ -139,17 +139,35 @@ API authentication for Twitter and AI models:
 **Note**: You must save your credentials before testing them. The test validates the saved credentials in the database, not just what's in the form.
 
 **AI Model Configuration**:
-- **Provider**: Select from 11 supported providers
-  - OpenAI (GPT-4, GPT-3.5)
-  - Anthropic (Claude 3.5, Claude 3)
+- **Provider**: Select from supported providers
+  - OpenAI (GPT-4, GPT-3.5, o1, o3) - supports dynamic model discovery
+  - Google (Gemini Pro, Gemini Flash, etc.) - supports dynamic model discovery
+  - Anthropic (Claude 3.5, Claude 3) - supports dynamic model discovery
   - Groq, Together AI, Mistral, Cohere
   - Replicate, Hugging Face
   - Ollama, vLLM, LocalAI (for self-hosted)
-  
-- **Model Name**: Specific model (e.g., "gpt-4", "claude-3-5-sonnet-20241022")
-- **API Key Reference**: Name of the environment variable storing your key
 
-**Important**: The dashboard stores API key references (like `OPENAI_API_KEY`), not the actual keys. Add your real keys via the **API Keys** page first.
+**Dynamic Model Discovery** (NEW):
+For OpenAI, Google, and Anthropic providers, you can automatically fetch the latest available models:
+1. Select your provider (OpenAI, Google, or Anthropic)
+2. Enter your API key in the API Key field
+3. Click **Test API Key & Load Models** button
+4. The system will:
+   - Verify your API key is valid
+   - Fetch all available models from the provider
+   - Display them in a dropdown sorted by newest first
+   - Show you the latest model available
+5. Select your desired model from the dropdown
+
+**Manual Entry**:
+If automatic discovery isn't available for your provider or if you prefer manual entry:
+- Enter the model name directly (e.g., "gpt-4", "gemini-pro", "claude-3-5-sonnet-20241022")
+
+**Benefits**:
+- Always see the latest models as soon as they're released
+- Verify API keys work before using them
+- No need to remember exact model names
+- Automatic filtering (e.g., only GPT models for OpenAI)
 
 #### 3. Behavior Tab
 Control posting and engagement patterns:

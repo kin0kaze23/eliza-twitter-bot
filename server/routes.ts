@@ -719,15 +719,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         const data = await response.json();
         
-        // Filter for Gemini models
+        // Filter for Gemini models and normalize to match expected structure
         const geminiModels = data.models
-          ?.filter((m: any) => m.name.includes('gemini'))
-          .map((m: any) => ({
-            id: m.name.split('/').pop(), // Extract model ID from full path
-            name: m.displayName || m.name,
-            description: m.description,
-            supportedGenerationMethods: m.supportedGenerationMethods
-          })) || [];
+          ?.filter((m: any) => m.name && m.name.includes('gemini'))
+          .map((m: any) => {
+            const modelId = m.name.split('/').pop() || m.name; // Extract model ID from full path like "models/gemini-pro"
+            return {
+              id: modelId,
+              name: m.displayName || modelId, // Use display name if available, otherwise use ID
+              description: m.description,
+              supportedGenerationMethods: m.supportedGenerationMethods
+            };
+          }) || [];
 
         models = geminiModels;
 
