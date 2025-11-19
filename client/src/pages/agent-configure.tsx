@@ -75,6 +75,8 @@ export default function AgentConfigure() {
     accessTokenSecret: "",
     bearerToken: "",
     appId: "",
+    oauthClientId: "",
+    oauthClientSecret: "",
   });
   
   const [twitterTestResult, setTwitterTestResult] = useState<{ success: boolean; message?: string; error?: string; hint?: string; user?: any } | null>(null);
@@ -366,13 +368,16 @@ export default function AgentConfigure() {
       }, {} as Record<string, string>);
       
       return apiRequest("PATCH", `/api/agents/${id}`, {
-        // Twitter API
+        // Twitter API (OAuth 1.0a)
         twitterApiKey: twitterConfig.apiKey,
         twitterApiSecret: twitterConfig.apiKeySecret,
         twitterAccessToken: twitterConfig.accessToken,
         twitterAccessSecret: twitterConfig.accessTokenSecret,
         twitterBearerToken: twitterConfig.bearerToken,
         twitterAppId: twitterConfig.appId,
+        // Twitter API (OAuth 2.0)
+        twitterOAuthClientId: twitterConfig.oauthClientId,
+        twitterOAuthClientSecret: twitterConfig.oauthClientSecret,
         // Character
         name: character.name,
         username: character.username,
@@ -450,6 +455,8 @@ export default function AgentConfigure() {
       accessTokenSecret: agent.twitterAccessSecret || "",
       bearerToken: agent.twitterBearerToken || "",
       appId: agent.twitterAppId || "",
+      oauthClientId: agent.twitterOAuthClientId || "",
+      oauthClientSecret: agent.twitterOAuthClientSecret || "",
     });
     
     // Load character
@@ -741,6 +748,52 @@ export default function AgentConfigure() {
                   />
                   <Button variant="outline" size="icon" onClick={() => toggleShowSecret("bearerToken")}>
                     {showSecrets.bearerToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </div>
+
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="text-sm">
+                  <strong>OAuth 2.0 Credentials</strong> (optional, for user authorization flows only)
+                </AlertDescription>
+              </Alert>
+
+              <div className="space-y-2">
+                <Label htmlFor="twitter-oauth-client-id">OAuth 2.0 Client ID</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="twitter-oauth-client-id"
+                    type={showSecrets.oauthClientId ? "text" : "password"}
+                    value={showSecrets.oauthClientId ? twitterConfig.oauthClientId : maskSecret(twitterConfig.oauthClientId)}
+                    onChange={(e) => setTwitterConfig({ ...twitterConfig, oauthClientId: e.target.value })}
+                    placeholder="Enter OAuth 2.0 Client ID (optional)..."
+                    className="font-mono text-sm"
+                    data-testid="input-twitter-oauth-client-id"
+                  />
+                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("oauthClientId")}>
+                    {showSecrets.oauthClientId ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Only needed if you're implementing user authorization flows. Not required for basic bot functionality.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="twitter-oauth-client-secret">OAuth 2.0 Client Secret</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="twitter-oauth-client-secret"
+                    type={showSecrets.oauthClientSecret ? "text" : "password"}
+                    value={showSecrets.oauthClientSecret ? twitterConfig.oauthClientSecret : maskSecret(twitterConfig.oauthClientSecret)}
+                    onChange={(e) => setTwitterConfig({ ...twitterConfig, oauthClientSecret: e.target.value })}
+                    placeholder="Enter OAuth 2.0 Client Secret (optional)..."
+                    className="font-mono text-sm"
+                    data-testid="input-twitter-oauth-client-secret"
+                  />
+                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("oauthClientSecret")}>
+                    {showSecrets.oauthClientSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
               </div>
