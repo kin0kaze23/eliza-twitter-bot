@@ -52,6 +52,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Update agent
   app.patch("/api/agents/:id", async (req, res) => {
     try {
+      console.log("[PATCH /api/agents/:id] Request body keys:", Object.keys(req.body));
       const partialSchema = insertAgentSchema.partial();
       const validatedData = partialSchema.parse(req.body);
       const agent = await storage.updateAgent(req.params.id, validatedData);
@@ -61,6 +62,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(agent);
     } catch (error) {
       if (error instanceof z.ZodError) {
+        console.error("[PATCH /api/agents/:id] Validation error:", JSON.stringify(error.errors, null, 2));
         return res.status(400).json({ error: "Validation error", details: error.errors });
       }
       console.error("Error updating agent:", error);

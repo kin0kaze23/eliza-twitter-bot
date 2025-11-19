@@ -127,6 +127,8 @@ export const insertAgentSchema = createInsertSchema(agents).omit({
   personalityPrompt: z.string().optional(),
   modelProvider: z.string().optional(),
   modelName: z.string().optional(),
+  twitterOAuthClientId: z.string().optional(),
+  twitterOAuthClientSecret: z.string().optional(),
 });
 
 export type InsertAgent = z.infer<typeof insertAgentSchema>;
