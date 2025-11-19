@@ -28,12 +28,17 @@ export const agents = pgTable("agents", {
   status: text("status").notNull().default("draft"), // draft, testing, deployed, paused
   
   // Twitter API credentials (encrypted in production)
+  // OAuth 1.0a (for automated bots/agents)
   twitterApiKey: text("twitter_api_key"),
   twitterApiSecret: text("twitter_api_secret"),
   twitterAccessToken: text("twitter_access_token"),
   twitterAccessSecret: text("twitter_access_secret"),
   twitterBearerToken: text("twitter_bearer_token"),
   twitterAppId: text("twitter_app_id"),
+  
+  // OAuth 2.0 (for user authorization flows)
+  twitterOAuthClientId: text("twitter_oauth_client_id"),
+  twitterOAuthClientSecret: text("twitter_oauth_client_secret"),
   
   // Character & Prompts
   systemPrompt: text("system_prompt"),
