@@ -49,6 +49,18 @@ Preferred communication style: Simple, everyday language.
 - ✅ Added Google (Gemini) provider to dropdown
 - ✅ Helpful API key source links for each provider
 
+**v1.3 - OAuth 2.0 Credential Support** (November 19, 2024):
+- ✅ Added OAuth 2.0 Client ID and Client Secret fields to database schema (nullable TEXT columns)
+- ✅ Extended validation schema with explicit optional OAuth 2.0 fields
+- ✅ Frontend UI displays OAuth 2.0 credentials section in Credentials tab
+- ✅ Password masking with visibility toggle for OAuth 2.0 secrets
+- ✅ Clear labeling: "OAuth 2.0 Credentials (optional, for user authorization flows only)"
+- ✅ Proper type serialization: LLM parameters as numbers, OAuth 2.0 fields as strings
+- ✅ Fixed numeric field serialization bug (temperature, topP, frequencyPenalty, presencePenalty)
+- ✅ Comprehensive documentation in TWITTER_AUTH_GUIDE.md explaining OAuth 1.0a vs 2.0 use cases
+- ✅ E2E testing confirmed: persistence, masking, visibility toggle, and value retrieval all working
+- ✅ Production-ready with proper validation and error handling
+
 ## System Architecture
 
 ### Frontend Architecture
@@ -111,7 +123,7 @@ Preferred communication style: Simple, everyday language.
 
 **Agents Table**: Comprehensive configuration storage including:
 - Basic metadata (name [required], username [required], bio [optional], status)
-- Twitter API credentials (6 fields: API key/secret, access token/secret, bearer token, app ID - all optional for draft mode)
+- Twitter API credentials (8 fields: OAuth 1.0a: API key/secret, access token/secret, bearer token, app ID; OAuth 2.0: client ID/secret - all optional for draft mode)
 - Character prompts (system [optional], personality [optional], style, topics, adjectives)
 - Message examples and custom prompts (JSONB)
 - AI model configuration (provider [optional], modelName [optional], 11 supported providers: OpenAI, Anthropic, Groq, Together, Mistral, Cohere, Replicate, HuggingFace, Ollama, vLLM, LocalAI)
