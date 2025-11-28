@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap, Pencil } from "lucide-react";
+import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap, Pencil, Star, Info, Sparkles, BookOpen, MessageSquare, Thermometer, Hash } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Link, useParams } from "wouter";
@@ -1276,6 +1276,65 @@ export default function AgentConfigure() {
         </TabsContent>
 
         <TabsContent value="character" className="space-y-6">
+          {/* Content Generation Quick Reference */}
+          <Card className="border-primary/30 bg-primary/5">
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-primary" />
+                <CardTitle className="text-lg">Content Generation Quick Reference</CardTitle>
+              </div>
+              <CardDescription>
+                These settings control how your AI agent generates content. Settings marked with importance levels have the most impact.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="destructive" className="text-xs">CRITICAL</Badge>
+                    <span className="font-medium">Message Examples</span>
+                  </div>
+                  <p className="text-muted-foreground text-xs pl-4">Defines the EXACT format and structure the AI will follow. The model mirrors these examples precisely.</p>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="destructive" className="text-xs">CRITICAL</Badge>
+                    <span className="font-medium">System Prompt</span>
+                  </div>
+                  <p className="text-muted-foreground text-xs pl-4">Core rules and required post structure. Defines what sections to include (Event, Verse, Context, Reflection).</p>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Badge className="text-xs bg-amber-500 hover:bg-amber-600">IMPORTANT</Badge>
+                    <span className="font-medium">Temperature</span>
+                  </div>
+                  <p className="text-muted-foreground text-xs pl-4">Controls creativity vs consistency. Lower (0.3-0.5) = strict format adherence. Higher (0.7+) = more creative variation.</p>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Badge className="text-xs bg-amber-500 hover:bg-amber-600">IMPORTANT</Badge>
+                    <span className="font-medium">Max Tokens</span>
+                  </div>
+                  <p className="text-muted-foreground text-xs pl-4">Maximum output length. Set to 500+ for multi-paragraph posts. Too low will truncate content.</p>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-xs">HELPFUL</Badge>
+                    <span className="font-medium">Knowledge Base</span>
+                  </div>
+                  <p className="text-muted-foreground text-xs pl-4">Provides current events/news content for the AI to reference in posts.</p>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="text-xs">HELPFUL</Badge>
+                    <span className="font-medium">Personality Prompt</span>
+                  </div>
+                  <p className="text-muted-foreground text-xs pl-4">Shapes the voice and character. Influences tone but not structure.</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Character Identity</CardTitle>
@@ -1317,29 +1376,44 @@ export default function AgentConfigure() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="border-red-200 dark:border-red-900/50">
             <CardHeader>
-              <CardTitle>System Prompt</CardTitle>
-              <CardDescription>Core instructions defining the agent's purpose</CardDescription>
+              <div className="flex items-center gap-2">
+                <CardTitle>System Prompt</CardTitle>
+                <Badge variant="destructive" className="text-xs">CRITICAL</Badge>
+              </div>
+              <CardDescription>
+                Core instructions defining the agent's purpose and required post structure. This is where you define what sections each post must include.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <Alert className="bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900/50">
+                <Star className="h-4 w-4 text-red-600" />
+                <AlertDescription className="text-sm">
+                  <strong>Why it matters:</strong> The System Prompt defines the rules and structure your agent must follow. Include specific formatting requirements like "Every post must follow this structure: Event Summary, Bible Verse, Context, Reflection."
+                </AlertDescription>
+              </Alert>
               <div className="space-y-2">
                 <Label htmlFor="system-prompt">System Prompt</Label>
                 <Textarea
                   id="system-prompt"
                   value={character.systemPrompt}
                   onChange={(e) => setCharacter({ ...character, systemPrompt: e.target.value })}
-                  className="min-h-[150px] font-mono text-sm"
+                  className="min-h-[200px] font-mono text-sm"
                   data-testid="input-system-prompt"
                 />
+                <p className="text-xs text-muted-foreground">{character.systemPrompt.length} characters</p>
               </div>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
-              <CardTitle>Personality & Style</CardTitle>
-              <CardDescription>Define tone, style, and personality</CardDescription>
+              <div className="flex items-center gap-2">
+                <CardTitle>Personality & Style</CardTitle>
+                <Badge variant="secondary" className="text-xs">HELPFUL</Badge>
+              </div>
+              <CardDescription>Define tone, style, and personality. These shape the voice but not the format.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -1351,6 +1425,7 @@ export default function AgentConfigure() {
                   className="min-h-[100px] font-mono text-sm"
                   data-testid="input-personality-prompt"
                 />
+                <p className="text-xs text-muted-foreground">Describes the character's backstory, voice, and perspective.</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="post-style">Post Style</Label>
@@ -1360,6 +1435,7 @@ export default function AgentConfigure() {
                   onChange={(e) => setCharacter({ ...character, postStyle: e.target.value })}
                   className="min-h-[60px]"
                 />
+                <p className="text-xs text-muted-foreground">Writing style guidelines and tone descriptors.</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="topics">Topics (comma-separated)</Label>
@@ -1380,15 +1456,40 @@ export default function AgentConfigure() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="border-red-200 dark:border-red-900/50">
             <CardHeader>
-              <CardTitle>Message Examples</CardTitle>
-              <CardDescription>Sample posts demonstrating the agent's style</CardDescription>
+              <div className="flex items-center gap-2">
+                <CardTitle>Message Examples</CardTitle>
+                <Badge variant="destructive" className="text-xs">CRITICAL</Badge>
+              </div>
+              <CardDescription>
+                The AI will follow these examples EXACTLY. This is the most important setting for controlling output format.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <Alert className="bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900/50">
+                <MessageSquare className="h-4 w-4 text-red-600" />
+                <AlertDescription className="text-sm">
+                  <strong>Why it matters:</strong> The AI mirrors these examples precisely. Include ALL sections you want in your posts: emoji, event summary, Bible verse with reference, context explanation, and reflection. The model will copy this exact structure.
+                </AlertDescription>
+              </Alert>
               {character.messageExamples.map((example, idx) => (
                 <div key={idx} className="space-y-2">
-                  <Label>Example {idx + 1}</Label>
+                  <div className="flex items-center justify-between">
+                    <Label>Example {idx + 1}</Label>
+                    {idx > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          const newExamples = character.messageExamples.filter((_, i) => i !== idx);
+                          setCharacter({ ...character, messageExamples: newExamples });
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4 text-muted-foreground" />
+                      </Button>
+                    )}
+                  </div>
                   <Textarea
                     value={example}
                     onChange={(e) => {
@@ -1396,16 +1497,21 @@ export default function AgentConfigure() {
                       newExamples[idx] = e.target.value;
                       setCharacter({ ...character, messageExamples: newExamples });
                     }}
-                    className="min-h-[80px] font-mono text-sm"
+                    className="min-h-[120px] font-mono text-sm"
                   />
+                  <p className="text-xs text-muted-foreground">{example.length} characters</p>
                 </div>
               ))}
               <Button
                 variant="outline"
                 onClick={() => setCharacter({ ...character, messageExamples: [...character.messageExamples, ""] })}
               >
+                <Plus className="mr-2 h-4 w-4" />
                 Add Example
               </Button>
+              <p className="text-xs text-muted-foreground">
+                Tip: Include 3-5 examples that demonstrate different types of content (crypto news, tech news, cultural events, etc.) while maintaining consistent structure.
+              </p>
             </CardContent>
           </Card>
 
