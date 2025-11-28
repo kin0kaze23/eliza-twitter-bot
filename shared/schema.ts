@@ -222,6 +222,7 @@ export const customApis = pgTable("custom_apis", {
   jsonPath: text("json_path"), // JSONPath to extract data from response (e.g., "$.data.articles[*]")
   titlePath: text("title_path"), // JSONPath for KB entry title
   contentPath: text("content_path"), // JSONPath for KB entry content
+  filterPrompt: text("filter_prompt"), // Custom AI filter prompt for relevance evaluation
   responseFormat: text("response_format").default("json"), // json, xml, text
   refreshInterval: integer("refresh_interval").default(60), // minutes
   enabled: boolean("enabled").default(true),

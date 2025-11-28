@@ -25,6 +25,7 @@ import {
   Eye,
   EyeOff,
   RefreshCw,
+  Sparkles,
 } from "lucide-react";
 
 export default function APIManagement() {
@@ -52,6 +53,7 @@ export default function APIManagement() {
     jsonPath: "",
     titlePath: "",
     contentPath: "",
+    filterPrompt: "",
     responseFormat: "json",
     refreshInterval: 60,
   });
@@ -287,6 +289,7 @@ export default function APIManagement() {
       jsonPath: "",
       titlePath: "",
       contentPath: "",
+      filterPrompt: "",
       responseFormat: "json",
       refreshInterval: 60,
     });
@@ -318,6 +321,7 @@ export default function APIManagement() {
       jsonPath: api.jsonPath || "",
       titlePath: api.titlePath || "",
       contentPath: api.contentPath || "",
+      filterPrompt: api.filterPrompt || "",
       responseFormat: api.responseFormat || "json",
       refreshInterval: api.refreshInterval || 60,
     });
@@ -517,6 +521,24 @@ export default function APIManagement() {
                       placeholder="$.description"
                     />
                   </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="filterPrompt" className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4" />
+                    AI Filter Prompt (Optional)
+                  </Label>
+                  <Textarea
+                    id="filterPrompt"
+                    value={formData.filterPrompt}
+                    onChange={(e) => setFormData({ ...formData, filterPrompt: e.target.value })}
+                    placeholder="Example: Select only content about biblical lessons and moral values that users care deeply about"
+                    className="min-h-[100px]"
+                    data-testid="input-filter-prompt"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Custom instructions for AI to filter ingested content. Leave empty to use default crypto/tech/Twitter filter.
+                  </p>
                 </div>
 
                 <div className="space-y-2">

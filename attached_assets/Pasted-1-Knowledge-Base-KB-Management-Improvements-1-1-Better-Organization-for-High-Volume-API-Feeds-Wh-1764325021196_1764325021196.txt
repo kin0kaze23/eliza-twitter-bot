@@ -1,0 +1,158 @@
+1. Knowledge Base (KB) Management Improvements
+1.1 Better Organization for High-Volume API Feeds
+
+When multiple APIs are added (e.g., world news, crypto news, tech news), the KB quickly becomes cluttered.
+Request:
+
+Ability to group KB entries by API source
+
+Filters like: news, crypto, technology, custom tags
+
+Folder or category view instead of a flat list
+
+1.2 Auto-Inclusion of Relevant News
+
+For news APIs, request an automated triage logic:
+
+Only include items relevant to crypto, tech, or Twitter-friendly topics
+
+Auto-classify and move relevant items to Active Knowledge
+
+Leave irrelevant ones in a “Pending Review” list
+
+1.3 Auto-Refresh or Manual Refresh Controls
+
+Request controls for updating API-based KB entries:
+
+Auto-refresh interval (every X minutes/hours)
+
+Manual refresh button
+
+Option to refresh only one API source instead of refreshing everything
+
+1.4 “Active Knowledge Review” Workflow
+
+Proposal:
+
+Bot auto-selects relevant items
+
+User reviews the queue
+
+User can approve, reject, or delete entries
+This creates a “living KB” without overwhelming manual effort.
+
+2. Playground Enhancements
+2.1 Tweet Generation Without Manual Prompting
+
+Because many agents auto-generate posts, the Playground should support:
+
+Generating a tweet solely based on KB + system instructions
+
+No manual prompt required
+
+Useful for verifying if auto-posting works correctly
+
+2.2 Log: Show Which KB Items Were Used
+
+When testing tweet generation:
+
+Show the exact KB entries referenced in generation
+
+This helps debugging and ensures proper grounding in factual inputs
+
+2.3 Conversation Test Mode (Tweet → Comment → Reply)
+
+Please ensure the conversational test simulates:
+
+A tweet being posted
+
+A user replying
+
+Agent generating a threaded response
+This is essential for verifying reply behavior.
+
+3. API Key & Config Validation
+3.1 API Key Validation Not Updating
+
+Currently, after adding API keys in agent configuration, validation sometimes doesn’t refresh or takes too long.
+Please ensure:
+
+Re-validation works immediately
+
+Debug results reflect the latest config
+
+Error messages are accurate (not generic)
+
+3.2 Show Debug Info Mapped to Current Agent State
+
+Request a “diagnostics panel” showing:
+
+Active tools
+
+API keys status
+
+Rate limits
+
+Last successful API call
+
+Errors and timestamps
+
+4. Agent Configuration Improvements
+4.1 Force Generate Tweet
+
+Add button:
+“Generate Tweet Now”
+Helpful for:
+
+Reviewing style before enabling automation
+
+Debugging live posting
+
+Approving content before going public
+
+4.2 Show “Last Tweeted At”
+
+A small timestamp field showing:
+
+When the agent last posted
+
+What the content was
+This helps track agent behavior at a glance.
+
+5. Posting Schedule UI Improvements
+5.1 Clearer Post Frequency Input
+
+The current UI (“2 hours”) is slightly ambiguous; suggestion:
+
+X posts every Y hours
+
+or
+
+Post every Y hours, up to X posts/day
+
+This makes scheduling clearer.
+
+5.2 Add More Timezones (e.g., UTC+8)
+
+Common timezones like UTC+8 (Singapore) are missing.
+Request to include full timezone list.
+
+6. Reply Behavior Module Evaluation
+6.1 Ensure Reply Rate Works Properly
+
+Sometimes reply frequency or triggers seem inconsistent.
+Request:
+
+A clearer explanation of how reply rate interacts with mentions
+
+A debug log showing why a reply was or wasn’t generated
+
+6.2 Keyword-Based Reply Behavior
+
+Request an option to:
+
+See which tweets matched keywords
+
+Test keyword-triggered replies in Playground
+
+Add synonyms automatically or via suggestions
