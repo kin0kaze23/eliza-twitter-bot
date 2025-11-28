@@ -153,23 +153,58 @@ export const knowledgeBase = pgTable("knowledge_base", {
   // Enhanced management
   category: text("category").notNull().default("general"), // crypto, theology, narratives, solana, mental_models, memes, general
   priority: integer("priority").default(5).notNull(), // 1-10, higher = more important
-  active: boolean("active").default(true).notNull(), // toggle on/off
+  status: text("status").default("approved").notNull(), // pending, approved, archived
+  active: boolean("active").default(true).notNull(), // toggle on/off (only applies to approved entries)
   refreshStrategy: text("refresh_strategy").default("static").notNull(), // static, daily, weekly, on_demand
   lastRefreshedAt: timestamp("last_refreshed_at"),
+  expiresAt: timestamp("expires_at"), // Optional expiration for time-sensitive content
   
   // Metadata
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  approvedAt: timestamp("approved_at"), // When entry was approved (if applicable)
+  approvedBy: text("approved_by"), // User/system that approved (future: user ID)
 });
 
 export const insertKnowledgeBaseSchema = createInsertSchema(knowledgeBase).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+  approvedAt: true,
 });
 
 export type InsertKnowledgeBase = z.infer<typeof insertKnowledgeBaseSchema>;
 export type KnowledgeBase = typeof knowledgeBase.$inferSelect;
+
+// Knowledge Ingestion Log - Track raw API fetches and batch imports
+export const knowledgeIngestions = pgTable("knowledge_ingestions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  sourceId: text("source_id").notNull(), // ID of custom_api or integration
+  sourceName: text("source_name").notNull(), // Name for display
+  sourceType: text("source_type").notNull(), // custom_api, crypto_price, news, etc.
+  
+  // Ingestion details
+  status: text("status").notNull().default("success"), // success, partial, failed
+  rawPayload: jsonb("raw_payload"), // Raw API response for reconciliation
+  itemsFound: integer("items_found").default(0).notNull(), // Total items in response
+  itemsCreated: integer("items_created").default(0).notNull(), // KB entries created
+  itemsUpdated: integer("items_updated").default(0).notNull(), // KB entries updated
+  itemsFailed: integer("items_failed").default(0).notNull(), // Failed to process
+  errorMessage: text("error_message"), // Error details if failed
+  
+  // Metadata
+  fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+  durationMs: integer("duration_ms"), // How long the fetch took
+});
+
+export const insertKnowledgeIngestionSchema = createInsertSchema(knowledgeIngestions).omit({
+  id: true,
+  fetchedAt: true,
+});
+
+export type InsertKnowledgeIngestion = z.infer<typeof insertKnowledgeIngestionSchema>;
+export type KnowledgeIngestion = typeof knowledgeIngestions.$inferSelect;
 
 // Custom API configurations (global, shared across agents)
 export const customApis = pgTable("custom_apis", {
