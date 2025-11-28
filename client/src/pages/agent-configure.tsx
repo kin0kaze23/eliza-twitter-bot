@@ -1470,15 +1470,15 @@ export default function AgentConfigure() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="post-model-provider">Provider</Label>
-                <Select value={postModelConfig.provider} onValueChange={(v) => {
-                  setPostModelConfig({ ...postModelConfig, provider: v });
+                <Label htmlFor="post-model-provider">Provider (Optional)</Label>
+                <Select value={postModelConfig.provider || "default"} onValueChange={(v) => {
+                  setPostModelConfig({ ...postModelConfig, provider: v === "default" ? "" : v });
                 }}>
                   <SelectTrigger id="post-model-provider" data-testid="select-post-model-provider">
-                    <SelectValue placeholder="Select provider (optional)" />
+                    <SelectValue placeholder="Select provider or leave empty" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Use Default</SelectItem>
+                    <SelectItem value="default">Use Default Model</SelectItem>
                     <SelectItem value="openai">OpenAI (GPT)</SelectItem>
                     <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
                     <SelectItem value="groq">Groq</SelectItem>
@@ -1539,15 +1539,15 @@ export default function AgentConfigure() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="conversation-model-provider">Provider</Label>
-                <Select value={conversationModelConfig.provider} onValueChange={(v) => {
-                  setConversationModelConfig({ ...conversationModelConfig, provider: v });
+                <Label htmlFor="conversation-model-provider">Provider (Optional)</Label>
+                <Select value={conversationModelConfig.provider || "default"} onValueChange={(v) => {
+                  setConversationModelConfig({ ...conversationModelConfig, provider: v === "default" ? "" : v });
                 }}>
                   <SelectTrigger id="conversation-model-provider" data-testid="select-conversation-model-provider">
-                    <SelectValue placeholder="Select provider (optional)" />
+                    <SelectValue placeholder="Select provider or leave empty" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Use Default</SelectItem>
+                    <SelectItem value="default">Use Default Model</SelectItem>
                     <SelectItem value="openai">OpenAI (GPT)</SelectItem>
                     <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
                     <SelectItem value="groq">Groq</SelectItem>
