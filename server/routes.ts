@@ -1596,13 +1596,18 @@ Respond in JSON format:
       // Get active knowledge entries
       const knowledgeEntries = await storage.getActiveKnowledgeBase(agentId);
       
-      // Assemble prompt with KB entries
+      // Get recent verse usages for avoidance (based on agent's verse window setting)
+      const verseWindow = agent.verseReuseWindow || 10;
+      const recentVerses = await storage.getRecentVerseUsages(agentId, verseWindow);
+      
+      // Assemble prompt with KB entries and verse avoidance
       const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
         includeKnowledge: true,
         includeExamples: true,
         includePersonality: true,
         maxKbEntries: 20,
         maxKbTokens: 2000,
+        recentVerses,
       });
       
       // Use the SAME prompt as force-post for consistency
@@ -1802,13 +1807,18 @@ Respond in JSON format:
       // Get active KB entries
       const knowledgeEntries = await storage.getActiveKnowledgeBase(id);
       
-      // Assemble prompt and generate tweet
+      // Get recent verse usages for avoidance (based on agent's verse window setting)
+      const verseWindow = agent.verseReuseWindow || 10;
+      const recentVerses = await storage.getRecentVerseUsages(id, verseWindow);
+      
+      // Assemble prompt and generate tweet (with verse avoidance)
       const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
         includeKnowledge: true,
         includeExamples: true,
         includePersonality: true,
         maxKbEntries: 20,
         maxKbTokens: 2000,
+        recentVerses,
       });
       
       const tweetPrompt = "Generate an engaging tweet for your audience based on your knowledge base. Be authentic and insightful. Keep it under 280 characters.";
@@ -1871,6 +1881,23 @@ Respond in JSON format:
       const kbUsedIds = assembledPrompt.metadata.kbEntriesUsedIds || [];
       if (kbUsedIds.length > 0 && result.success && result.tweetId) {
         await storage.markKnowledgeBaseAsUsed(kbUsedIds, result.tweetId);
+      }
+      
+      // Extract and log Bible verses from the tweet (if verse tracking enabled)
+      if (result.success && result.tweetId && agent.verseTrackingEnabled !== false) {
+        const { extractVerses } = await import("./verseExtractor");
+        const detectedVerses = extractVerses(tweetContent);
+        for (const verse of detectedVerses) {
+          await storage.logVerseUsage(
+            id,
+            verse.verseRef,
+            verse.book,
+            verse.chapter,
+            verse.verseStart,
+            verse.verseEnd,
+            result.tweetId
+          );
+        }
       }
       
       // Log activity
@@ -1954,6 +1981,23 @@ Respond in JSON format:
       }
       
       const result = await postTweet(agent, content);
+      
+      // Extract and log Bible verses from the tweet (if verse tracking enabled)
+      if (result.success && result.tweetId && agent.verseTrackingEnabled !== false) {
+        const { extractVerses } = await import("./verseExtractor");
+        const detectedVerses = extractVerses(content);
+        for (const verse of detectedVerses) {
+          await storage.logVerseUsage(
+            id,
+            verse.verseRef,
+            verse.book,
+            verse.chapter,
+            verse.verseStart,
+            verse.verseEnd,
+            result.tweetId
+          );
+        }
+      }
       
       // Log the activity
       await storage.createActivityLog({

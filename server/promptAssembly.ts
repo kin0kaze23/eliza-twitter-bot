@@ -1,4 +1,4 @@
-import type { Agent, KnowledgeBase } from "@shared/schema";
+import type { Agent, KnowledgeBase, BibleVerseUsage } from "@shared/schema";
 
 export interface PromptAssemblyOptions {
   includeKnowledge?: boolean;
@@ -6,6 +6,7 @@ export interface PromptAssemblyOptions {
   includePersonality?: boolean;
   maxKbEntries?: number;
   maxKbTokens?: number;
+  recentVerses?: BibleVerseUsage[]; // Recently used Bible verses to avoid
 }
 
 export interface AssembledPrompt {
@@ -23,6 +24,16 @@ export interface AssembledPrompt {
  * Assembles a comprehensive prompt from agent configuration and knowledge base
  * Used by both playground and runtime agents for consistent behavior
  */
+// Helper function to convert priority string to number for sorting
+function priorityToNumber(priority: string | null): number {
+  switch (priority) {
+    case 'high': return 3;
+    case 'medium': return 2;
+    case 'low': return 1;
+    default: return 2; // Default to medium
+  }
+}
+
 export async function assemblePrompt(
   agent: Agent,
   knowledgeEntries: KnowledgeBase[],
@@ -34,6 +45,7 @@ export async function assemblePrompt(
     includePersonality = true,
     maxKbEntries = 20,
     maxKbTokens = 2000,
+    recentVerses = [],
   } = options;
 
   const componentsIncluded: string[] = [];
@@ -118,7 +130,9 @@ export async function assemblePrompt(
       }
       
       // Then sort by priority (desc), then by freshness (desc)
-      if (b.priority !== a.priority) return b.priority - a.priority;
+      const aPriority = priorityToNumber(a.priority);
+      const bPriority = priorityToNumber(b.priority);
+      if (bPriority !== aPriority) return bPriority - aPriority;
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     }).slice(0, maxKbEntries);
 
@@ -145,7 +159,22 @@ export async function assemblePrompt(
     }
   }
 
-  // 5. Message examples (if available and enabled)
+  // 5. Bible Verse Avoidance Instructions (if verse tracking is enabled)
+  const verseTrackingEnabled = (agent as any).verseTrackingEnabled !== false; // Default true
+  const verseReusePolicy = (agent as any).verseReusePolicy || "avoid_recent";
+  
+  if (verseTrackingEnabled && verseReusePolicy !== "allow" && recentVerses.length > 0) {
+    const verseList = recentVerses.map(v => v.verseRef).join(", ");
+    
+    systemPrompt += "## Bible Verse Usage Guidelines\n";
+    systemPrompt += "IMPORTANT: When including Scripture references, please AVOID using the following verses that have been used recently:\n";
+    systemPrompt += `${verseList}\n\n`;
+    systemPrompt += "Choose different, fresh Scripture passages to provide variety for your audience.\n\n";
+    
+    componentsIncluded.push("verseAvoidance");
+  }
+
+  // 6. Message examples (if available and enabled)
   let examplesUsed = 0;
   if (includeExamples && agent.messageExamples && agent.messageExamples.length > 0) {
     // Add message examples as assistant messages to demonstrate tone/style
@@ -160,7 +189,7 @@ export async function assemblePrompt(
       } else if (example && typeof example === "object" && "content" in example) {
         messages.push({
           role: "assistant",
-          content: String(example.content),
+          content: String((example as any).content),
         });
         examplesUsed++;
       }
