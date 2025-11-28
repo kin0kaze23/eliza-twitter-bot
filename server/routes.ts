@@ -14,18 +14,42 @@ function buildOpenAIParams(modelName: string, baseParams: any) {
   const params = { ...baseParams };
   const modelLower = (modelName || "").toLowerCase();
   
-  // gpt-4.1-mini and mini models only support temperature=1
-  if (modelLower.includes("mini") || modelLower.includes("4o-mini")) {
-    params.temperature = 1;
-  }
+  // Models that only support temperature=1 (reasoning models, mini models, experimental)
+  const temperatureOnlyModels = [
+    "mini", "4o-mini", "gpt-5", "gpt-4.1", "o1", "reasoning",
+    "thinking", "preview", "experimental", "latest"
+  ];
   
-  // Some models don't support frequency_penalty or presence_penalty
-  if (modelLower.includes("mini")) {
+  const isRestrictedModel = temperatureOnlyModels.some(m => modelLower.includes(m));
+  
+  if (isRestrictedModel) {
+    // Restricted models only support temperature=1
+    params.temperature = 1;
+    // Remove unsupported parameters
     delete params.frequency_penalty;
     delete params.presence_penalty;
   }
   
   return params;
+}
+
+// Async helper to safely call OpenAI with automatic parameter fallback
+async function safeOpenAICall(openai: any, params: any, retryCount = 0): Promise<any> {
+  try {
+    return await openai.chat.completions.create(params);
+  } catch (error: any) {
+    // If parameter is unsupported, try removing it and retry once
+    if (retryCount === 0 && error.error?.code === "unsupported_parameter") {
+      const paramName = error.error?.param;
+      if (paramName) {
+        console.log(`Parameter "${paramName}" not supported for this model, retrying without it...`);
+        const retryParams = { ...params };
+        delete retryParams[paramName];
+        return safeOpenAICall(openai, retryParams, retryCount + 1);
+      }
+    }
+    throw error;
+  }
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -620,7 +644,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           presence_penalty: Number(agent.presencePenalty) || 0.5,
         });
         
-        const completion = await openai.chat.completions.create(params as any);
+        const completion = await safeOpenAICall(openai, params);
         
         response = completion.choices[0]?.message?.content || "No response generated";
         
@@ -1545,7 +1569,7 @@ Respond in JSON format:
           max_completion_tokens: 280, // Twitter character limit context
         });
         
-        const completion = await openai.chat.completions.create(params as any);
+        const completion = await safeOpenAICall(openai, params);
         
         tweet = completion.choices[0]?.message?.content || "No tweet generated";
         
