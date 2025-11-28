@@ -595,7 +595,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           model: agent.modelName || "gpt-4-turbo-preview",
           messages: messages as any,
           temperature: Number(agent.temperature) || 0.7,
-          max_tokens: agent.maxTokens || 500,
+          max_completion_tokens: agent.maxTokens || 500,
           top_p: Number(agent.topP) || 0.9,
           frequency_penalty: Number(agent.frequencyPenalty) || 0.5,
           presence_penalty: Number(agent.presencePenalty) || 0.5,
@@ -1521,7 +1521,7 @@ Respond in JSON format:
           model: agent.modelName || "gpt-4-turbo-preview",
           messages: messages as any,
           temperature: Number(agent.temperature) || 0.7,
-          max_tokens: 280, // Twitter character limit context
+          max_completion_tokens: 280, // Twitter character limit context
         });
         
         tweet = completion.choices[0]?.message?.content || "No tweet generated";
