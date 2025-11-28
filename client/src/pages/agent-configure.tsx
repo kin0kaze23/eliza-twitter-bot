@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap, Pencil, Star, Info, Sparkles, BookOpen, MessageSquare, Thermometer, Hash } from "lucide-react";
+import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap, Pencil, Star, Info, Sparkles, BookOpen, MessageSquare, Thermometer, Hash, Database } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Link, useParams } from "wouter";
@@ -2262,6 +2262,21 @@ export default function AgentConfigure() {
         </TabsContent>
 
         <TabsContent value="knowledge" className="space-y-6">
+          {/* KB Role in Content Generation */}
+          <Alert className="border-primary/30 bg-primary/5">
+            <Database className="h-4 w-4 text-primary" />
+            <AlertDescription className="text-sm">
+              <div className="flex items-center gap-2 mb-1">
+                <strong>Role in Content Generation</strong>
+                <Badge variant="secondary" className="text-xs">HELPFUL</Badge>
+              </div>
+              <p className="text-muted-foreground">
+                Knowledge Base entries provide current events and news content for the AI to reference. High-priority, unused entries are selected first. 
+                The KB gives your agent fresh topics to discuss, but <strong>Message Examples</strong> and <strong>System Prompt</strong> control the actual output format.
+              </p>
+            </AlertDescription>
+          </Alert>
+
           {/* Workflow Guide */}
           <Card className="bg-muted/30">
             <CardHeader>
