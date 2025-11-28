@@ -549,7 +549,15 @@ export default function AgentConfigure() {
   };
 
   // Validation
-  const twitterComplete = Object.values(twitterConfig).every(v => v !== "");
+  // Only check OAuth 1.0a required fields (OAuth 2.0 fields are optional)
+  const twitterComplete = Boolean(
+    twitterConfig.apiKey &&
+    twitterConfig.apiKeySecret &&
+    twitterConfig.accessToken &&
+    twitterConfig.accessTokenSecret &&
+    twitterConfig.bearerToken &&
+    twitterConfig.appId
+  );
   const modelComplete = modelConfig.apiKey !== "";
   const characterComplete = character.name && character.username && character.systemPrompt;
   const isConfigurationComplete = twitterComplete && modelComplete && characterComplete;
