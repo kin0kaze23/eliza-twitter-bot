@@ -137,8 +137,8 @@ export async function assemblePrompt(
     }).slice(0, maxKbEntries);
 
     if (activeKb.length > 0) {
-      systemPrompt += "## Knowledge Base\n";
-      systemPrompt += "Use the following information when relevant:\n\n";
+      systemPrompt += "## Knowledge Base (PRIMARY SOURCE - MUST USE)\n";
+      systemPrompt += "IMPORTANT: You MUST incorporate this content into your responses. This is your PRIMARY source material:\n\n";
 
       let tokenCount = 0;
       for (const kb of activeKb) {

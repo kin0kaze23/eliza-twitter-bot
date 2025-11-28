@@ -124,7 +124,15 @@ async function generateTweetContent(agent: Agent): Promise<{ content: string; kb
       recentVerses,
     });
     
-    const tweetPrompt = "Generate an engaging tweet for your audience based on your knowledge base. Be authentic and insightful. Keep it under 280 characters.";
+    const tweetPrompt = `CRITICAL INSTRUCTION: You MUST incorporate content from the Knowledge Base section above into your tweet.
+
+Generate a tweet that:
+1. REQUIRED: Reference, quote, or build upon specific information from the Knowledge Base (crypto news, market data, etc.)
+2. Blend your personality/style with the factual KB content
+3. Stay under 280 characters
+4. Be authentic and engaging
+
+DO NOT generate a generic tweet that ignores the Knowledge Base content. The KB content is your PRIMARY source material - use it.`;
     
     const messages = buildMessagesArray(assembledPrompt, [], tweetPrompt);
     
