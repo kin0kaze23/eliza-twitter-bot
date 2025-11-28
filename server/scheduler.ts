@@ -3,6 +3,7 @@ import { activityLogs } from "@shared/schema";
 import { postTweet, validateTwitterCredentials } from "./twitter";
 import { assemblePrompt, buildMessagesArray } from "./promptAssembly";
 import { sendPostCreatedWebhook, sendPostFailedWebhook } from "./webhook";
+import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
 import type { Agent } from "@shared/schema";
 
 interface SchedulerState {
@@ -141,12 +142,15 @@ async function generateTweetContent(agent: Agent): Promise<{ content: string; kb
         baseURL: process.env.OPENAI_API_KEY ? undefined : process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
       });
       
-      const completion = await openai.chat.completions.create({
+      // Use same wrapper functions as test-tweet for consistency
+      const params = buildOpenAIParams(postModelName, {
         model: postModelName,
         messages: messages as any,
         temperature: postTemperature,
         max_completion_tokens: postMaxTokens,
       });
+      
+      const completion = await safeOpenAICall(openai, params);
       
       content = completion.choices[0]?.message?.content || "";
     } else if (postModelProvider === "anthropic") {

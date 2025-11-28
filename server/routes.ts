@@ -10,49 +10,7 @@ import OAuth from "oauth-1.0a";
 import crypto from "crypto";
 import { assemblePrompt, buildMessagesArray } from "./promptAssembly";
 import { sendPostCreatedWebhook, sendPostFailedWebhook } from "./webhook";
-
-// Helper to build OpenAI completion params with model-specific support
-function buildOpenAIParams(modelName: string, baseParams: any) {
-  const params = { ...baseParams };
-  const modelLower = (modelName || "").toLowerCase();
-  
-  // Models that only support temperature=1 (reasoning models, mini models, experimental)
-  const temperatureOnlyModels = [
-    "mini", "4o-mini", "gpt-5", "gpt-4.1", "o1", "reasoning",
-    "thinking", "preview", "experimental", "latest"
-  ];
-  
-  const isRestrictedModel = temperatureOnlyModels.some(m => modelLower.includes(m));
-  
-  if (isRestrictedModel) {
-    // Restricted models only support temperature=1
-    params.temperature = 1;
-    // Remove unsupported parameters
-    delete params.frequency_penalty;
-    delete params.presence_penalty;
-  }
-  
-  return params;
-}
-
-// Async helper to safely call OpenAI with automatic parameter fallback
-async function safeOpenAICall(openai: any, params: any, retryCount = 0): Promise<any> {
-  try {
-    return await openai.chat.completions.create(params);
-  } catch (error: any) {
-    // If parameter is unsupported, try removing it and retry once
-    if (retryCount === 0 && error.error?.code === "unsupported_parameter") {
-      const paramName = error.error?.param;
-      if (paramName) {
-        console.log(`Parameter "${paramName}" not supported for this model, retrying without it...`);
-        const retryParams = { ...params };
-        delete retryParams[paramName];
-        return safeOpenAICall(openai, retryParams, retryCount + 1);
-      }
-    }
-    throw error;
-  }
-}
+import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============= AGENTS ============= //
@@ -1913,12 +1871,15 @@ Respond in JSON format:
           baseURL: process.env.OPENAI_API_KEY ? undefined : process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
         });
         
-        const completion = await openai.chat.completions.create({
+        // Use same wrapper functions as test-tweet for consistency
+        const params = buildOpenAIParams(postModelName, {
           model: postModelName,
           messages: messages as any,
           temperature: postTemperature,
           max_completion_tokens: postMaxTokens,
         });
+        
+        const completion = await safeOpenAICall(openai, params);
         
         tweetContent = completion.choices[0]?.message?.content || "";
       } else if (postModelProvider === "anthropic") {
