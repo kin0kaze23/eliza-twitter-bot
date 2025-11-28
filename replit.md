@@ -61,6 +61,18 @@ Preferred communication style: Simple, everyday language.
 - ✅ E2E testing confirmed: persistence, masking, visibility toggle, and value retrieval all working
 - ✅ Production-ready with proper validation and error handling
 
+**v1.4 - Twitter API Authentication Fix** (November 28, 2024):
+- ✅ Fixed Twitter API test endpoint authentication method from Bearer Token to OAuth 1.0a
+- ✅ Switched from Twitter API v2 `/users/me` to v1.1 `/account/verify_credentials.json`
+- ✅ Implemented proper OAuth 1.0a request signing using `oauth-1.0a` library
+- ✅ Updated validation to check only required OAuth 1.0a fields (API Key, Secret, Access Token, Access Token Secret)
+- ✅ OAuth 2.0 fields now correctly treated as optional in both frontend and backend validation
+- ✅ Added detailed error hints for common authentication failures (401, 403 errors)
+- ✅ Returns comprehensive user data on successful authentication (followers, following, verified status)
+- ✅ Created TWITTER_SETUP_GUIDE.md with step-by-step Developer Portal configuration instructions
+- ✅ Fixed frontend validation bug that prevented saving with empty OAuth 2.0 fields
+- ✅ Twitter API test now production-ready and fully functional
+
 ## System Architecture
 
 ### Frontend Architecture

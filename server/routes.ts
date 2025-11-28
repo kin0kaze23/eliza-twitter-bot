@@ -571,9 +571,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Agent not found" });
       }
       
-      // Check if all required Twitter credentials are present
+      // Check if all required OAuth 1.0a credentials are present
       const requiredFields = [
-        { key: 'twitterBearerToken', name: 'Bearer Token' },
+        { key: 'twitterApiKey', name: 'API Key (Consumer Key)' },
+        { key: 'twitterApiSecret', name: 'API Key Secret' },
+        { key: 'twitterAccessToken', name: 'Access Token' },
+        { key: 'twitterAccessSecret', name: 'Access Token Secret' },
       ];
       
       const missingFields = requiredFields.filter(field => !agent[field.key as keyof typeof agent]);
@@ -583,18 +586,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
           success: false,
           error: "Missing Twitter credentials",
           missingFields: missingFields.map(f => f.name),
-          details: "Please add all required Twitter API credentials in the Credentials tab"
+          details: "Please add all required OAuth 1.0a credentials in the Credentials tab",
+          hint: "For Twitter API access, you need: API Key, API Key Secret, Access Token, and Access Token Secret"
         });
       }
       
-      // Test Twitter API v2 - Get authenticated user
-      const bearerToken = agent.twitterBearerToken;
+      // Import OAuth library
+      const OAuth = require('oauth-1.0a');
+      const crypto = require('crypto');
       
-      const response = await fetch("https://api.twitter.com/2/users/me", {
-        method: "GET",
+      // Initialize OAuth
+      const oauth = OAuth({
+        consumer: {
+          key: agent.twitterApiKey!,
+          secret: agent.twitterApiSecret!,
+        },
+        signature_method: 'HMAC-SHA1',
+        hash_function(base_string: string, key: string) {
+          return crypto
+            .createHmac('sha1', key)
+            .update(base_string)
+            .digest('base64');
+        },
+      });
+      
+      // Prepare token
+      const token = {
+        key: agent.twitterAccessToken!,
+        secret: agent.twitterAccessSecret!,
+      };
+      
+      // Test endpoint: Verify credentials
+      const requestData = {
+        url: 'https://api.twitter.com/1.1/account/verify_credentials.json',
+        method: 'GET',
+      };
+      
+      // Generate OAuth header
+      const authHeader = oauth.toHeader(oauth.authorize(requestData, token));
+      
+      // Make request
+      const response = await fetch(requestData.url, {
+        method: requestData.method,
         headers: {
-          "Authorization": `Bearer ${bearerToken}`,
-          "Content-Type": "application/json",
+          ...authHeader,
+          'Content-Type': 'application/json',
         },
       });
       
@@ -607,14 +643,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           errorDetails = { message: errorText };
         }
         
+        let hint = "Please verify your Twitter API credentials are correct.";
+        if (response.status === 401) {
+          hint = "Authentication failed. Check that your API Key, API Secret, Access Token, and Access Token Secret are correct.";
+        } else if (response.status === 403) {
+          hint = "Access forbidden. Make sure your Twitter app has the required permissions (Read and Write).";
+        }
+        
         return res.status(response.status).json({
           success: false,
           error: "Twitter API authentication failed",
           statusCode: response.status,
           details: errorDetails,
-          hint: response.status === 401 
-            ? "Bearer token is invalid or expired. Please check your Twitter Developer Portal."
-            : "Please verify your Twitter API credentials are correct."
+          hint
         });
       }
       
@@ -623,13 +664,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Successfully authenticated
       res.json({
         success: true,
-        message: "Twitter API credentials are valid",
+        message: "Twitter API credentials are valid! ✓",
         user: {
-          id: userData.data?.id,
-          name: userData.data?.name,
-          username: userData.data?.username,
+          id: userData.id_str,
+          name: userData.name,
+          username: userData.screen_name,
+          verified: userData.verified,
+          followers: userData.followers_count,
+          following: userData.friends_count,
         },
         testedAt: new Date().toISOString(),
+        hint: "Your Twitter bot is ready to post and interact!"
       });
       
     } catch (error: any) {
@@ -637,7 +682,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ 
         success: false,
         error: "Failed to test Twitter API",
-        details: error.message 
+        details: error.message,
+        hint: "An unexpected error occurred. Check server logs for details."
       });
     }
   });
