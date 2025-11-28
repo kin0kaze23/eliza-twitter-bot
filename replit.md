@@ -73,6 +73,19 @@ Preferred communication style: Simple, everyday language.
 - ✅ Fixed frontend validation bug that prevented saving with empty OAuth 2.0 fields
 - ✅ Twitter API test now production-ready and fully functional
 
+**v1.5 - Knowledge Base Review System** (November 28, 2024):
+- ✅ Implemented pending/approved/archived workflow for knowledge entries (similar to aixbt)
+- ✅ API data ingestion creates pending entries requiring manual review before activation
+- ✅ Frontend nested tabs: "Review Queue" (pending entries) and "Active Knowledge" (approved entries)
+- ✅ Batch approve/archive operations with multi-select checkboxes
+- ✅ Security: Agent isolation prevents cross-agent KB modification
+- ✅ Security: SQL injection prevention using Drizzle's `inArray` helper for safe parameterization
+- ✅ Security: Frontend clears selection state when switching tabs
+- ✅ Storage methods: `getPendingKnowledgeBase()`, `getApprovedKnowledgeBase()`, `batchApproveKnowledgeBase()`, `batchArchiveKnowledgeBase()`
+- ✅ Batch endpoints: POST `/api/agents/:id/knowledge/batch-approve`, POST `/api/agents/:id/knowledge/batch-archive`
+- ✅ Prompt assembly respects agent-level KB limits and only uses approved entries
+- ✅ Passed architect security review - confirmed production-ready with no vulnerabilities
+
 ## System Architecture
 
 ### Frontend Architecture
