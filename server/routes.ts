@@ -1605,8 +1605,8 @@ Respond in JSON format:
         maxKbTokens: 2000,
       });
       
-      // Auto-generate prompt if not provided (use KB to inspire tweet)
-      const tweetPrompt = prompt || "Generate an insightful tweet for your audience based on recent knowledge base entries. Be engaging and authentic.";
+      // Use the SAME prompt as force-post for consistency
+      const tweetPrompt = prompt || "Generate an engaging tweet for your audience based on your knowledge base. Be authentic and insightful. Keep it under 280 characters.";
       
       // Build messages for AI model
       const messages = buildMessagesArray(
