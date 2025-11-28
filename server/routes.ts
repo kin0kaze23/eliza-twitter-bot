@@ -622,7 +622,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           top_p: Number(agent.topP) || 0.9,
         });
         
-        const textContent = completion.content.find((c: any) => c.type === "text");
+        const textContent = completion.content.find((c): c is { type: 'text'; text: string } => c.type === "text");
         response = textContent?.text || "No response generated";
         
       } else {
