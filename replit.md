@@ -27,7 +27,7 @@ The frontend is built with React, TypeScript, Vite, Radix UI primitives, and sha
 ### System Design Choices
 **Database**: PostgreSQL via Neon serverless, using Drizzle ORM with a schema-first approach (`shared/schema.ts`).
 - **Agents Table**: Stores comprehensive agent configurations including metadata, Twitter API credentials (OAuth 1.0a and 2.0), character prompts, AI model configurations (11 providers), model parameters, posting/reply behaviors, content modules, and triggers. Most fields are optional to support draft mode.
-- **Knowledge Base Table**: Agent-specific knowledge entries with categories, tags, priority, active status, and refresh strategies, supporting a pending/approved/archived workflow.
+- **Knowledge Base Table**: Agent-specific knowledge entries with categories, tags, priority, active status, and refresh strategies, supporting a pending/approved/archived workflow. Includes Smart Priority Learning with `originalPriority` and `priorityCorrectedAt` fields to track user corrections and improve future auto-prioritization.
 - **Custom APIs Table**: External data source configurations.
 - **API Keys Table**: Encrypted credential storage.
 - **Agent Activity Table**: Monitoring data.
