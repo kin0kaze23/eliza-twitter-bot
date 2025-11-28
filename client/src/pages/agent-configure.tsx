@@ -66,6 +66,27 @@ export default function AgentConfigure() {
     queryKey: ["/api/agents", id, "knowledge"],
     enabled: !!id,
   });
+
+  // Fetch pending KB entries (for review)
+  const { data: pendingKB = [] } = useQuery<KnowledgeBase[]>({
+    queryKey: ["/api/agents", id, "knowledge/pending"],
+    enabled: !!id,
+  });
+
+  // Fetch approved KB entries
+  const { data: approvedKB = [] } = useQuery<KnowledgeBase[]>({
+    queryKey: ["/api/agents", id, "knowledge/approved"],
+    enabled: !!id,
+  });
+
+  // KB batch operations state
+  const [selectedKBIds, setSelectedKBIds] = useState<Set<string>>(new Set());
+  const [kbSubtab, setKbSubtab] = useState<"review" | "active">("review");
+  
+  // Clear KB selection when switching tabs to prevent cross-tab operations
+  useEffect(() => {
+    setSelectedKBIds(new Set());
+  }, [kbSubtab]);
   
   // Twitter API Credentials
   const [twitterConfig, setTwitterConfig] = useState({
@@ -316,6 +337,54 @@ export default function AgentConfigure() {
     },
   });
 
+  // Batch approve KB entries
+  const batchApproveMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      return apiRequest("POST", `/api/agents/${id}/knowledge/batch/approve`, { ids });
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/pending"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/approved"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
+      setSelectedKBIds(new Set());
+      toast({ 
+        title: "Approved!", 
+        description: data.message || `Approved ${data.approvedCount} entries`
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to approve entries",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Batch archive KB entries
+  const batchArchiveMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      return apiRequest("POST", `/api/agents/${id}/knowledge/batch/archive`, { ids });
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/pending"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/approved"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
+      setSelectedKBIds(new Set());
+      toast({ 
+        title: "Archived!", 
+        description: data.message || `Archived ${data.archivedCount} entries`
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to archive entries",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleAddKBEntry = () => {
     if (!newKBEntry.title || !newKBEntry.content) return;
     
@@ -333,6 +402,35 @@ export default function AgentConfigure() {
 
   const handleDeleteKBEntry = (entryId: string) => {
     deleteKBMutation.mutate(entryId);
+  };
+
+  // KB batch operation handlers
+  const handleToggleKBSelection = (id: string) => {
+    const newSelection = new Set(selectedKBIds);
+    if (newSelection.has(id)) {
+      newSelection.delete(id);
+    } else {
+      newSelection.add(id);
+    }
+    setSelectedKBIds(newSelection);
+  };
+
+  const handleSelectAllKB = (entries: KnowledgeBase[]) => {
+    if (selectedKBIds.size === entries.length) {
+      setSelectedKBIds(new Set());
+    } else {
+      setSelectedKBIds(new Set(entries.map(e => e.id)));
+    }
+  };
+
+  const handleBatchApprove = () => {
+    if (selectedKBIds.size === 0) return;
+    batchApproveMutation.mutate(Array.from(selectedKBIds));
+  };
+
+  const handleBatchArchive = () => {
+    if (selectedKBIds.size === 0) return;
+    batchArchiveMutation.mutate(Array.from(selectedKBIds));
   };
 
   const handleAddCustomPrompt = () => {
@@ -1423,165 +1521,280 @@ export default function AgentConfigure() {
         </TabsContent>
 
         <TabsContent value="knowledge" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <CardTitle>Knowledge Base</CardTitle>
-                  <CardDescription>Knowledge specific to this agent ({knowledgeBase.length} entries)</CardDescription>
-                </div>
-                <Dialog open={isAddKBDialogOpen} onOpenChange={setIsAddKBDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button size="sm">
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add Entry
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
-                      <DialogTitle>Add Knowledge Entry</DialogTitle>
-                      <DialogDescription>Add knowledge specific to this agent with smart management</DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="kb-title">Title</Label>
-                          <Input
-                            id="kb-title"
-                            value={newKBEntry.title}
-                            onChange={(e) => setNewKBEntry({ ...newKBEntry, title: e.target.value })}
-                            placeholder="Entry title..."
-                            data-testid="input-kb-title"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="kb-category">Category</Label>
-                          <Select
-                            value={newKBEntry.category}
-                            onValueChange={(value) => setNewKBEntry({ ...newKBEntry, category: value })}
-                          >
-                            <SelectTrigger data-testid="select-kb-category">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="general">General</SelectItem>
-                              <SelectItem value="crypto">Crypto</SelectItem>
-                              <SelectItem value="theology">Theology</SelectItem>
-                              <SelectItem value="narratives">Narratives</SelectItem>
-                              <SelectItem value="solana">Solana</SelectItem>
-                              <SelectItem value="mental_models">Mental Models</SelectItem>
-                              <SelectItem value="memes">Memes</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                      
+          <Tabs value={kbSubtab} onValueChange={(v) => setKbSubtab(v as "review" | "active")} className="w-full">
+            <div className="flex items-center justify-between mb-4">
+              <TabsList>
+                <TabsTrigger value="review" data-testid="tab-kb-review">
+                  Review Queue ({pendingKB.length})
+                </TabsTrigger>
+                <TabsTrigger value="active" data-testid="tab-kb-active">
+                  Active Knowledge ({approvedKB.length})
+                </TabsTrigger>
+              </TabsList>
+              <Dialog open={isAddKBDialogOpen} onOpenChange={setIsAddKBDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Entry
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Add Knowledge Entry</DialogTitle>
+                    <DialogDescription>Add knowledge (will be approved automatically)</DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="kb-content">Content</Label>
-                        <Textarea
-                          id="kb-content"
-                          value={newKBEntry.content}
-                          onChange={(e) => setNewKBEntry({ ...newKBEntry, content: e.target.value })}
-                          placeholder="Knowledge content..."
-                          className="min-h-[120px] font-mono text-sm"
-                          data-testid="textarea-kb-content"
-                        />
-                      </div>
-                      
-                      <div className="space-y-2">
-                        <Label htmlFor="kb-tags">Tags (comma-separated)</Label>
+                        <Label htmlFor="kb-title">Title</Label>
                         <Input
-                          id="kb-tags"
-                          value={newKBEntry.tags}
-                          onChange={(e) => setNewKBEntry({ ...newKBEntry, tags: e.target.value })}
-                          placeholder="tag1, tag2, tag3"
-                          data-testid="input-kb-tags"
+                          id="kb-title"
+                          value={newKBEntry.title}
+                          onChange={(e) => setNewKBEntry({ ...newKBEntry, title: e.target.value })}
+                          placeholder="Entry title..."
+                          data-testid="input-kb-title"
                         />
                       </div>
-                      
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <Label>Priority: {newKBEntry.priority}</Label>
-                            <span className="text-xs text-muted-foreground">1 (low) - 10 (high)</span>
-                          </div>
-                          <Slider
-                            value={[newKBEntry.priority]}
-                            onValueChange={([value]) => setNewKBEntry({ ...newKBEntry, priority: value })}
-                            min={1}
-                            max={10}
-                            step={1}
-                            data-testid="slider-kb-priority"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="kb-refresh">Refresh Strategy</Label>
-                          <Select
-                            value={newKBEntry.refreshStrategy}
-                            onValueChange={(value) => setNewKBEntry({ ...newKBEntry, refreshStrategy: value })}
-                          >
-                            <SelectTrigger data-testid="select-kb-refresh">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="static">Static (Never refresh)</SelectItem>
-                              <SelectItem value="daily">Daily</SelectItem>
-                              <SelectItem value="weekly">Weekly</SelectItem>
-                              <SelectItem value="on_demand">On Demand</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="kb-category">Category</Label>
+                        <Select
+                          value={newKBEntry.category}
+                          onValueChange={(value) => setNewKBEntry({ ...newKBEntry, category: value })}
+                        >
+                          <SelectTrigger data-testid="select-kb-category">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="general">General</SelectItem>
+                            <SelectItem value="crypto">Crypto</SelectItem>
+                            <SelectItem value="theology">Theology</SelectItem>
+                            <SelectItem value="narratives">Narratives</SelectItem>
+                            <SelectItem value="solana">Solana</SelectItem>
+                            <SelectItem value="mental_models">Mental Models</SelectItem>
+                            <SelectItem value="memes">Memes</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
-                      
-                      <div className="flex items-center justify-between py-2 px-3 bg-muted/50 rounded-lg">
-                        <Label htmlFor="kb-active" className="cursor-pointer">Active (Include in generations)</Label>
-                        <Switch
-                          id="kb-active"
-                          checked={newKBEntry.active}
-                          onCheckedChange={(checked) => setNewKBEntry({ ...newKBEntry, active: checked })}
-                          data-testid="switch-kb-active"
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label htmlFor="kb-content">Content</Label>
+                      <Textarea
+                        id="kb-content"
+                        value={newKBEntry.content}
+                        onChange={(e) => setNewKBEntry({ ...newKBEntry, content: e.target.value })}
+                        placeholder="Knowledge content..."
+                        className="min-h-[120px] font-mono text-sm"
+                        data-testid="textarea-kb-content"
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label htmlFor="kb-tags">Tags (comma-separated)</Label>
+                      <Input
+                        id="kb-tags"
+                        value={newKBEntry.tags}
+                        onChange={(e) => setNewKBEntry({ ...newKBEntry, tags: e.target.value })}
+                        placeholder="tag1, tag2, tag3"
+                        data-testid="input-kb-tags"
+                      />
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label>Priority: {newKBEntry.priority}</Label>
+                          <span className="text-xs text-muted-foreground">1 (low) - 10 (high)</span>
+                        </div>
+                        <Slider
+                          value={[newKBEntry.priority]}
+                          onValueChange={([value]) => setNewKBEntry({ ...newKBEntry, priority: value })}
+                          min={1}
+                          max={10}
+                          step={1}
+                          data-testid="slider-kb-priority"
                         />
                       </div>
-                    </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setIsAddKBDialogOpen(false)}>Cancel</Button>
-                      <Button
-                        onClick={handleAddKBEntry}
-                        disabled={addKBMutation.isPending}
-                        data-testid="button-add-kb-entry"
-                      >
-                        {addKBMutation.isPending ? "Adding..." : "Add Entry"}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {knowledgeBase.map((entry) => (
-                <div key={entry.id} className="p-3 border rounded-lg space-y-2">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <h4 className="font-medium">{entry.title}</h4>
-                      <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{entry.content}</p>
-                      <div className="flex gap-2 mt-2 flex-wrap">
-                        {entry.tags.map(tag => (
-                          <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>
-                        ))}
+                      <div className="space-y-2">
+                        <Label htmlFor="kb-refresh">Refresh Strategy</Label>
+                        <Select
+                          value={newKBEntry.refreshStrategy}
+                          onValueChange={(value) => setNewKBEntry({ ...newKBEntry, refreshStrategy: value })}
+                        >
+                          <SelectTrigger data-testid="select-kb-refresh">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="static">Static (Never refresh)</SelectItem>
+                            <SelectItem value="daily">Daily</SelectItem>
+                            <SelectItem value="weekly">Weekly</SelectItem>
+                            <SelectItem value="on_demand">On Demand</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleDeleteKBEntry(entry.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    
+                    <div className="flex items-center justify-between py-2 px-3 bg-muted/50 rounded-lg">
+                      <Label htmlFor="kb-active" className="cursor-pointer">Active (Include in generations)</Label>
+                      <Switch
+                        id="kb-active"
+                        checked={newKBEntry.active}
+                        onCheckedChange={(checked) => setNewKBEntry({ ...newKBEntry, active: checked })}
+                        data-testid="switch-kb-active"
+                      />
+                    </div>
                   </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setIsAddKBDialogOpen(false)}>Cancel</Button>
+                    <Button
+                      onClick={handleAddKBEntry}
+                      disabled={addKBMutation.isPending}
+                      data-testid="button-add-kb-entry"
+                    >
+                      {addKBMutation.isPending ? "Adding..." : "Add Entry"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
+
+            {/* Review Queue Tab */}
+            <TabsContent value="review" className="space-y-4">
+              {selectedKBIds.size > 0 && (
+                <Card className="bg-primary/5 border-primary/20">
+                  <CardContent className="flex items-center justify-between gap-4 py-3">
+                    <span className="text-sm font-medium">{selectedKBIds.size} selected</span>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={handleBatchApprove}
+                        disabled={batchApproveMutation.isPending}
+                        data-testid="button-batch-approve"
+                      >
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        {batchApproveMutation.isPending ? "Approving..." : "Approve"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={handleBatchArchive}
+                        disabled={batchArchiveMutation.isPending}
+                        data-testid="button-batch-archive"
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        {batchArchiveMutation.isPending ? "Archiving..." : "Archive"}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Pending Entries</CardTitle>
+                      <CardDescription>Review and approve ingested data before activation</CardDescription>
+                    </div>
+                    {pendingKB.length > 0 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleSelectAllKB(pendingKB)}
+                        data-testid="button-select-all"
+                      >
+                        {selectedKBIds.size === pendingKB.length ? "Deselect All" : "Select All"}
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {pendingKB.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <p>No pending entries. Ingest data from Custom APIs to review.</p>
+                    </div>
+                  ) : (
+                    pendingKB.map((entry) => (
+                      <div key={entry.id} className="p-3 border rounded-lg space-y-2 hover-elevate" data-testid={`kb-entry-${entry.id}`}>
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedKBIds.has(entry.id)}
+                            onChange={() => handleToggleKBSelection(entry.id)}
+                            className="mt-1"
+                            data-testid={`checkbox-kb-${entry.id}`}
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <h4 className="font-medium">{entry.title}</h4>
+                              <Badge variant="outline" className="text-xs">{entry.category}</Badge>
+                            </div>
+                            <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{entry.content}</p>
+                            <div className="flex gap-2 mt-2 flex-wrap">
+                              {entry.tags?.map((tag: string) => (
+                                <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+                              ))}
+                              {entry.source && (
+                                <Badge variant="outline" className="text-xs">Source: {entry.source}</Badge>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* Active Knowledge Tab */}
+            <TabsContent value="active" className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Active Knowledge</CardTitle>
+                  <CardDescription>Approved entries used in agent conversations</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {approvedKB.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <p>No active knowledge entries yet. Approve pending entries or add manually.</p>
+                    </div>
+                  ) : (
+                    approvedKB.map((entry) => (
+                      <div key={entry.id} className="p-3 border rounded-lg space-y-2" data-testid={`active-kb-entry-${entry.id}`}>
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <h4 className="font-medium">{entry.title}</h4>
+                              <div className="flex gap-1">
+                                <Badge variant="outline" className="text-xs">{entry.category}</Badge>
+                                {entry.active && <Badge variant="default" className="text-xs">Active</Badge>}
+                              </div>
+                            </div>
+                            <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{entry.content}</p>
+                            <div className="flex gap-2 mt-2 flex-wrap">
+                              {entry.tags?.map((tag: string) => (
+                                <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+                              ))}
+                              <Badge variant="outline" className="text-xs">Priority: {entry.priority}</Badge>
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDeleteKBEntry(entry.id)}
+                            data-testid={`button-delete-kb-${entry.id}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </TabsContent>
       </Tabs>
 

@@ -180,6 +180,88 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get pending knowledge base entries for review
+  app.get("/api/agents/:agentId/knowledge/pending", async (req, res) => {
+    try {
+      const entries = await storage.getPendingKnowledgeBase(req.params.agentId);
+      res.json(entries);
+    } catch (error) {
+      console.error("Error fetching pending knowledge base:", error);
+      res.status(500).json({ error: "Failed to fetch pending knowledge base" });
+    }
+  });
+
+  // Get approved knowledge base entries
+  app.get("/api/agents/:agentId/knowledge/approved", async (req, res) => {
+    try {
+      const entries = await storage.getApprovedKnowledgeBase(req.params.agentId);
+      res.json(entries);
+    } catch (error) {
+      console.error("Error fetching approved knowledge base:", error);
+      res.status(500).json({ error: "Failed to fetch approved knowledge base" });
+    }
+  });
+
+  // Batch approve knowledge base entries
+  app.post("/api/agents/:agentId/knowledge/batch/approve", async (req, res) => {
+    try {
+      const { agentId } = req.params;
+      const { ids, approvedBy } = req.body;
+
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: "ids array is required and cannot be empty" });
+      }
+
+      const count = await storage.batchApproveKnowledgeBase(agentId, ids, approvedBy);
+      
+      if (count === 0) {
+        return res.status(404).json({ 
+          error: "No entries were approved. Ensure they are pending and belong to this agent.",
+          approvedCount: 0
+        });
+      }
+
+      res.json({
+        success: true,
+        approvedCount: count,
+        message: `Successfully approved ${count} knowledge base entries`,
+      });
+    } catch (error) {
+      console.error("Error batch approving knowledge entries:", error);
+      res.status(500).json({ error: "Failed to approve knowledge entries" });
+    }
+  });
+
+  // Batch archive/reject knowledge base entries
+  app.post("/api/agents/:agentId/knowledge/batch/archive", async (req, res) => {
+    try {
+      const { agentId } = req.params;
+      const { ids } = req.body;
+
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: "ids array is required and cannot be empty" });
+      }
+
+      const count = await storage.batchArchiveKnowledgeBase(agentId, ids);
+      
+      if (count === 0) {
+        return res.status(404).json({ 
+          error: "No entries were archived. Ensure they belong to this agent and are not already archived.",
+          archivedCount: 0
+        });
+      }
+
+      res.json({
+        success: true,
+        archivedCount: count,
+        message: `Successfully archived ${count} knowledge base entries`,
+      });
+    } catch (error) {
+      console.error("Error batch archiving knowledge entries:", error);
+      res.status(500).json({ error: "Failed to archive knowledge entries" });
+    }
+  });
+
   // Get knowledge base entries by category
   app.get("/api/agents/:agentId/knowledge/category/:category", async (req, res) => {
     try {
@@ -969,7 +1051,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
         
-        // Create KB entry
+        // Create KB entry with pending status (requires manual review)
         const entryData = {
           title: title.substring(0, 500), // Limit title length
           content: content.substring(0, 10000), // Limit content length
@@ -979,7 +1061,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           sourceUrl: customApi.url,
           category: customApi.category || "general",
           priority: 5,
-          active: true,
+          active: false, // Inactive until approved
+          status: "pending", // Requires review before becoming active
           refreshStrategy: "manual",
           lastFetchedAt: new Date().toISOString(),
           agentId: agentId,

@@ -19,7 +19,7 @@ import {
   apiKeys,
   agentActivity,
 } from "@shared/schema";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, and, sql, inArray } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -40,10 +40,14 @@ export interface IStorage {
   getKnowledgeBaseEntry(id: string): Promise<KnowledgeBase | undefined>;
   getKnowledgeBaseByCategory(agentId: string, category: string): Promise<KnowledgeBase[]>;
   getActiveKnowledgeBase(agentId: string): Promise<KnowledgeBase[]>;
+  getPendingKnowledgeBase(agentId: string): Promise<KnowledgeBase[]>;
+  getApprovedKnowledgeBase(agentId: string): Promise<KnowledgeBase[]>;
   createKnowledgeBaseEntry(entry: InsertKnowledgeBase): Promise<KnowledgeBase>;
   updateKnowledgeBaseEntry(id: string, entry: Partial<InsertKnowledgeBase>): Promise<KnowledgeBase | undefined>;
   deleteKnowledgeBaseEntry(id: string): Promise<boolean>;
   refreshKnowledgeBaseEntry(id: string): Promise<KnowledgeBase | undefined>;
+  batchApproveKnowledgeBase(agentId: string, ids: string[], approvedBy?: string): Promise<number>;
+  batchArchiveKnowledgeBase(agentId: string, ids: string[]): Promise<number>;
   
   // Agent Activity (Monitoring)
   getAgentActivity(agentId: string, startDate?: string, endDate?: string): Promise<AgentActivity[]>;
@@ -189,8 +193,91 @@ export class DbStorage implements IStorage {
     return await db
       .select()
       .from(knowledgeBase)
-      .where(and(eq(knowledgeBase.agentId, agentId), eq(knowledgeBase.active, true)))
+      .where(
+        and(
+          eq(knowledgeBase.agentId, agentId),
+          eq(knowledgeBase.active, true),
+          eq(knowledgeBase.status, "approved")
+        )
+      )
       .orderBy(desc(knowledgeBase.priority), desc(knowledgeBase.createdAt));
+  }
+
+  async getPendingKnowledgeBase(agentId: string): Promise<KnowledgeBase[]> {
+    return await db
+      .select()
+      .from(knowledgeBase)
+      .where(and(eq(knowledgeBase.agentId, agentId), eq(knowledgeBase.status, "pending")))
+      .orderBy(desc(knowledgeBase.createdAt));
+  }
+
+  async getApprovedKnowledgeBase(agentId: string): Promise<KnowledgeBase[]> {
+    return await db
+      .select()
+      .from(knowledgeBase)
+      .where(and(eq(knowledgeBase.agentId, agentId), eq(knowledgeBase.status, "approved")))
+      .orderBy(desc(knowledgeBase.priority), desc(knowledgeBase.createdAt));
+  }
+
+  async batchApproveKnowledgeBase(agentId: string, ids: string[], approvedBy?: string): Promise<number> {
+    if (ids.length === 0) {
+      return 0;
+    }
+
+    const updateData: any = {
+      status: "approved",
+      active: true, // Activate when approving
+      approvedAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    if (approvedBy) {
+      updateData.approvedBy = approvedBy;
+    }
+
+    // Only approve entries that are (1) owned by this agent and (2) currently pending
+    // Use inArray for safe parameterization (prevents SQL injection)
+    const result = await db
+      .update(knowledgeBase)
+      .set(updateData)
+      .where(
+        and(
+          eq(knowledgeBase.agentId, agentId),
+          eq(knowledgeBase.status, "pending"),
+          inArray(knowledgeBase.id, ids)
+        )
+      )
+      .returning();
+
+    return result.length;
+  }
+
+  async batchArchiveKnowledgeBase(agentId: string, ids: string[]): Promise<number> {
+    if (ids.length === 0) {
+      return 0;
+    }
+
+    const updateData: any = {
+      status: "archived",
+      active: false,
+      updatedAt: new Date(),
+    };
+
+    // Only archive entries that are owned by this agent (any status except already archived)
+    // Use inArray for safe parameterization (prevents SQL injection)
+    const result = await db
+      .update(knowledgeBase)
+      .set(updateData)
+      .where(
+        and(
+          eq(knowledgeBase.agentId, agentId),
+          sql`${knowledgeBase.status} != 'archived'`, // Don't re-archive
+          inArray(knowledgeBase.id, ids)
+        )
+      )
+      .returning();
+
+    return result.length;
   }
 
   // Agent Activity (Monitoring)
