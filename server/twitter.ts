@@ -8,6 +8,7 @@ export interface TwitterPostResult {
   error?: string;
   errorCode?: string;
   rateLimited?: boolean;
+  hint?: string;
 }
 
 export interface TwitterUser {
@@ -87,10 +88,34 @@ export async function postTweet(agent: Agent, content: string): Promise<TwitterP
       }
 
       if (response.status === 403) {
+        // Parse Twitter's specific error format
+        const errorDetail = errorData.detail || 
+                           errorData.errors?.[0]?.message ||
+                           errorData.title ||
+                           "Forbidden";
+        
+        // Check for common 403 error patterns
+        let userFriendlyError = errorDetail;
+        let hint = "";
+        
+        if (errorDetail.includes("not permitted") || errorDetail.includes("permission")) {
+          userFriendlyError = "You are not permitted to perform this action";
+          hint = "Your Twitter app may not have write permissions. Go to Twitter Developer Portal → Your App → Settings → App permissions → Enable 'Read and Write'. Then regenerate your Access Token and Secret.";
+        } else if (errorDetail.includes("suspended") || errorDetail.includes("locked")) {
+          userFriendlyError = "Twitter account is suspended or locked";
+          hint = "Check your Twitter account status at twitter.com";
+        } else if (errorDetail.includes("duplicate")) {
+          userFriendlyError = "Duplicate tweet detected";
+          hint = "Twitter doesn't allow posting the exact same content twice. The system will try a different post next time.";
+        }
+        
+        console.error(`[Twitter] 403 Error: ${errorDetail}${hint ? ` | Hint: ${hint}` : ""}`);
+        
         return {
           success: false,
-          error: errorData.detail || "Forbidden - check Twitter app permissions",
+          error: hint ? `${userFriendlyError} - ${hint}` : userFriendlyError,
           errorCode: "FORBIDDEN",
+          hint: hint || undefined,
         };
       }
 
