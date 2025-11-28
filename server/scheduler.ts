@@ -110,12 +110,17 @@ async function generateTweetContent(agent: Agent): Promise<{ content: string; kb
   try {
     const knowledgeEntries = await storage.getActiveKnowledgeBase(agent.id);
     
+    // Get recent verse usages for avoidance (based on agent's verse window setting)
+    const verseWindow = agent.verseReuseWindow || 10;
+    const recentVerses = await storage.getRecentVerseUsages(agent.id, verseWindow);
+    
     const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
       includeKnowledge: true,
       includeExamples: true,
       includePersonality: true,
       maxKbEntries: 20,
       maxKbTokens: 2000,
+      recentVerses,
     });
     
     const tweetPrompt = "Generate an engaging tweet for your audience based on your knowledge base. Be authentic and insightful. Keep it under 280 characters.";
@@ -239,6 +244,26 @@ async function executePost(agent: Agent): Promise<void> {
     if (result.success) {
       state.lastPostTime.set(agent.id, new Date());
       state.postsToday.set(postsKey, (state.postsToday.get(postsKey) || 0) + 1);
+      
+      // Extract and log Bible verses from the tweet (if verse tracking enabled)
+      if (result.tweetId && agent.verseTrackingEnabled !== false) {
+        const { extractVerses } = await import("./verseExtractor");
+        const detectedVerses = extractVerses(generated.content);
+        for (const verse of detectedVerses) {
+          await storage.logVerseUsage(
+            agent.id,
+            verse.verseRef,
+            verse.book,
+            verse.chapter,
+            verse.verseStart,
+            verse.verseEnd,
+            result.tweetId
+          );
+        }
+        if (detectedVerses.length > 0) {
+          console.log(`[Scheduler] Logged ${detectedVerses.length} verse(s): ${detectedVerses.map(v => v.verseRef).join(", ")}`);
+        }
+      }
       
       await logActivity({
         agentId: agent.id,
