@@ -337,6 +337,15 @@ export default function AgentConfigure() {
     reuseCooldownHours: "24",
   });
 
+  // Webhook Settings
+  const [webhookSettings, setWebhookSettings] = useState({
+    enabled: false,
+    url: "",
+    secret: "",
+    events: ["post_created", "post_failed", "error"] as string[],
+  });
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+
   // Knowledge Base (Per-Agent)
   const [knowledgeBase, setKnowledgeBase] = useState<KBEntry[]>([]);
   const [isAddKBDialogOpen, setIsAddKBDialogOpen] = useState(false);
@@ -617,6 +626,11 @@ export default function AgentConfigure() {
         kbMaxTokens: parseInt(kbSettings.maxTokens) || 1500,
         kbReusePolicy: kbSettings.reusePolicy,
         kbReuseCooldownHours: parseInt(kbSettings.reuseCooldownHours) || 24,
+        // Webhook Settings
+        webhookEnabled: webhookSettings.enabled,
+        webhookUrl: webhookSettings.url || undefined,
+        webhookSecret: webhookSettings.secret || undefined,
+        webhookEvents: webhookSettings.events,
       });
     },
     onSuccess: () => {
@@ -811,6 +825,14 @@ export default function AgentConfigure() {
       reusePolicy: agent.kbReusePolicy || "deprioritize",
       reuseCooldownHours: (agent.kbReuseCooldownHours || 24).toString(),
     });
+    
+    // Load webhook settings
+    setWebhookSettings({
+      enabled: agent.webhookEnabled ?? false,
+      url: agent.webhookUrl || "",
+      secret: agent.webhookSecret || "",
+      events: agent.webhookEvents || ["post_created", "post_failed", "error"],
+    });
   }, [agent]);
 
   // Sync knowledge base from backend data
@@ -926,6 +948,7 @@ export default function AgentConfigure() {
           <TabsTrigger value="model">AI Model</TabsTrigger>
           <TabsTrigger value="behavior">Behavior</TabsTrigger>
           <TabsTrigger value="knowledge">Knowledge Base</TabsTrigger>
+          <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
         </TabsList>
 
         <TabsContent value="twitter" className="space-y-6">
@@ -2386,6 +2409,200 @@ export default function AgentConfigure() {
               </Card>
             </TabsContent>
           </Tabs>
+        </TabsContent>
+
+        <TabsContent value="webhooks" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                Webhook Notifications
+              </CardTitle>
+              <CardDescription>
+                Receive real-time notifications when your agent posts tweets or encounters errors
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label htmlFor="webhook-enabled">Enable Webhooks</Label>
+                  <p className="text-sm text-muted-foreground">Send notifications to your endpoint</p>
+                </div>
+                <Switch
+                  id="webhook-enabled"
+                  checked={webhookSettings.enabled}
+                  onCheckedChange={(v) => setWebhookSettings({ ...webhookSettings, enabled: v })}
+                  data-testid="switch-webhook-enabled"
+                />
+              </div>
+
+              {webhookSettings.enabled && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="webhook-url">Webhook URL</Label>
+                    <Input
+                      id="webhook-url"
+                      type="url"
+                      placeholder="https://your-server.com/webhook"
+                      value={webhookSettings.url}
+                      onChange={(e) => setWebhookSettings({ ...webhookSettings, url: e.target.value })}
+                      data-testid="input-webhook-url"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Your endpoint will receive POST requests with JSON payload
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="webhook-secret">Webhook Secret (Optional)</Label>
+                    <div className="relative">
+                      <Input
+                        id="webhook-secret"
+                        type={showSecrets["webhook"] ? "text" : "password"}
+                        placeholder="Optional HMAC secret for signature verification"
+                        value={webhookSettings.secret}
+                        onChange={(e) => setWebhookSettings({ ...webhookSettings, secret: e.target.value })}
+                        className="pr-10"
+                        data-testid="input-webhook-secret"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-0 top-0 h-full"
+                        onClick={() => toggleShowSecret("webhook")}
+                      >
+                        {showSecrets["webhook"] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      If set, requests include X-Webhook-Signature header with sha256=HMAC signature
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <Label>Event Types</Label>
+                    <p className="text-sm text-muted-foreground">Select which events trigger webhook notifications</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { id: "post_created", label: "Post Created", desc: "When a tweet is posted" },
+                        { id: "post_failed", label: "Post Failed", desc: "When posting fails" },
+                        { id: "reply_created", label: "Reply Created", desc: "When a reply is sent" },
+                        { id: "reply_failed", label: "Reply Failed", desc: "When reply fails" },
+                        { id: "error", label: "Errors", desc: "General error events" },
+                        { id: "rate_limit_warning", label: "Rate Limit Warning", desc: "Approaching rate limits" },
+                      ].map((event) => (
+                        <div key={event.id} className="flex items-start gap-2 p-3 border rounded-lg">
+                          <Switch
+                            id={`event-${event.id}`}
+                            checked={webhookSettings.events.includes(event.id)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setWebhookSettings({
+                                  ...webhookSettings,
+                                  events: [...webhookSettings.events, event.id],
+                                });
+                              } else {
+                                setWebhookSettings({
+                                  ...webhookSettings,
+                                  events: webhookSettings.events.filter((e) => e !== event.id),
+                                });
+                              }
+                            }}
+                            data-testid={`switch-event-${event.id}`}
+                          />
+                          <div>
+                            <Label htmlFor={`event-${event.id}`} className="text-sm font-medium">
+                              {event.label}
+                            </Label>
+                            <p className="text-xs text-muted-foreground">{event.desc}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t">
+                    <Button
+                      variant="outline"
+                      onClick={async () => {
+                        if (!webhookSettings.url) {
+                          toast({ title: "Enter a webhook URL first", variant: "destructive" });
+                          return;
+                        }
+                        setIsTestingWebhook(true);
+                        try {
+                          const response = await fetch(`/api/agents/${id}/test-webhook`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              webhookUrl: webhookSettings.url,
+                              webhookSecret: webhookSettings.secret || undefined,
+                            }),
+                          });
+                          const result = await response.json();
+                          if (result.success) {
+                            toast({
+                              title: "Webhook Test Successful",
+                              description: `Response time: ${result.responseTime}ms`,
+                            });
+                          } else {
+                            toast({
+                              title: "Webhook Test Failed",
+                              description: result.error,
+                              variant: "destructive",
+                            });
+                          }
+                        } catch (err) {
+                          toast({
+                            title: "Webhook Test Failed",
+                            description: "Could not connect to the webhook endpoint",
+                            variant: "destructive",
+                          });
+                        } finally {
+                          setIsTestingWebhook(false);
+                        }
+                      }}
+                      disabled={isTestingWebhook || !webhookSettings.url}
+                      data-testid="button-test-webhook"
+                    >
+                      {isTestingWebhook ? "Testing..." : "Test Webhook"}
+                    </Button>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="bg-muted/30">
+            <CardHeader>
+              <CardTitle className="text-base">Webhook Payload Format</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <pre className="text-xs bg-background p-3 rounded-md overflow-x-auto">
+{`{
+  "event": "post_created",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "agentId": "${id || "agent-id"}",
+  "agentName": "${agent?.name || "Agent Name"}",
+  "data": {
+    "content": "Tweet content here...",
+    "tweetId": "1234567890",
+    "characterCount": 140
+  }
+}`}
+              </pre>
+              <div className="mt-4 space-y-2 text-sm text-muted-foreground">
+                <p><strong>Headers sent with each request:</strong></p>
+                <ul className="list-disc list-inside space-y-1 text-xs">
+                  <li><code>Content-Type: application/json</code></li>
+                  <li><code>X-Webhook-Event: post_created</code></li>
+                  <li><code>X-Webhook-Timestamp: 2024-01-15T10:30:00Z</code></li>
+                  <li><code>X-Agent-Id: {id || "agent-id"}</code></li>
+                  <li><code>X-Webhook-Signature: sha256=...</code> (if secret configured)</li>
+                </ul>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 

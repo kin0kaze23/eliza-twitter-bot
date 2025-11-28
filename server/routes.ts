@@ -1661,6 +1661,43 @@ Respond in JSON format:
     }
   });
 
+  // Test webhook endpoint
+  app.post("/api/agents/:id/test-webhook", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { webhookUrl, webhookSecret } = req.body;
+
+      if (!webhookUrl) {
+        return res.status(400).json({ error: "Webhook URL is required" });
+      }
+
+      const { testWebhookConnection } = await import("./webhook");
+      const result = await testWebhookConnection(webhookUrl, webhookSecret);
+
+      if (result.success) {
+        res.json({
+          success: true,
+          message: "Webhook test successful",
+          statusCode: result.statusCode,
+          responseTime: result.responseTime,
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          error: result.error,
+          statusCode: result.statusCode,
+          responseTime: result.responseTime,
+        });
+      }
+    } catch (error: any) {
+      console.error("Error testing webhook:", error);
+      res.status(500).json({
+        success: false,
+        error: error.message || "Failed to test webhook",
+      });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
