@@ -1713,10 +1713,13 @@ export default function AgentConfigure() {
                 )}
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-2 p-3 border border-amber-200 dark:border-amber-900/50 rounded-md bg-amber-50/50 dark:bg-amber-950/20">
                 <div className="flex items-center justify-between">
-                  <Label>Temperature</Label>
-                  <span className="text-sm text-muted-foreground">{modelConfig.temperature[0].toFixed(2)}</span>
+                  <div className="flex items-center gap-2">
+                    <Label>Temperature</Label>
+                    <Badge className="text-xs bg-amber-500 hover:bg-amber-600">IMPORTANT</Badge>
+                  </div>
+                  <span className="text-sm font-medium">{modelConfig.temperature[0].toFixed(2)}</span>
                 </div>
                 <Slider
                   value={modelConfig.temperature}
@@ -1724,12 +1727,18 @@ export default function AgentConfigure() {
                   max={2}
                   step={0.1}
                 />
+                <p className="text-xs text-muted-foreground">
+                  <strong>0.3-0.5:</strong> Strict format adherence, consistent output &bull; <strong>0.6-0.8:</strong> Balanced creativity &bull; <strong>0.9+:</strong> More variation
+                </p>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-2 p-3 border border-amber-200 dark:border-amber-900/50 rounded-md bg-amber-50/50 dark:bg-amber-950/20">
                 <div className="flex items-center justify-between">
-                  <Label>Max Tokens</Label>
-                  <span className="text-sm text-muted-foreground">{modelConfig.maxTokens[0]}</span>
+                  <div className="flex items-center gap-2">
+                    <Label>Max Tokens</Label>
+                    <Badge className="text-xs bg-amber-500 hover:bg-amber-600">IMPORTANT</Badge>
+                  </div>
+                  <span className="text-sm font-medium">{modelConfig.maxTokens[0]}</span>
                 </div>
                 <Slider
                   value={modelConfig.maxTokens}
@@ -1738,6 +1747,9 @@ export default function AgentConfigure() {
                   max={4000}
                   step={100}
                 />
+                <p className="text-xs text-muted-foreground">
+                  <strong>Recommended:</strong> 500+ for multi-paragraph posts. Too low will truncate your output and cut off sections.
+                </p>
               </div>
 
               <div className="space-y-2">
