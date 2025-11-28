@@ -114,7 +114,11 @@ export const agents = pgTable("agents", {
   rateLimitPerHour: integer("rate_limit_per_hour").default(20),
   contentFilterEnabled: boolean("content_filter_enabled").default(true),
   requireApproval: boolean("require_approval").default(false),
+  // Webhook configuration
   webhookUrl: text("webhook_url"), // for monitoring/alerts
+  webhookSecret: text("webhook_secret"), // HMAC secret for signature verification
+  webhookEvents: jsonb("webhook_events").$type<string[]>().default(sql`'["post_created", "post_failed", "error"]'`), // events to send
+  webhookEnabled: boolean("webhook_enabled").default(false),
   
   // Knowledge Base Selection Settings
   kbMaxEntries: integer("kb_max_entries").default(5), // max KB entries per generation
