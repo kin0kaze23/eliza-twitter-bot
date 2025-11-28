@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw } from "lucide-react";
+import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Link, useParams } from "wouter";
@@ -329,6 +329,14 @@ export default function AgentConfigure() {
     minNewsSentiment: [0.6],
   });
 
+  // Knowledge Base Settings
+  const [kbSettings, setKbSettings] = useState({
+    maxEntries: "5",
+    maxTokens: "1500",
+    reusePolicy: "deprioritize", // never, deprioritize, allow
+    reuseCooldownHours: "24",
+  });
+
   // Knowledge Base (Per-Agent)
   const [knowledgeBase, setKnowledgeBase] = useState<KBEntry[]>([]);
   const [isAddKBDialogOpen, setIsAddKBDialogOpen] = useState(false);
@@ -604,6 +612,11 @@ export default function AgentConfigure() {
         volumeChangeThreshold: behavior.volumeChangeThreshold[0],
         autoTweetOnNews: behavior.autoTweetOnNews,
         minNewsSentiment: behavior.minNewsSentiment[0].toString(),
+        // Knowledge Base Settings
+        kbMaxEntries: parseInt(kbSettings.maxEntries),
+        kbMaxTokens: parseInt(kbSettings.maxTokens),
+        kbReusePolicy: kbSettings.reusePolicy,
+        kbReuseCooldownHours: parseInt(kbSettings.reuseCooldownHours),
       });
     },
     onSuccess: () => {
@@ -789,6 +802,14 @@ export default function AgentConfigure() {
       volumeChangeThreshold: [agent.volumeChangeThreshold || 50],
       autoTweetOnNews: agent.autoTweetOnNews ?? true,
       minNewsSentiment: [parseFloat(agent.minNewsSentiment || "0.6")],
+    });
+    
+    // Load KB settings
+    setKbSettings({
+      maxEntries: (agent.kbMaxEntries || 5).toString(),
+      maxTokens: (agent.kbMaxTokens || 1500).toString(),
+      reusePolicy: agent.kbReusePolicy || "deprioritize",
+      reuseCooldownHours: (agent.kbReuseCooldownHours || 24).toString(),
     });
   }, [agent]);
 
@@ -1951,6 +1972,82 @@ export default function AgentConfigure() {
                   </div>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* KB Selection Settings */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Settings className="h-4 w-4" />
+                Knowledge Selection Settings
+              </CardTitle>
+              <CardDescription>Control how knowledge base entries are selected for posts</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="kb-max-entries">Max Entries Per Post</Label>
+                  <Input
+                    id="kb-max-entries"
+                    type="number"
+                    min="1"
+                    max="20"
+                    value={kbSettings.maxEntries}
+                    onChange={(e) => setKbSettings({ ...kbSettings, maxEntries: e.target.value })}
+                    data-testid="input-kb-max-entries"
+                  />
+                  <p className="text-xs text-muted-foreground">Maximum KB entries to include in each generation</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="kb-max-tokens">Max KB Tokens</Label>
+                  <Input
+                    id="kb-max-tokens"
+                    type="number"
+                    min="100"
+                    max="10000"
+                    step="100"
+                    value={kbSettings.maxTokens}
+                    onChange={(e) => setKbSettings({ ...kbSettings, maxTokens: e.target.value })}
+                    data-testid="input-kb-max-tokens"
+                  />
+                  <p className="text-xs text-muted-foreground">Maximum tokens to use from knowledge base</p>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="kb-reuse-policy">Reuse Policy</Label>
+                <Select
+                  value={kbSettings.reusePolicy}
+                  onValueChange={(v) => setKbSettings({ ...kbSettings, reusePolicy: v })}
+                >
+                  <SelectTrigger data-testid="select-kb-reuse-policy">
+                    <SelectValue placeholder="Select reuse policy" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="never">Never Reuse - Skip entries used in recent posts</SelectItem>
+                    <SelectItem value="deprioritize">Deprioritize - Prefer unused entries but allow reuse</SelectItem>
+                    <SelectItem value="allow">Allow - No restrictions on reuse</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">How to handle KB entries that have already been used in posts</p>
+              </div>
+              
+              {kbSettings.reusePolicy !== "allow" && (
+                <div className="space-y-2">
+                  <Label htmlFor="kb-cooldown">Cooldown Period (Hours)</Label>
+                  <Input
+                    id="kb-cooldown"
+                    type="number"
+                    min="1"
+                    max="168"
+                    value={kbSettings.reuseCooldownHours}
+                    onChange={(e) => setKbSettings({ ...kbSettings, reuseCooldownHours: e.target.value })}
+                    data-testid="input-kb-cooldown"
+                  />
+                  <p className="text-xs text-muted-foreground">Hours to wait before allowing an entry to be reused</p>
+                </div>
+              )}
             </CardContent>
           </Card>
 

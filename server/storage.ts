@@ -1,4 +1,5 @@
 import { db } from "./db";
+export { db };
 import {
   type User,
   type InsertUser,

@@ -122,6 +122,8 @@ export const agents = pgTable("agents", {
   kbCategoryWeights: jsonb("kb_category_weights").$type<Record<string, number>>().default(sql`'{}'`), // category priority weights
   kbPriorityBias: text("kb_priority_bias").default("0.5"), // 0-1, how much to favor high-priority
   kbInjectionMethod: text("kb_injection_method").default("prepend"), // prepend, append, context
+  kbReusePolicy: text("kb_reuse_policy").default("deprioritize"), // never (exclude used), deprioritize (lower priority), allow (no restriction)
+  kbReuseCooldownHours: integer("kb_reuse_cooldown_hours").default(24), // hours before entry can be reused (for 'never' policy)
   
   // Metadata
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -170,6 +172,11 @@ export const knowledgeBase = pgTable("knowledge_base", {
   refreshStrategy: text("refresh_strategy").default("static").notNull(), // static, daily, weekly, on_demand
   lastRefreshedAt: timestamp("last_refreshed_at"),
   expiresAt: timestamp("expires_at"), // Optional expiration for time-sensitive content
+  
+  // Usage tracking (for preventing reuse after posting)
+  usedAt: timestamp("used_at"), // Last time this entry was used in a generation
+  usedCount: integer("used_count").default(0).notNull(), // How many times used
+  usedInTweetIds: jsonb("used_in_tweet_ids").$type<string[]>().default(sql`'[]'`), // IDs of tweets that used this entry
   
   // Metadata
   createdAt: timestamp("created_at").defaultNow().notNull(),

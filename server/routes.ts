@@ -1,8 +1,9 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
-import { insertAgentSchema, insertKnowledgeBaseSchema, insertCustomApiSchema, insertApiKeySchema, insertAgentActivitySchema } from "@shared/schema";
+import { storage, db } from "./storage";
+import { insertAgentSchema, insertKnowledgeBaseSchema, insertCustomApiSchema, insertApiKeySchema, insertAgentActivitySchema, knowledgeBase } from "@shared/schema";
 import { z } from "zod";
+import { eq, sql } from "drizzle-orm";
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import OAuth from "oauth-1.0a";
@@ -1608,10 +1609,10 @@ Respond in JSON format:
         return res.status(400).json({ error: `Unsupported model provider: ${agent.modelProvider}` });
       }
 
-      // Get active KB entries for logging
+      // Get active KB entries for logging using the IDs from prompt assembly
+      const kbUsedIds = assembledPrompt.metadata.kbEntriesUsedIds || [];
       const kbSources = knowledgeEntries
-        .filter(kb => kb.active && kb.status === "approved")
-        .slice(0, assembledPrompt.metadata.kbEntriesUsed)
+        .filter(kb => kbUsedIds.includes(kb.id))
         .map(entry => ({
           id: entry.id,
           title: entry.title,
@@ -1620,12 +1621,31 @@ Respond in JSON format:
           priority: entry.priority
         }));
 
+      // Mark KB entries as used (prevent reuse based on agent's kbReusePolicy)
+      if (kbUsedIds.length > 0) {
+        const tweetId = `tweet_${Date.now()}`;
+        for (const kbId of kbUsedIds) {
+          try {
+            await db.update(knowledgeBase)
+              .set({
+                usedAt: new Date(),
+                usedCount: sql`COALESCE(${knowledgeBase.usedCount}, 0) + 1`,
+                usedInTweetIds: sql`COALESCE(${knowledgeBase.usedInTweetIds}, '[]'::jsonb) || ${JSON.stringify([tweetId])}::jsonb`,
+              })
+              .where(eq(knowledgeBase.id, kbId));
+          } catch (err) {
+            console.error(`Failed to mark KB entry ${kbId} as used:`, err);
+          }
+        }
+      }
+
       res.json({
         success: true,
         tweet,
         mode: prompt ? "prompted" : "auto-generated",
         kbEntriesCount: assembledPrompt.metadata.kbEntriesUsed,
         kbSources,
+        kbMarkedAsUsed: kbUsedIds.length,
         config: {
           provider: agent.modelProvider,
           model: agent.modelName,

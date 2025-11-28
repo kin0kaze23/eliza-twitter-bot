@@ -13,6 +13,7 @@ export interface AssembledPrompt {
   messages: Array<{ role: string; content: string }>;
   metadata: {
     kbEntriesUsed: number;
+    kbEntriesUsedIds: string[];
     examplesUsed: number;
     componentsIncluded: string[];
   };
@@ -77,18 +78,49 @@ export async function assemblePrompt(
     }
   }
 
-  // 4. Knowledge base entries (active, approved, prioritized)
+  // 4. Knowledge base entries (active, approved, prioritized with reuse policy)
   let kbEntriesUsed = 0;
+  const kbEntriesUsedIds: string[] = [];
+  const reusePolicy = (agent as any).kbReusePolicy || "deprioritize";
+  const reuseCooldownHours = (agent as any).kbReuseCooldownHours || 24;
+  const now = new Date();
+  
   if (includeKnowledge && knowledgeEntries.length > 0) {
     // Filter: only active and approved entries
-    const activeKb = knowledgeEntries
-      .filter(kb => kb.active && kb.status === "approved")
-      .sort((a, b) => {
-        // Sort by priority (desc), then by freshness (desc)
-        if (b.priority !== a.priority) return b.priority - a.priority;
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      })
-      .slice(0, maxKbEntries);
+    let activeKb = knowledgeEntries
+      .filter(kb => kb.active && kb.status === "approved");
+    
+    // Apply reuse policy
+    if (reusePolicy === "never") {
+      // Exclude entries used within cooldown period
+      activeKb = activeKb.filter(kb => {
+        if (!kb.usedAt) return true; // Never used, include
+        const usedTime = new Date(kb.usedAt).getTime();
+        const cooldownMs = reuseCooldownHours * 60 * 60 * 1000;
+        return (now.getTime() - usedTime) > cooldownMs; // Include if cooldown passed
+      });
+    }
+    
+    // Sort entries with reuse consideration
+    activeKb = activeKb.sort((a, b) => {
+      // If deprioritize policy, penalize recently used entries
+      if (reusePolicy === "deprioritize") {
+        const aUsed = a.usedAt ? 1 : 0;
+        const bUsed = b.usedAt ? 1 : 0;
+        if (aUsed !== bUsed) return aUsed - bUsed; // Unused entries first
+        
+        // If both used, prefer the one used longer ago
+        if (a.usedAt && b.usedAt) {
+          const aTime = new Date(a.usedAt).getTime();
+          const bTime = new Date(b.usedAt).getTime();
+          if (aTime !== bTime) return aTime - bTime; // Older usage first
+        }
+      }
+      
+      // Then sort by priority (desc), then by freshness (desc)
+      if (b.priority !== a.priority) return b.priority - a.priority;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    }).slice(0, maxKbEntries);
 
     if (activeKb.length > 0) {
       systemPrompt += "## Knowledge Base\n";
@@ -106,6 +138,7 @@ export async function assemblePrompt(
         systemPrompt += `### ${kb.title}\n${kb.content}\n\n`;
         tokenCount += estimatedTokens;
         kbEntriesUsed++;
+        kbEntriesUsedIds.push(kb.id);
       }
 
       componentsIncluded.push("knowledgeBase");
@@ -148,6 +181,7 @@ export async function assemblePrompt(
     messages,
     metadata: {
       kbEntriesUsed,
+      kbEntriesUsedIds,
       examplesUsed,
       componentsIncluded,
     },
