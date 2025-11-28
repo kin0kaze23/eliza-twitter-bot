@@ -9,6 +9,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import OAuth from "oauth-1.0a";
 import crypto from "crypto";
 import { assemblePrompt, buildMessagesArray } from "./promptAssembly";
+import { sendPostCreatedWebhook, sendPostFailedWebhook } from "./webhook";
 
 // Helper to build OpenAI completion params with model-specific support
 function buildOpenAIParams(modelName: string, baseParams: any) {
@@ -1641,7 +1642,6 @@ Respond in JSON format:
 
       // Send webhook notification for successful tweet generation
       if (agent.webhookEnabled && agent.webhookUrl) {
-        const { sendPostCreatedWebhook } = await import("./webhook");
         sendPostCreatedWebhook(agent, tweet, undefined, {
           mode: prompt ? "prompted" : "auto-generated",
           kbEntriesUsed: assembledPrompt.metadata.kbEntriesUsed,
@@ -1669,7 +1669,6 @@ Respond in JSON format:
       try {
         const agent = await storage.getAgent(req.body.agentId);
         if (agent?.webhookEnabled && agent?.webhookUrl) {
-          const { sendPostFailedWebhook } = await import("./webhook");
           sendPostFailedWebhook(agent, error.message, req.body.prompt).catch(err => 
             console.error("Webhook error:", err)
           );
