@@ -465,7 +465,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (api.jsonPath && typeof responseData === "object") {
         try {
           // Use jsonpath library for proper JSONPath extraction
-          const jp = await import("jsonpath");
+          const jpModule = await import("jsonpath");
+          const jp = jpModule.default || jpModule;
           extractedData = jp.query(responseData, api.jsonPath);
           
           // Extract title and content from first item if paths provided
@@ -1001,7 +1002,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const data = await response.json();
       
       // Extract data using JSON path
-      const jp = await import("jsonpath");
+      const jpModule = await import("jsonpath");
+      const jp = jpModule.default || jpModule;
       let extractedData: any[] = [];
       
       try {
