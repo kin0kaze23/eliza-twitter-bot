@@ -108,6 +108,8 @@ export default function AgentConfigure() {
   const [twitterTestResult, setTwitterTestResult] = useState<{ success: boolean; message?: string; error?: string; hint?: string; user?: any } | null>(null);
   const [modelTestResult, setModelTestResult] = useState<{ success: boolean; provider?: string; modelCount?: number; latestModel?: string; models?: any[]; error?: string; hint?: string; note?: string } | null>(null);
   const [availableModels, setAvailableModels] = useState<any[]>([]);
+  const [availablePostModels, setAvailablePostModels] = useState<any[]>([]);
+  const [availableConversationModels, setAvailableConversationModels] = useState<any[]>([]);
   
   // Twitter API Test Mutation
   const testTwitter = useMutation({
@@ -140,7 +142,7 @@ export default function AgentConfigure() {
     },
   });
 
-  // AI Model API Test Mutation
+  // AI Model API Test Mutation (Default Model)
   const testModel = useMutation({
     mutationFn: async () => {
       const response = await fetch(`/api/agents/${id}/test/model`, {
@@ -174,6 +176,54 @@ export default function AgentConfigure() {
         description: errorData.hint || errorData.error || "Failed to test model API key",
         variant: "destructive",
       });
+    },
+  });
+
+  // Test models for post generation
+  const testPostModels = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`/api/agents/${id}/test/model`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: postModelConfig.provider,
+          apiKey: modelConfig.apiKey,
+        }),
+      });
+      if (!response.ok) throw new Error("Failed to load models");
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      setAvailablePostModels(data.models || []);
+      toast({ title: "Post models loaded", description: `Found ${data.modelCount} models` });
+    },
+    onError: () => {
+      setAvailablePostModels([]);
+      toast({ title: "Failed to load models", variant: "destructive" });
+    },
+  });
+
+  // Test models for conversation
+  const testConversationModels = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`/api/agents/${id}/test/model`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: conversationModelConfig.provider,
+          apiKey: modelConfig.apiKey,
+        }),
+      });
+      if (!response.ok) throw new Error("Failed to load models");
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      setAvailableConversationModels(data.models || []);
+      toast({ title: "Conversation models loaded", description: `Found ${data.modelCount} models` });
+    },
+    onError: () => {
+      setAvailableConversationModels([]);
+      toast({ title: "Failed to load models", variant: "destructive" });
     },
   });
   
@@ -694,6 +744,22 @@ export default function AgentConfigure() {
       frequencyPenalty: [typeof agent.frequencyPenalty === 'number' ? agent.frequencyPenalty : 0.5],
       presencePenalty: [typeof agent.presencePenalty === 'number' ? agent.presencePenalty : 0.5],
       contextWindow: (agent.contextWindow || 8000).toString(),
+    });
+    
+    // Load post-specific model config
+    setPostModelConfig({
+      provider: agent.postModelProvider || "",
+      model: agent.postModelName || "",
+      temperature: [typeof agent.postTemperature === 'number' ? agent.postTemperature : 0.7],
+      maxTokens: [agent.postMaxTokens || 280],
+    });
+    
+    // Load conversation-specific model config
+    setConversationModelConfig({
+      provider: agent.conversationModelProvider || "",
+      model: agent.conversationModelName || "",
+      temperature: [typeof agent.conversationTemperature === 'number' ? agent.conversationTemperature : 0.7],
+      maxTokens: [agent.conversationMaxTokens || 500],
     });
     
     // Load behavior
@@ -1490,13 +1556,42 @@ export default function AgentConfigure() {
                 <>
                   <div className="space-y-2">
                     <Label htmlFor="post-model-name">Model Name</Label>
-                    <Input
-                      id="post-model-name"
-                      value={postModelConfig.model}
-                      onChange={(e) => setPostModelConfig({ ...postModelConfig, model: e.target.value })}
-                      placeholder="e.g., gpt-4-turbo-preview or claude-3-opus-20240229"
-                      data-testid="input-post-model-name"
-                    />
+                    {availablePostModels.length > 0 ? (
+                      <div className="flex gap-2">
+                        <Select value={postModelConfig.model} onValueChange={(v) => setPostModelConfig({ ...postModelConfig, model: v })}>
+                          <SelectTrigger id="post-model-name" data-testid="select-post-model-name">
+                            <SelectValue placeholder="Select a model" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availablePostModels.filter((m) => m.id || m.name).map((m, idx) => {
+                              const modelId = m.id || m.name || `model-${idx}`;
+                              const modelName = m.name || m.id || `Model ${idx + 1}`;
+                              return (
+                                <SelectItem key={modelId} value={modelId}>
+                                  {modelName}
+                                </SelectItem>
+                              );
+                            })}
+                          </SelectContent>
+                        </Select>
+                        <Button variant="outline" size="icon" onClick={() => testPostModels.mutate()} disabled={testPostModels.isPending}>
+                          <RefreshCw className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <Input
+                          id="post-model-name"
+                          value={postModelConfig.model}
+                          onChange={(e) => setPostModelConfig({ ...postModelConfig, model: e.target.value })}
+                          placeholder="e.g., gpt-4-turbo-preview"
+                          data-testid="input-post-model-name"
+                        />
+                        <Button variant="outline" onClick={() => testPostModels.mutate()} disabled={testPostModels.isPending}>
+                          {testPostModels.isPending ? "Loading..." : "Load"}
+                        </Button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -1559,13 +1654,42 @@ export default function AgentConfigure() {
                 <>
                   <div className="space-y-2">
                     <Label htmlFor="conversation-model-name">Model Name</Label>
-                    <Input
-                      id="conversation-model-name"
-                      value={conversationModelConfig.model}
-                      onChange={(e) => setConversationModelConfig({ ...conversationModelConfig, model: e.target.value })}
-                      placeholder="e.g., gpt-4-turbo-preview or claude-3-opus-20240229"
-                      data-testid="input-conversation-model-name"
-                    />
+                    {availableConversationModels.length > 0 ? (
+                      <div className="flex gap-2">
+                        <Select value={conversationModelConfig.model} onValueChange={(v) => setConversationModelConfig({ ...conversationModelConfig, model: v })}>
+                          <SelectTrigger id="conversation-model-name" data-testid="select-conversation-model-name">
+                            <SelectValue placeholder="Select a model" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableConversationModels.filter((m) => m.id || m.name).map((m, idx) => {
+                              const modelId = m.id || m.name || `model-${idx}`;
+                              const modelName = m.name || m.id || `Model ${idx + 1}`;
+                              return (
+                                <SelectItem key={modelId} value={modelId}>
+                                  {modelName}
+                                </SelectItem>
+                              );
+                            })}
+                          </SelectContent>
+                        </Select>
+                        <Button variant="outline" size="icon" onClick={() => testConversationModels.mutate()} disabled={testConversationModels.isPending}>
+                          <RefreshCw className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <Input
+                          id="conversation-model-name"
+                          value={conversationModelConfig.model}
+                          onChange={(e) => setConversationModelConfig({ ...conversationModelConfig, model: e.target.value })}
+                          placeholder="e.g., gpt-4-turbo-preview"
+                          data-testid="input-conversation-model-name"
+                        />
+                        <Button variant="outline" onClick={() => testConversationModels.mutate()} disabled={testConversationModels.isPending}>
+                          {testConversationModels.isPending ? "Loading..." : "Load"}
+                        </Button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-2">
