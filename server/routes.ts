@@ -945,7 +945,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ============= KB AUTO-INGESTION ============= //
 
   // Helper function to evaluate news relevance using AI with numeric scoring
-  async function evaluateRelevance(title: string, content: string): Promise<{ 
+  async function evaluateRelevance(title: string, content: string, customFilterPrompt?: string): Promise<{ 
     isRelevant: boolean; 
     relevanceScore: number;
     topics: string[]; 
@@ -961,7 +961,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY
       });
 
-      const prompt = `You are a content relevance filter for a Twitter AI agent focused on crypto, tech, and Twitter/social media topics.
+      // Use custom filter prompt if provided, otherwise use default
+      const basePrompt = customFilterPrompt 
+        ? `You are a content relevance filter for a Twitter AI agent.
+
+Evaluate this news item based on the following custom criteria:
+${customFilterPrompt}
+
+News item:
+Title: ${title}
+Content: ${content.substring(0, 1000)}
+
+Rate the content's relevance (0.0 to 1.0) based on how well it matches the criteria above.`
+        : `You are a content relevance filter for a Twitter AI agent focused on crypto, tech, and Twitter/social media topics.
 
 Evaluate this news item for relevance:
 Title: ${title}
@@ -970,7 +982,9 @@ Content: ${content.substring(0, 1000)}
 Rate the content's relevance (0.0 to 1.0) to audiences interested in:
 - Cryptocurrency, blockchain, DeFi, NFTs, Web3
 - Technology, AI, software development, startups
-- Twitter/X, social media trends, digital culture
+- Twitter/X, social media trends, digital culture`;
+
+      const prompt = `${basePrompt}
 
 Scoring guide:
 - 0.0-0.3: Not relevant or off-topic
@@ -981,7 +995,7 @@ Scoring guide:
 Respond in JSON format:
 {
   "relevanceScore": 0.75,
-  "topics": ["crypto", "ai"],
+  "topics": ["topic1", "topic2"],
   "reason": "brief explanation of score"
 }`;
 
@@ -1125,8 +1139,8 @@ Respond in JSON format:
           }
         }
         
-        // AI-powered relevance evaluation
-        const relevanceEval = await evaluateRelevance(title, content);
+        // AI-powered relevance evaluation with custom filter prompt from API config
+        const relevanceEval = await evaluateRelevance(title, content, customApi.filterPrompt || undefined);
         
         // Auto-approve if relevant, otherwise keep as pending for manual review
         const isAutoApproved = relevanceEval.isRelevant;
