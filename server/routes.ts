@@ -9,6 +9,25 @@ import OAuth from "oauth-1.0a";
 import crypto from "crypto";
 import { assemblePrompt, buildMessagesArray } from "./promptAssembly";
 
+// Helper to build OpenAI completion params with model-specific support
+function buildOpenAIParams(modelName: string, baseParams: any) {
+  const params = { ...baseParams };
+  const modelLower = (modelName || "").toLowerCase();
+  
+  // gpt-4.1-mini and mini models only support temperature=1
+  if (modelLower.includes("mini") || modelLower.includes("4o-mini")) {
+    params.temperature = 1;
+  }
+  
+  // Some models don't support frequency_penalty or presence_penalty
+  if (modelLower.includes("mini")) {
+    delete params.frequency_penalty;
+    delete params.presence_penalty;
+  }
+  
+  return params;
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============= AGENTS ============= //
   
@@ -591,7 +610,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (agent.modelProvider === "openai" || !agent.modelProvider) {
         const openai = new OpenAI({ apiKey });
         
-        const completion = await openai.chat.completions.create({
+        const params = buildOpenAIParams(agent.modelName, {
           model: agent.modelName || "gpt-4-turbo-preview",
           messages: messages as any,
           temperature: Number(agent.temperature) || 0.7,
@@ -600,6 +619,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           frequency_penalty: Number(agent.frequencyPenalty) || 0.5,
           presence_penalty: Number(agent.presencePenalty) || 0.5,
         });
+        
+        const completion = await openai.chat.completions.create(params as any);
         
         response = completion.choices[0]?.message?.content || "No response generated";
         
@@ -1517,12 +1538,14 @@ Respond in JSON format:
           baseURL: process.env.OPENAI_API_KEY ? undefined : process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
         });
         
-        const completion = await openai.chat.completions.create({
+        const params = buildOpenAIParams(agent.modelName, {
           model: agent.modelName || "gpt-4-turbo-preview",
           messages: messages as any,
           temperature: Number(agent.temperature) || 0.7,
           max_completion_tokens: 280, // Twitter character limit context
         });
+        
+        const completion = await openai.chat.completions.create(params as any);
         
         tweet = completion.choices[0]?.message?.content || "No tweet generated";
         
