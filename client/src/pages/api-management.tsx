@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { CustomApi } from "@shared/schema";
+import type { CustomApi, Agent } from "@shared/schema";
 import { useState } from "react";
 import {
   Plus,
@@ -31,8 +31,10 @@ export default function APIManagement() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingApi, setEditingApi] = useState<CustomApi | null>(null);
   const [testingApiId, setTestingApiId] = useState<string | null>(null);
+  const [testedApiId, setTestedApiId] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<any>(null);
   const [showRawResponse, setShowRawResponse] = useState(false);
+  const [selectedAgentForIngest, setSelectedAgentForIngest] = useState<string>("");
 
   // Form state
   const [formData, setFormData] = useState({
@@ -58,26 +60,37 @@ export default function APIManagement() {
     queryKey: ["/api/custom-apis"],
   });
 
+  // Fetch all agents for ingestion
+  const { data: agents = [] } = useQuery<Agent[]>({
+    queryKey: ["/api/agents"],
+  });
+
   // Test API mutation
   const testApiMutation = useMutation({
     mutationFn: async (apiId: string) => {
       setTestingApiId(apiId);
+      setTestResult(null); // Clear previous test results
+      setTestedApiId(null); // Clear previous tested API
       const response = await fetch(`/api/custom-apis/${apiId}/test`, {
         method: "POST",
       });
-      return response.json();
+      return { data: await response.json(), apiId };
     },
-    onSuccess: (data) => {
+    onSuccess: ({ data, apiId }) => {
       setTestResult(data);
       setTestingApiId(null);
       queryClient.invalidateQueries({ queryKey: ["/api/custom-apis"] });
       
       if (data.success) {
+        // Only set testedApiId when test actually succeeds
+        setTestedApiId(apiId);
         toast({
           title: "API Test Successful",
           description: `Extracted ${data.extractedCount || 0} items from response`,
         });
       } else {
+        // Clear testedApiId on test failure
+        setTestedApiId(null);
         toast({
           title: "API Test Failed",
           description: data.error || "Failed to fetch from API",
@@ -87,6 +100,8 @@ export default function APIManagement() {
     },
     onError: (error: any) => {
       setTestingApiId(null);
+      setTestedApiId(null); // Clear on error
+      setTestResult(null); // Clear test results
       toast({
         title: "Test Error",
         description: error.message || "Failed to test API",
@@ -193,6 +208,36 @@ export default function APIManagement() {
       toast({
         title: "API Deleted",
         description: "Custom API has been removed",
+      });
+    },
+  });
+
+  // Ingest data to agent mutation
+  const ingestMutation = useMutation({
+    mutationFn: async ({ apiId, agentId }: { apiId: string; agentId: string }) => {
+      const response = await fetch(`/api/agents/${agentId}/knowledge/ingest/${apiId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to ingest data");
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
+      toast({
+        title: "Data Ingested Successfully",
+        description: `${data.count} entries added to Review Queue`,
+      });
+      setSelectedAgentForIngest("");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Ingestion Failed",
+        description: error.message || "Failed to ingest data to agent",
+        variant: "destructive",
       });
     },
   });
@@ -661,6 +706,70 @@ export default function APIManagement() {
                 </pre>
               </div>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Ingest to Agent Section */}
+      {testResult && testResult.success && testResult.extractedCount > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Ingest to Agent</CardTitle>
+            <CardDescription>
+              Pull {testResult.extractedCount} {testResult.extractedCount === 1 ? 'entry' : 'entries'} into your agent's knowledge base for review
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="agent-select">Select Agent</Label>
+              <Select
+                value={selectedAgentForIngest}
+                onValueChange={setSelectedAgentForIngest}
+              >
+                <SelectTrigger id="agent-select" data-testid="select-ingest-agent">
+                  <SelectValue placeholder="Choose an agent..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {agents.length === 0 ? (
+                    <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                      No agents available. Create one first.
+                    </div>
+                  ) : (
+                    agents.map((agent) => (
+                      <SelectItem key={agent.id} value={agent.id}>
+                        {agent.name} (@{agent.username})
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                onClick={() => {
+                  if (!selectedAgentForIngest) {
+                    toast({
+                      title: "No Agent Selected",
+                      description: "Please select an agent to ingest data",
+                      variant: "destructive",
+                    });
+                    return;
+                  }
+                  if (testedApiId) {
+                    ingestMutation.mutate({ apiId: testedApiId, agentId: selectedAgentForIngest });
+                  }
+                }}
+                disabled={!selectedAgentForIngest || ingestMutation.isPending}
+                data-testid="button-ingest-now"
+              >
+                <PlayCircle className="mr-2 h-4 w-4" />
+                {ingestMutation.isPending ? "Ingesting..." : "Ingest Now"}
+              </Button>
+              <p className="text-sm text-muted-foreground flex items-center">
+                Entries will be added to the agent's Review Queue for approval
+              </p>
+            </div>
           </CardContent>
         </Card>
       )}

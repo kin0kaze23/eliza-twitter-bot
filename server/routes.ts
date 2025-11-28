@@ -948,11 +948,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/agents/:agentId/knowledge/ingest/:sourceId", async (req, res) => {
     try {
       const { agentId, sourceId } = req.params;
-      const { sourceType } = req.body; // "custom_api"
-      
-      if (sourceType !== "custom_api") {
-        return res.status(400).json({ error: "Only custom_api source type is supported" });
-      }
       
       // Fetch custom API configuration
       const customApi = await storage.getCustomApi(sourceId);
@@ -1066,7 +1061,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           active: false, // Inactive until approved
           status: "pending", // Requires review before becoming active
           refreshStrategy: "manual",
-          lastFetchedAt: new Date().toISOString(),
+          lastFetchedAt: new Date(),
           agentId: agentId,
         };
         
