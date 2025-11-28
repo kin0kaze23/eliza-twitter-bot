@@ -92,38 +92,81 @@ export default function Playground() {
     setForcePostResult(null);
 
     try {
-      const response = await fetch(`/api/agents/${selectedAgent}/force-post`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.success) {
-        setForcePostResult({
-          success: true,
-          tweet: data.tweet,
-          tweetId: data.tweetId,
-          tweetUrl: data.tweetUrl,
-          kbEntriesUsed: data.kbEntriesUsed,
+      // If there's already a successful preview, post that instead of generating new
+      if (testResult?.success && testResult?.output) {
+        // Use the previewed content - post via post-tweet endpoint
+        const response = await fetch(`/api/agents/${selectedAgent}/post-tweet`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: testResult.output }),
         });
-        toast({
-          title: "Tweet Posted to X!",
-          description: `Generated and posted successfully using ${data.kbEntriesUsed} KB entries`,
-        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+          setForcePostResult({
+            success: true,
+            tweet: testResult.output,
+            tweetId: data.tweetId,
+            tweetUrl: data.tweetUrl,
+            kbEntriesUsed: (testResult as any).kbEntriesCount || 0,
+          });
+          // Clear the test result since we posted it
+          setTestResult(null);
+          setPostResult({ success: true, tweetId: data.tweetId, tweetUrl: data.tweetUrl });
+          toast({
+            title: "Preview Posted to X!",
+            description: "Your previewed tweet was posted successfully",
+          });
+        } else {
+          setForcePostResult({
+            success: false,
+            tweet: testResult.output,
+            error: data.error || "Failed to post tweet",
+            errorCode: data.errorCode,
+            rateLimited: data.rateLimited,
+          });
+          toast({
+            title: data.rateLimited ? "Rate Limited" : "Failed to Post Tweet",
+            description: data.error || "Check Twitter credentials and try again",
+            variant: "destructive",
+          });
+        }
       } else {
-        setForcePostResult({
-          success: false,
-          tweet: data.tweet,
-          error: data.error || "Failed to post tweet",
-          errorCode: data.errorCode,
-          rateLimited: data.rateLimited,
+        // No preview - generate new content and post
+        const response = await fetch(`/api/agents/${selectedAgent}/force-post`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
         });
-        toast({
-          title: data.rateLimited ? "Rate Limited" : "Failed to Post Tweet",
-          description: data.error || "Check Twitter credentials and try again",
-          variant: "destructive",
-        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+          setForcePostResult({
+            success: true,
+            tweet: data.tweet,
+            tweetId: data.tweetId,
+            tweetUrl: data.tweetUrl,
+            kbEntriesUsed: data.kbEntriesUsed,
+          });
+          toast({
+            title: "Tweet Posted to X!",
+            description: `Generated and posted successfully using ${data.kbEntriesUsed} KB entries`,
+          });
+        } else {
+          setForcePostResult({
+            success: false,
+            tweet: data.tweet,
+            error: data.error || "Failed to post tweet",
+            errorCode: data.errorCode,
+            rateLimited: data.rateLimited,
+          });
+          toast({
+            title: data.rateLimited ? "Rate Limited" : "Failed to Post Tweet",
+            description: data.error || "Check Twitter credentials and try again",
+            variant: "destructive",
+          });
+        }
       }
     } catch (error: any) {
       console.error("Force post error:", error);
@@ -432,11 +475,22 @@ export default function Playground() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Zap className="h-5 w-5 text-primary" />
-                Force Generate & Post
+                {testResult?.success ? "Post Preview to X" : "Force Generate & Post"}
               </CardTitle>
-              <CardDescription>Generate a tweet from your knowledge base and post it directly to X/Twitter in one click.</CardDescription>
+              <CardDescription>
+                {testResult?.success 
+                  ? "Post your previewed tweet to X/Twitter. The exact preview content will be posted."
+                  : "Generate a tweet from your knowledge base and post it directly to X/Twitter in one click."
+                }
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {testResult?.success && (
+                <div className="bg-primary/10 border border-primary/30 p-3 rounded-md text-sm">
+                  <p className="font-medium text-primary mb-1">Preview Ready to Post:</p>
+                  <p className="text-muted-foreground line-clamp-2">{testResult.output}</p>
+                </div>
+              )}
               <Button
                 onClick={handleForceGenerateAndPost}
                 disabled={isForcePosting || !selectedAgent}
@@ -447,7 +501,12 @@ export default function Playground() {
                 {isForcePosting ? (
                   <>
                     <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    Generating & Posting...
+                    {testResult?.success ? "Posting Preview..." : "Generating & Posting..."}
+                  </>
+                ) : testResult?.success ? (
+                  <>
+                    <Send className="mr-2 h-4 w-4" />
+                    Post This Preview to X
                   </>
                 ) : (
                   <>
