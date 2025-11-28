@@ -1098,7 +1098,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ============= KB AUTO-INGESTION ============= //
 
   // Helper function to evaluate news relevance and priority using AI
-  async function evaluateRelevance(title: string, content: string, customFilterPrompt?: string): Promise<{ 
+  // Now includes learning from user priority corrections
+  async function evaluateRelevance(
+    title: string, 
+    content: string, 
+    customFilterPrompt?: string,
+    agentId?: string
+  ): Promise<{ 
     isRelevant: boolean; 
     relevanceScore: number;
     priority: "high" | "medium" | "low";
@@ -1115,13 +1121,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY
       });
 
+      // Fetch user priority corrections for learning (if agentId provided)
+      let learningExamples = "";
+      if (agentId) {
+        try {
+          const corrections = await storage.getPriorityCorrections(agentId, 10);
+          if (corrections.length > 0) {
+            learningExamples = `
+IMPORTANT: Learn from the user's past priority corrections. They have adjusted these entries:
+${corrections.slice(0, 5).map((c, i) => 
+  `${i + 1}. "${c.title.substring(0, 80)}..." (Category: ${c.category})
+   AI assigned: ${c.originalPriority} → User corrected to: ${c.priority}`
+).join('\n')}
+
+Use these corrections to better understand the user's priority preferences for similar content.
+`;
+          }
+        } catch (err) {
+          console.log("Could not fetch priority corrections for learning:", err);
+        }
+      }
+
       // Use custom filter prompt if provided, otherwise use default
       const basePrompt = customFilterPrompt 
         ? `You are a content relevance filter for a Twitter AI agent.
 
 Evaluate this news item based on the following custom criteria:
 ${customFilterPrompt}
-
+${learningExamples}
 News item:
 Title: ${title}
 Content: ${content.substring(0, 1000)}
@@ -1130,7 +1157,7 @@ Based on the criteria above:
 1. Rate the content's relevance (0.0 to 1.0)
 2. Assign a priority tag: "high" (breaking news, urgent, highly actionable), "medium" (interesting, worth posting), or "low" (general info, backup content)`
         : `You are a content relevance filter for a Twitter AI agent focused on crypto, tech, and Twitter/social media topics.
-
+${learningExamples}
 Evaluate this news item for relevance:
 Title: ${title}
 Content: ${content.substring(0, 1000)}
@@ -1312,7 +1339,8 @@ Respond in JSON format:
         }
         
         // AI-powered relevance evaluation with custom filter prompt from API config
-        const relevanceEval = await evaluateRelevance(title, content, customApi.filterPrompt || undefined);
+        // Pass agentId to enable learning from user's priority corrections
+        const relevanceEval = await evaluateRelevance(title, content, customApi.filterPrompt || undefined, agentId);
         
         // Auto-approve if relevant, otherwise keep as pending for manual review
         const isAutoApproved = relevanceEval.isRelevant;
