@@ -137,8 +137,8 @@ export async function assemblePrompt(
     }).slice(0, maxKbEntries);
 
     if (activeKb.length > 0) {
-      systemPrompt += "## Knowledge Base (PRIMARY SOURCE - MUST USE)\n";
-      systemPrompt += "IMPORTANT: You MUST incorporate this content into your responses. This is your PRIMARY source material:\n\n";
+      systemPrompt += "## Knowledge Base\n";
+      systemPrompt += "Use the following information when relevant:\n\n";
 
       let tokenCount = 0;
       for (const kb of activeKb) {
@@ -177,20 +177,20 @@ export async function assemblePrompt(
   // 6. Message examples (if available and enabled)
   let examplesUsed = 0;
   if (includeExamples && agent.messageExamples && agent.messageExamples.length > 0) {
-    // Add message examples as assistant messages to demonstrate tone/style
+    // Add explicit instruction about following examples format
+    systemPrompt += "## Message Examples (FOLLOW THIS FORMAT EXACTLY)\n";
+    systemPrompt += "The following are examples of EXACTLY how your posts should be structured. You MUST follow this format precisely - same structure, same sections, same style. Do not add hashtags unless shown in examples:\n\n";
+    
+    // Add examples to system prompt for clarity
     for (const example of agent.messageExamples.slice(0, 3)) {
-      // Limit to 3 examples
-      if (typeof example === "string") {
-        messages.push({
-          role: "assistant",
-          content: example,
-        });
-        examplesUsed++;
-      } else if (example && typeof example === "object" && "content" in example) {
-        messages.push({
-          role: "assistant",
-          content: String((example as any).content),
-        });
+      const content = typeof example === "string" 
+        ? example 
+        : (example && typeof example === "object" && "content" in example) 
+          ? String((example as any).content) 
+          : null;
+      
+      if (content) {
+        systemPrompt += `---\n${content}\n---\n\n`;
         examplesUsed++;
       }
     }

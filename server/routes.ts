@@ -1703,17 +1703,8 @@ Respond in JSON format:
         recentVerses,
       });
       
-      // Use the SAME prompt as force-post for consistency - with stronger KB instruction
-      const defaultTweetPrompt = `CRITICAL INSTRUCTION: You MUST incorporate content from the Knowledge Base section above into your tweet.
-
-Generate a tweet that:
-1. REQUIRED: Reference, quote, or build upon specific information from the Knowledge Base (crypto news, market data, etc.)
-2. Blend your personality/style with the factual KB content
-3. Stay under 280 characters
-4. Be authentic and engaging
-
-DO NOT generate a generic tweet that ignores the Knowledge Base content. The KB content is your PRIMARY source material - use it.`;
-      const tweetPrompt = prompt || defaultTweetPrompt;
+      // Use the SAME prompt as force-post for consistency
+      const tweetPrompt = prompt || "Generate a post following the exact structure and format demonstrated in your message examples. Use current knowledge base content as source material.";
       
       // Build messages for AI model
       const messages = buildMessagesArray(
@@ -1728,7 +1719,7 @@ DO NOT generate a generic tweet that ignores the Knowledge Base content. The KB 
       const postModelProvider = agent.postModelProvider || agent.modelProvider || "openai";
       const postModelName = agent.postModelName || agent.modelName || "gpt-4-turbo-preview";
       const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.7;
-      const postMaxTokens = agent.postMaxTokens || 280;
+      const postMaxTokens = agent.postMaxTokens || 500;
       
       // Call appropriate AI model
       if (postModelProvider === "openai") {
@@ -1923,21 +1914,13 @@ DO NOT generate a generic tweet that ignores the Knowledge Base content. The KB 
         recentVerses,
       });
       
-      const tweetPrompt = `CRITICAL INSTRUCTION: You MUST incorporate content from the Knowledge Base section above into your tweet.
-
-Generate a tweet that:
-1. REQUIRED: Reference, quote, or build upon specific information from the Knowledge Base (crypto news, market data, etc.)
-2. Blend your personality/style with the factual KB content
-3. Stay under 280 characters
-4. Be authentic and engaging
-
-DO NOT generate a generic tweet that ignores the Knowledge Base content. The KB content is your PRIMARY source material - use it.`;
+      const tweetPrompt = "Generate a post following the exact structure and format demonstrated in your message examples. Use current knowledge base content as source material.";
       const messages = buildMessagesArray(assembledPrompt, [], tweetPrompt);
       
       const postModelProvider = agent.postModelProvider || agent.modelProvider || "openai";
       const postModelName = agent.postModelName || agent.modelName || "gpt-4-turbo-preview";
       const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.7;
-      const postMaxTokens = agent.postMaxTokens || 280;
+      const postMaxTokens = agent.postMaxTokens || 500;
       
       let tweetContent = "";
       
