@@ -1462,6 +1462,144 @@ export default function AgentConfigure() {
               )}
             </CardFooter>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Post Generation Model (Optional)</CardTitle>
+              <CardDescription>Use a different AI model specifically for generating tweets. Leave empty to use default model.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="post-model-provider">Provider</Label>
+                <Select value={postModelConfig.provider} onValueChange={(v) => {
+                  setPostModelConfig({ ...postModelConfig, provider: v });
+                }}>
+                  <SelectTrigger id="post-model-provider" data-testid="select-post-model-provider">
+                    <SelectValue placeholder="Select provider (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Use Default</SelectItem>
+                    <SelectItem value="openai">OpenAI (GPT)</SelectItem>
+                    <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
+                    <SelectItem value="groq">Groq</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {postModelConfig.provider && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="post-model-name">Model Name</Label>
+                    <Input
+                      id="post-model-name"
+                      value={postModelConfig.model}
+                      onChange={(e) => setPostModelConfig({ ...postModelConfig, model: e.target.value })}
+                      placeholder="e.g., gpt-4-turbo-preview or claude-3-opus-20240229"
+                      data-testid="input-post-model-name"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>Temperature</Label>
+                      <span className="text-sm text-muted-foreground">{postModelConfig.temperature[0].toFixed(2)}</span>
+                    </div>
+                    <Slider
+                      value={postModelConfig.temperature}
+                      onValueChange={(v) => setPostModelConfig({ ...postModelConfig, temperature: v })}
+                      max={2}
+                      step={0.1}
+                    />
+                    <p className="text-xs text-muted-foreground">Lower = more focused, Higher = more creative</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>Max Tokens</Label>
+                      <span className="text-sm text-muted-foreground">{postModelConfig.maxTokens[0]}</span>
+                    </div>
+                    <Slider
+                      value={postModelConfig.maxTokens}
+                      onValueChange={(v) => setPostModelConfig({ ...postModelConfig, maxTokens: v })}
+                      min={50}
+                      max={500}
+                      step={10}
+                    />
+                    <p className="text-xs text-muted-foreground">Recommended: 280 for Twitter character limit</p>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Conversation Model (Optional)</CardTitle>
+              <CardDescription>Use a different AI model for conversation testing and replies. Leave empty to use default model.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="conversation-model-provider">Provider</Label>
+                <Select value={conversationModelConfig.provider} onValueChange={(v) => {
+                  setConversationModelConfig({ ...conversationModelConfig, provider: v });
+                }}>
+                  <SelectTrigger id="conversation-model-provider" data-testid="select-conversation-model-provider">
+                    <SelectValue placeholder="Select provider (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Use Default</SelectItem>
+                    <SelectItem value="openai">OpenAI (GPT)</SelectItem>
+                    <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
+                    <SelectItem value="groq">Groq</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {conversationModelConfig.provider && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="conversation-model-name">Model Name</Label>
+                    <Input
+                      id="conversation-model-name"
+                      value={conversationModelConfig.model}
+                      onChange={(e) => setConversationModelConfig({ ...conversationModelConfig, model: e.target.value })}
+                      placeholder="e.g., gpt-4-turbo-preview or claude-3-opus-20240229"
+                      data-testid="input-conversation-model-name"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>Temperature</Label>
+                      <span className="text-sm text-muted-foreground">{conversationModelConfig.temperature[0].toFixed(2)}</span>
+                    </div>
+                    <Slider
+                      value={conversationModelConfig.temperature}
+                      onValueChange={(v) => setConversationModelConfig({ ...conversationModelConfig, temperature: v })}
+                      max={2}
+                      step={0.1}
+                    />
+                    <p className="text-xs text-muted-foreground">Lower = more focused, Higher = more creative</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>Max Tokens</Label>
+                      <span className="text-sm text-muted-foreground">{conversationModelConfig.maxTokens[0]}</span>
+                    </div>
+                    <Slider
+                      value={conversationModelConfig.maxTokens}
+                      onValueChange={(v) => setConversationModelConfig({ ...conversationModelConfig, maxTokens: v })}
+                      min={100}
+                      max={4000}
+                      step={100}
+                    />
+                    <p className="text-xs text-muted-foreground">Recommended: 500+ for detailed conversations</p>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="behavior" className="space-y-6">
