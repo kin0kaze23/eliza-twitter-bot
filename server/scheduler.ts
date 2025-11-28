@@ -10,6 +10,7 @@ interface SchedulerState {
   activeAgents: Map<string, NodeJS.Timeout>;
   lastPostTime: Map<string, Date>;
   postsToday: Map<string, number>;
+  lastCleanupDate: string;
 }
 
 const state: SchedulerState = {
@@ -17,7 +18,29 @@ const state: SchedulerState = {
   activeAgents: new Map(),
   lastPostTime: new Map(),
   postsToday: new Map(),
+  lastCleanupDate: new Date().toISOString().split("T")[0],
 };
+
+function cleanupOldPostCounts(): void {
+  const today = new Date().toISOString().split("T")[0];
+  if (state.lastCleanupDate !== today) {
+    const keysToDelete: string[] = [];
+    state.postsToday.forEach((_, key) => {
+      if (!key.endsWith(`_${today}`)) {
+        keysToDelete.push(key);
+      }
+    });
+    keysToDelete.forEach(key => state.postsToday.delete(key));
+    state.lastCleanupDate = today;
+    console.log(`[Scheduler] Cleaned up ${keysToDelete.length} old post count entries`);
+  }
+}
+
+function parseTimeToMinutes(timeStr: string): number {
+  const match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return 0;
+  return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+}
 
 function isInQuietHours(agent: Agent): boolean {
   if (!agent.quietHoursEnabled) return false;
@@ -32,14 +55,18 @@ function isInQuietHours(agent: Agent): boolean {
     timeZone: timezone,
   });
   
-  const currentTime = formatter.format(now);
-  const startTime = agent.quietHoursStart || "22:00";
-  const endTime = agent.quietHoursEnd || "08:00";
+  const timeParts = formatter.formatToParts(now);
+  const hour = parseInt(timeParts.find(p => p.type === "hour")?.value || "0", 10);
+  const minute = parseInt(timeParts.find(p => p.type === "minute")?.value || "0", 10);
+  const currentMinutes = hour * 60 + minute;
   
-  if (startTime < endTime) {
-    return currentTime >= startTime && currentTime < endTime;
+  const startMinutes = parseTimeToMinutes(agent.quietHoursStart || "22:00");
+  const endMinutes = parseTimeToMinutes(agent.quietHoursEnd || "08:00");
+  
+  if (startMinutes <= endMinutes) {
+    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
   } else {
-    return currentTime >= startTime || currentTime < endTime;
+    return currentMinutes >= startMinutes || currentMinutes < endMinutes;
   }
 }
 
@@ -56,6 +83,8 @@ function getPostIntervalMs(agent: Agent): number {
 function canPostNow(agent: Agent): boolean {
   if (!agent.postingEnabled) return false;
   if (isInQuietHours(agent)) return false;
+  
+  cleanupOldPostCounts();
   
   const today = new Date().toISOString().split("T")[0];
   const postsKey = `${agent.id}_${today}`;
@@ -149,87 +178,120 @@ async function generateTweetContent(agent: Agent): Promise<{ content: string; kb
   }
 }
 
+async function logActivity(data: {
+  agentId: string;
+  eventType: "post" | "reply" | "mention" | "error" | "scheduled";
+  status: "success" | "failed" | "rate_limited" | "pending";
+  tweetId?: string;
+  content?: string;
+  characterCount?: number;
+  modelProvider?: string | null;
+  modelName?: string | null;
+  kbEntriesUsed?: string[];
+  errorMessage?: string;
+  errorCode?: string;
+  postedAt?: Date;
+}): Promise<void> {
+  try {
+    await db.insert(activityLogs).values(data as any);
+  } catch (error) {
+    console.error(`[Scheduler] Failed to log activity for agent ${data.agentId}:`, error);
+  }
+}
+
 async function executePost(agent: Agent): Promise<void> {
-  if (!canPostNow(agent)) {
-    return;
-  }
-  
-  const validation = validateTwitterCredentials(agent);
-  if (!validation.valid) {
-    console.log(`Agent ${agent.name}: Missing Twitter credentials`);
-    return;
-  }
-  
-  console.log(`[Scheduler] Generating post for agent: ${agent.name}`);
-  
-  const generated = await generateTweetContent(agent);
-  if (!generated) {
-    console.error(`[Scheduler] Failed to generate content for agent: ${agent.name}`);
+  try {
+    if (!canPostNow(agent)) {
+      return;
+    }
     
-    await db.insert(activityLogs).values({
+    const validation = validateTwitterCredentials(agent);
+    if (!validation.valid) {
+      console.log(`Agent ${agent.name}: Missing Twitter credentials`);
+      return;
+    }
+    
+    console.log(`[Scheduler] Generating post for agent: ${agent.name}`);
+    
+    const generated = await generateTweetContent(agent);
+    if (!generated) {
+      console.error(`[Scheduler] Failed to generate content for agent: ${agent.name}`);
+      
+      await logActivity({
+        agentId: agent.id,
+        eventType: "post",
+        status: "failed",
+        content: "",
+        errorMessage: "Failed to generate tweet content",
+        errorCode: "GENERATION_FAILED",
+      });
+      
+      return;
+    }
+    
+    console.log(`[Scheduler] Posting to Twitter for agent: ${agent.name}`);
+    
+    const result = await postTweet(agent, generated.content);
+    
+    const today = new Date().toISOString().split("T")[0];
+    const postsKey = `${agent.id}_${today}`;
+    
+    if (result.success) {
+      state.lastPostTime.set(agent.id, new Date());
+      state.postsToday.set(postsKey, (state.postsToday.get(postsKey) || 0) + 1);
+      
+      await logActivity({
+        agentId: agent.id,
+        eventType: "post",
+        status: "success",
+        tweetId: result.tweetId,
+        content: generated.content,
+        characterCount: generated.content.length,
+        modelProvider: agent.postModelProvider || agent.modelProvider,
+        modelName: agent.postModelName || agent.modelName,
+        kbEntriesUsed: generated.kbIds,
+        postedAt: new Date(),
+      });
+      
+      console.log(`[Scheduler] Posted successfully: ${result.tweetId}`);
+      
+      if (agent.webhookEnabled && agent.webhookUrl) {
+        sendPostCreatedWebhook(agent, generated.content, result.tweetId).catch((err) =>
+          console.error("Webhook error:", err)
+        );
+      }
+    } else {
+      await logActivity({
+        agentId: agent.id,
+        eventType: "post",
+        status: result.rateLimited ? "rate_limited" : "failed",
+        content: generated.content,
+        characterCount: generated.content.length,
+        modelProvider: agent.postModelProvider || agent.modelProvider,
+        modelName: agent.postModelName || agent.modelName,
+        kbEntriesUsed: generated.kbIds,
+        errorMessage: result.error,
+        errorCode: result.errorCode,
+      });
+      
+      console.error(`[Scheduler] Failed to post: ${result.error}`);
+      
+      if (agent.webhookEnabled && agent.webhookUrl) {
+        sendPostFailedWebhook(agent, result.error || "Unknown error", generated.content).catch((err) =>
+          console.error("Webhook error:", err)
+        );
+      }
+    }
+  } catch (error) {
+    console.error(`[Scheduler] Unexpected error during post for agent ${agent.name}:`, error);
+    
+    await logActivity({
       agentId: agent.id,
-      eventType: "post",
+      eventType: "error",
       status: "failed",
-      content: "",
-      errorMessage: "Failed to generate tweet content",
-      errorCode: "GENERATION_FAILED",
+      errorMessage: error instanceof Error ? error.message : "Unknown error",
+      errorCode: "SCHEDULER_ERROR",
     });
-    
-    return;
-  }
-  
-  console.log(`[Scheduler] Posting to Twitter for agent: ${agent.name}`);
-  
-  const result = await postTweet(agent, generated.content);
-  
-  const today = new Date().toISOString().split("T")[0];
-  const postsKey = `${agent.id}_${today}`;
-  
-  if (result.success) {
-    state.lastPostTime.set(agent.id, new Date());
-    state.postsToday.set(postsKey, (state.postsToday.get(postsKey) || 0) + 1);
-    
-    await db.insert(activityLogs).values({
-      agentId: agent.id,
-      eventType: "post",
-      status: "success",
-      tweetId: result.tweetId,
-      content: generated.content,
-      characterCount: generated.content.length,
-      modelProvider: agent.postModelProvider || agent.modelProvider,
-      modelName: agent.postModelName || agent.modelName,
-      kbEntriesUsed: generated.kbIds,
-      postedAt: new Date(),
-    });
-    
-    console.log(`[Scheduler] Posted successfully: ${result.tweetId}`);
-    
-    if (agent.webhookEnabled && agent.webhookUrl) {
-      sendPostCreatedWebhook(agent, generated.content, result.tweetId).catch((err) =>
-        console.error("Webhook error:", err)
-      );
-    }
-  } else {
-    await db.insert(activityLogs).values({
-      agentId: agent.id,
-      eventType: "post",
-      status: result.rateLimited ? "rate_limited" : "failed",
-      content: generated.content,
-      characterCount: generated.content.length,
-      modelProvider: agent.postModelProvider || agent.modelProvider,
-      modelName: agent.postModelName || agent.modelName,
-      kbEntriesUsed: generated.kbIds,
-      errorMessage: result.error,
-      errorCode: result.errorCode,
-    });
-    
-    console.error(`[Scheduler] Failed to post: ${result.error}`);
-    
-    if (agent.webhookEnabled && agent.webhookUrl) {
-      sendPostFailedWebhook(agent, result.error || "Unknown error", generated.content).catch((err) =>
-        console.error("Webhook error:", err)
-      );
-    }
   }
 }
 
@@ -241,14 +303,20 @@ function scheduleAgent(agent: Agent): void {
   const intervalMs = getPostIntervalMs(agent);
   console.log(`[Scheduler] Scheduling agent ${agent.name} with interval ${intervalMs / 1000}s`);
   
-  executePost(agent);
+  executePost(agent).catch(err => 
+    console.error(`[Scheduler] Initial post failed for ${agent.name}:`, err)
+  );
   
   const timer = setInterval(async () => {
-    const currentAgent = await storage.getAgent(agent.id);
-    if (currentAgent && currentAgent.status === "active" && currentAgent.postingEnabled) {
-      executePost(currentAgent);
-    } else {
-      stopAgent(agent.id);
+    try {
+      const currentAgent = await storage.getAgent(agent.id);
+      if (currentAgent && currentAgent.status === "active" && currentAgent.postingEnabled) {
+        await executePost(currentAgent);
+      } else {
+        stopAgent(agent.id);
+      }
+    } catch (error) {
+      console.error(`[Scheduler] Error in scheduled post for agent ${agent.id}:`, error);
     }
   }, intervalMs);
   
