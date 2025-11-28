@@ -216,6 +216,10 @@ export default function Playground() {
           ? `${agent.modelProvider}/${agent.modelName} configured (ensure API key is set in environment)`
           : "Model provider or model name missing - configure in Agent → Model tab"
       },
+      knowledge: {
+        valid: true, // KB is optional
+        message: "Knowledge base entries can be added in Agent → Knowledge Base tab"
+      },
       twitterCredentials: {
         valid: !!(agent.twitterApiKey && agent.twitterApiSecret && agent.twitterAccessToken && agent.twitterAccessSecret),
         message: (agent.twitterApiKey && agent.twitterApiSecret && agent.twitterAccessToken && agent.twitterAccessSecret)

@@ -319,3 +319,55 @@ export const insertAgentActivitySchema = createInsertSchema(agentActivity).omit(
 
 export type InsertAgentActivity = z.infer<typeof insertAgentActivitySchema>;
 export type AgentActivity = typeof agentActivity.$inferSelect;
+
+// Activity Logs - Individual post/reply events with detailed tracking
+export const activityLogs = pgTable("activity_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  
+  // Event type: post, reply, mention_reply, quote, retweet, error
+  eventType: text("event_type").notNull(),
+  
+  // Status: pending, success, failed, rate_limited
+  status: text("status").notNull().default("pending"),
+  
+  // Twitter data
+  tweetId: text("tweet_id"), // The posted tweet ID from Twitter
+  inReplyToTweetId: text("in_reply_to_tweet_id"), // For replies
+  inReplyToUserId: text("in_reply_to_user_id"), // For replies
+  
+  // Content
+  content: text("content").notNull(),
+  characterCount: integer("character_count"),
+  
+  // AI generation info
+  modelProvider: text("model_provider"),
+  modelName: text("model_name"),
+  tokensUsed: integer("tokens_used"),
+  
+  // Knowledge base entries used
+  kbEntriesUsed: jsonb("kb_entries_used").$type<string[]>().default(sql`'[]'`),
+  
+  // Error info
+  errorMessage: text("error_message"),
+  errorCode: text("error_code"),
+  
+  // Engagement metrics (updated later)
+  likes: integer("likes").default(0),
+  retweets: integer("retweets").default(0),
+  replies: integer("replies").default(0),
+  impressions: integer("impressions").default(0),
+  
+  // Timestamps
+  scheduledAt: timestamp("scheduled_at"), // When it was supposed to post
+  postedAt: timestamp("posted_at"), // When it actually posted
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertActivityLogSchema = createInsertSchema(activityLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertActivityLog = z.infer<typeof insertActivityLogSchema>;
+export type ActivityLog = typeof activityLogs.$inferSelect;
