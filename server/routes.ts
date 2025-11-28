@@ -7,6 +7,7 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import OAuth from "oauth-1.0a";
 import crypto from "crypto";
+import { assemblePrompt, buildMessagesArray } from "./promptAssembly";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============= AGENTS ============= //
@@ -459,7 +460,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/agents/:agentId/test/conversation", async (req, res) => {
     try {
       const { agentId } = req.params;
-      const { message, conversationHistory } = req.body;
+      const { message, conversationHistory, includeKnowledge = true } = req.body;
       
       if (!message) {
         return res.status(400).json({ error: "Message is required" });
@@ -480,27 +481,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Build messages array from conversation history
-      const messages: Array<{role: string; content: string}> = [];
+      // Get active knowledge base entries for this agent
+      const knowledgeEntries = includeKnowledge 
+        ? await storage.getActiveKnowledgeBase(agentId)
+        : [];
       
-      // Add system prompt if available
-      if (agent.systemPrompt) {
-        messages.push({
-          role: "system",
-          content: agent.systemPrompt
-        });
-      }
-      
-      // Add conversation history
-      if (conversationHistory && conversationHistory.length > 0) {
-        messages.push(...conversationHistory);
-      }
-      
-      // Add current user message
-      messages.push({
-        role: "user",
-        content: message
+      // Assemble comprehensive prompt using all agent configuration
+      const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
+        includeKnowledge,
+        includeExamples: true,
+        includePersonality: true,
+        maxKbEntries: 20,
+        maxKbTokens: 2000,
       });
+      
+      // Build messages array with assembled prompt
+      const messages = buildMessagesArray(
+        assembledPrompt,
+        conversationHistory,
+        message
+      );
       
       let response: string;
       
@@ -551,7 +551,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         response,
         timestamp: new Date().toISOString(),
         contextUsed: conversationHistory?.length || 0,
-        modelUsed: `${agent.modelProvider}/${agent.modelName}`,
+        modelUsed: `${agent.modelProvider || 'openai'}/${agent.modelName || 'gpt-4-turbo-preview'}`,
+        promptInfo: {
+          kbEntriesUsed: assembledPrompt.metadata.kbEntriesUsed,
+          examplesUsed: assembledPrompt.metadata.examplesUsed,
+          componentsIncluded: assembledPrompt.metadata.componentsIncluded,
+        },
       });
     } catch (error: any) {
       console.error("Error in conversation test:", error);
