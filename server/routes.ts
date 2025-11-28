@@ -169,6 +169,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Update knowledge base entry priority with feedback tracking
+  app.patch("/api/knowledge/:id/priority", async (req, res) => {
+    try {
+      const { priority } = req.body;
+      
+      if (!priority || !["high", "medium", "low"].includes(priority)) {
+        return res.status(400).json({ error: "Invalid priority. Must be high, medium, or low." });
+      }
+      
+      const entry = await storage.updateKnowledgeBasePriority(req.params.id, priority);
+      if (!entry) {
+        return res.status(404).json({ error: "Knowledge entry not found" });
+      }
+      res.json(entry);
+    } catch (error) {
+      console.error("Error updating knowledge entry priority:", error);
+      res.status(500).json({ error: "Failed to update priority" });
+    }
+  });
+
+  // Get priority corrections for learning
+  app.get("/api/agents/:agentId/knowledge/priority-corrections", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 20;
+      const corrections = await storage.getPriorityCorrections(req.params.agentId, limit);
+      res.json(corrections);
+    } catch (error) {
+      console.error("Error fetching priority corrections:", error);
+      res.status(500).json({ error: "Failed to fetch priority corrections" });
+    }
+  });
+
   // Delete knowledge base entry
   app.delete("/api/knowledge/:id", async (req, res) => {
     try {

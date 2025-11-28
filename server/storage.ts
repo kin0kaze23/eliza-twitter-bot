@@ -51,6 +51,8 @@ export interface IStorage {
   getApprovedKnowledgeBase(agentId: string): Promise<KnowledgeBase[]>;
   createKnowledgeBaseEntry(entry: InsertKnowledgeBase): Promise<KnowledgeBase>;
   updateKnowledgeBaseEntry(id: string, entry: Partial<InsertKnowledgeBase>): Promise<KnowledgeBase | undefined>;
+  updateKnowledgeBasePriority(id: string, newPriority: string): Promise<KnowledgeBase | undefined>;
+  getPriorityCorrections(agentId: string, limit?: number): Promise<KnowledgeBase[]>;
   deleteKnowledgeBaseEntry(id: string): Promise<boolean>;
   refreshKnowledgeBaseEntry(id: string): Promise<KnowledgeBase | undefined>;
   batchApproveKnowledgeBase(agentId: string, ids: string[], approvedBy?: string): Promise<number>;
@@ -178,6 +180,51 @@ export class DbStorage implements IStorage {
       .where(eq(knowledgeBase.id, id))
       .returning();
     return result[0];
+  }
+
+  async updateKnowledgeBasePriority(
+    id: string,
+    newPriority: string
+  ): Promise<KnowledgeBase | undefined> {
+    // Get the current entry first
+    const existing = await this.getKnowledgeBaseEntry(id);
+    if (!existing) return undefined;
+
+    const updateData: any = {
+      priority: newPriority,
+      updatedAt: new Date(),
+    };
+
+    // If this is a correction (priority changed), track it for learning
+    if (existing.priority !== newPriority) {
+      // Store original priority if not already set
+      if (!existing.originalPriority) {
+        updateData.originalPriority = existing.priority;
+      }
+      updateData.priorityCorrectedAt = new Date();
+    }
+
+    const result = await db
+      .update(knowledgeBase)
+      .set(updateData)
+      .where(eq(knowledgeBase.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async getPriorityCorrections(agentId: string, limit: number = 20): Promise<KnowledgeBase[]> {
+    // Get entries where the user corrected the priority
+    return await db
+      .select()
+      .from(knowledgeBase)
+      .where(
+        and(
+          eq(knowledgeBase.agentId, agentId),
+          sql`${knowledgeBase.priorityCorrectedAt} IS NOT NULL`
+        )
+      )
+      .orderBy(desc(knowledgeBase.priorityCorrectedAt))
+      .limit(limit);
   }
 
   async deleteKnowledgeBaseEntry(id: string): Promise<boolean> {
