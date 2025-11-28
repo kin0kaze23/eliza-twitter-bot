@@ -138,6 +138,11 @@ export const agents = pgTable("agents", {
   kbPriorityRule: text("kb_priority_rule"), // Rule text like "if content contains 'breaking' then priority 10"
   kbPriorityRuleLastAppliedAt: timestamp("kb_priority_rule_last_applied_at"),
   
+  // Bible Verse Tracking - prevent repetitive verse usage
+  verseTrackingEnabled: boolean("verse_tracking_enabled").default(true),
+  verseReusePolicy: text("verse_reuse_policy").default("avoid_recent"), // allow, avoid_recent, unique_daily
+  verseReuseWindow: integer("verse_reuse_window").default(10), // number of posts to look back (for avoid_recent)
+  
   // Metadata
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -380,3 +385,33 @@ export const insertActivityLogSchema = createInsertSchema(activityLogs).omit({
 
 export type InsertActivityLog = z.infer<typeof insertActivityLogSchema>;
 export type ActivityLog = typeof activityLogs.$inferSelect;
+
+// Bible Verse Usage Tracking - prevent repetitive verse usage in tweets
+export const bibleVerseUsages = pgTable("bible_verse_usages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  
+  // Verse reference (normalized format)
+  verseRef: text("verse_ref").notNull(), // e.g., "Matthew 6:21", "Psalm 23:1"
+  book: text("book").notNull(), // e.g., "Matthew", "Psalm"
+  chapter: integer("chapter").notNull(),
+  verseStart: integer("verse_start").notNull(),
+  verseEnd: integer("verse_end"), // for ranges like "Matt 5:3-12"
+  
+  // Usage tracking
+  usageCount: integer("usage_count").default(1).notNull(),
+  tweetIds: jsonb("tweet_ids").$type<string[]>().default(sql`'[]'`), // IDs of tweets that used this verse
+  
+  // Timestamps
+  firstUsedAt: timestamp("first_used_at").defaultNow().notNull(),
+  lastUsedAt: timestamp("last_used_at").defaultNow().notNull(),
+});
+
+export const insertBibleVerseUsageSchema = createInsertSchema(bibleVerseUsages).omit({
+  id: true,
+  firstUsedAt: true,
+  lastUsedAt: true,
+});
+
+export type InsertBibleVerseUsage = z.infer<typeof insertBibleVerseUsageSchema>;
+export type BibleVerseUsage = typeof bibleVerseUsages.$inferSelect;

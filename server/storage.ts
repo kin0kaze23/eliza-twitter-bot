@@ -15,6 +15,8 @@ import {
   type InsertAgentActivity,
   type ActivityLog,
   type InsertActivityLog,
+  type BibleVerseUsage,
+  type InsertBibleVerseUsage,
   users,
   agents,
   knowledgeBase,
@@ -22,6 +24,7 @@ import {
   apiKeys,
   agentActivity,
   activityLogs,
+  bibleVerseUsages,
 } from "@shared/schema";
 import { eq, desc, and, sql, inArray } from "drizzle-orm";
 
@@ -78,6 +81,11 @@ export interface IStorage {
   getActivityLogs(agentId?: string, limit?: number): Promise<ActivityLog[]>;
   getRecentActivityLogs(limit?: number): Promise<ActivityLog[]>;
   createActivityLog(log: InsertActivityLog): Promise<ActivityLog>;
+  
+  // Bible Verse Tracking
+  getRecentVerseUsages(agentId: string, limit?: number): Promise<BibleVerseUsage[]>;
+  logVerseUsage(agentId: string, verseRef: string, book: string, chapter: number, verseStart: number, verseEnd: number | undefined, tweetId?: string): Promise<BibleVerseUsage>;
+  clearVerseHistory(agentId: string): Promise<number>;
 }
 
 export class DbStorage implements IStorage {
@@ -476,6 +484,75 @@ export class DbStorage implements IStorage {
   async createActivityLog(log: InsertActivityLog): Promise<ActivityLog> {
     const result = await db.insert(activityLogs).values(log as any).returning();
     return result[0];
+  }
+
+  // Bible Verse Tracking
+  async getRecentVerseUsages(agentId: string, limit: number = 10): Promise<BibleVerseUsage[]> {
+    return await db
+      .select()
+      .from(bibleVerseUsages)
+      .where(eq(bibleVerseUsages.agentId, agentId))
+      .orderBy(desc(bibleVerseUsages.lastUsedAt))
+      .limit(limit);
+  }
+
+  async logVerseUsage(
+    agentId: string,
+    verseRef: string,
+    book: string,
+    chapter: number,
+    verseStart: number,
+    verseEnd: number | undefined,
+    tweetId?: string
+  ): Promise<BibleVerseUsage> {
+    // Check if this verse was already used
+    const existing = await db
+      .select()
+      .from(bibleVerseUsages)
+      .where(and(
+        eq(bibleVerseUsages.agentId, agentId),
+        eq(bibleVerseUsages.verseRef, verseRef)
+      ));
+    
+    if (existing.length > 0) {
+      // Update existing record
+      const currentTweetIds = (existing[0].tweetIds as string[]) || [];
+      const newTweetIds = tweetId ? [...currentTweetIds, tweetId] : currentTweetIds;
+      
+      const result = await db
+        .update(bibleVerseUsages)
+        .set({
+          usageCount: existing[0].usageCount + 1,
+          lastUsedAt: new Date(),
+          tweetIds: newTweetIds,
+        })
+        .where(eq(bibleVerseUsages.id, existing[0].id))
+        .returning();
+      return result[0];
+    }
+    
+    // Create new record
+    const result = await db
+      .insert(bibleVerseUsages)
+      .values({
+        agentId,
+        verseRef,
+        book,
+        chapter,
+        verseStart,
+        verseEnd,
+        tweetIds: tweetId ? [tweetId] : [],
+      })
+      .returning();
+    return result[0];
+  }
+
+  async clearVerseHistory(agentId: string): Promise<number> {
+    const result = await db
+      .delete(bibleVerseUsages)
+      .where(eq(bibleVerseUsages.agentId, agentId))
+      .returning();
+    return result.length;
   }
 }
 
