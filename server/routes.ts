@@ -493,7 +493,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Update test status in database
       await storage.updateCustomApi(api.id, {
-        lastTestedAt: new Date().toISOString() as any,
+        lastTestedAt: new Date(),
         testStatus: response.ok ? "success" : "failed",
         testError: response.ok ? null : `HTTP ${response.status}: ${response.statusText}`,
       });
@@ -520,7 +520,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         if (req.params.id) {
           await storage.updateCustomApi(req.params.id, {
-            lastTestedAt: new Date().toISOString() as any,
+            lastTestedAt: new Date(),
             testStatus: "failed",
             testError: error.message,
           });
