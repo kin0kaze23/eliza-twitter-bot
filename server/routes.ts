@@ -5,6 +5,8 @@ import { insertAgentSchema, insertKnowledgeBaseSchema, insertCustomApiSchema, in
 import { z } from "zod";
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
+import OAuth from "oauth-1.0a";
+import crypto from "crypto";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============= AGENTS ============= //
@@ -591,12 +593,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Import OAuth library
-      const OAuth = require('oauth-1.0a');
-      const crypto = require('crypto');
-      
       // Initialize OAuth
-      const oauth = OAuth({
+      const oauth = new OAuth({
         consumer: {
           key: agent.twitterApiKey!,
           secret: agent.twitterApiSecret!,
