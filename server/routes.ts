@@ -1639,6 +1639,16 @@ Respond in JSON format:
         }
       }
 
+      // Send webhook notification for successful tweet generation
+      if (agent.webhookEnabled && agent.webhookUrl) {
+        const { sendPostCreatedWebhook } = await import("./webhook");
+        sendPostCreatedWebhook(agent, tweet, undefined, {
+          mode: prompt ? "prompted" : "auto-generated",
+          kbEntriesUsed: assembledPrompt.metadata.kbEntriesUsed,
+          kbSources: kbSources.map(kb => kb.title),
+        }).catch(err => console.error("Webhook error:", err));
+      }
+
       res.json({
         success: true,
         tweet,
@@ -1654,6 +1664,20 @@ Respond in JSON format:
       });
     } catch (error: any) {
       console.error("Error testing tweet generation:", error);
+      
+      // Send webhook notification for failed tweet generation
+      try {
+        const agent = await storage.getAgent(req.body.agentId);
+        if (agent?.webhookEnabled && agent?.webhookUrl) {
+          const { sendPostFailedWebhook } = await import("./webhook");
+          sendPostFailedWebhook(agent, error.message, req.body.prompt).catch(err => 
+            console.error("Webhook error:", err)
+          );
+        }
+      } catch (webhookErr) {
+        console.error("Failed to send error webhook:", webhookErr);
+      }
+      
       res.status(500).json({ 
         error: "Failed to test tweet generation",
         details: error.message 
