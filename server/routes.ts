@@ -622,7 +622,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           top_p: Number(agent.topP) || 0.9,
         });
         
-        const textContent = completion.content.find((c): c is { type: 'text'; text: string } => c.type === "text");
+        const textContent = completion.content.find((c) => c.type === "text") as any;
         response = textContent?.text || "No response generated";
         
       } else {
@@ -944,6 +944,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ============= KB AUTO-INGESTION ============= //
 
+  // Helper function to evaluate news relevance using AI with numeric scoring
+  async function evaluateRelevance(title: string, content: string): Promise<{ 
+    isRelevant: boolean; 
+    relevanceScore: number;
+    topics: string[]; 
+    reason: string 
+  }> {
+    try {
+      // This uses Replit AI Integrations - no API key needed, charges billed to credits
+      const openaiModule = await import("openai");
+      const OpenAI = openaiModule.default;
+      
+      const openai = new OpenAI({
+        baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+        apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY
+      });
+
+      const prompt = `You are a content relevance filter for a Twitter AI agent focused on crypto, tech, and Twitter/social media topics.
+
+Evaluate this news item for relevance:
+Title: ${title}
+Content: ${content.substring(0, 1000)}
+
+Rate the content's relevance (0.0 to 1.0) to audiences interested in:
+- Cryptocurrency, blockchain, DeFi, NFTs, Web3
+- Technology, AI, software development, startups
+- Twitter/X, social media trends, digital culture
+
+Scoring guide:
+- 0.0-0.3: Not relevant or off-topic
+- 0.4-0.5: Marginally relevant
+- 0.6-0.7: Relevant (auto-approve threshold)
+- 0.8-1.0: Highly relevant
+
+Respond in JSON format:
+{
+  "relevanceScore": 0.75,
+  "topics": ["crypto", "ai"],
+  "reason": "brief explanation of score"
+}`;
+
+      // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
+      const response = await openai.chat.completions.create({
+        model: "gpt-5-mini", // Using mini for cost efficiency on filtering
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
+        max_completion_tokens: 500,
+      });
+
+      const result = JSON.parse(response.choices[0]?.message?.content || "{}");
+      const relevanceScore = typeof result.relevanceScore === "number" 
+        ? result.relevanceScore 
+        : 0.0;
+      
+      // Auto-approve if score >= 0.6 (stated threshold)
+      const isRelevant = relevanceScore >= 0.6;
+      
+      return {
+        isRelevant,
+        relevanceScore,
+        topics: result.topics || [],
+        reason: result.reason || `Score: ${relevanceScore.toFixed(2)}`
+      };
+    } catch (error) {
+      console.error("AI relevance evaluation failed:", error);
+      // Default to manual review if AI fails
+      return { 
+        isRelevant: false, 
+        relevanceScore: 0.0,
+        topics: [], 
+        reason: "AI evaluation failed - requires manual review" 
+      };
+    }
+  }
+
   // Manually trigger KB ingestion from an integration or custom API
   app.post("/api/agents/:agentId/knowledge/ingest/:sourceId", async (req, res) => {
     try {
@@ -1027,8 +1102,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Create KB entries from extracted data
+      // Create KB entries from extracted data with AI-powered relevance filtering
       const createdEntries = [];
+      const relevanceStats = { approved: 0, pending: 0 };
+      
       for (const item of extractedData.slice(0, 20)) { // Limit to 20 entries per ingestion
         let title = "Untitled";
         let content = JSON.stringify(item);
@@ -1048,18 +1125,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
         
-        // Create KB entry with pending status (requires manual review)
+        // AI-powered relevance evaluation
+        const relevanceEval = await evaluateRelevance(title, content);
+        
+        // Auto-approve if relevant, otherwise keep as pending for manual review
+        const isAutoApproved = relevanceEval.isRelevant;
+        const tags = [
+          "auto-generated",
+          "api-ingestion",
+          ...relevanceEval.topics,
+          isAutoApproved ? "ai-approved" : "ai-review-required"
+        ];
+        
         const entryData = {
-          title: title.substring(0, 500), // Limit title length
-          content: content.substring(0, 10000), // Limit content length
-          tags: ["auto-generated", "api-ingestion"],
+          title: title.substring(0, 500),
+          content: content.substring(0, 10000),
+          tags,
           source: customApi.name,
           sourceId: sourceId,
           sourceUrl: customApi.baseUrl,
-          category: "news", // Default category for API-ingested entries
-          priority: 5,
-          active: false, // Inactive until approved
-          status: "pending", // Requires review before becoming active
+          category: "news",
+          priority: isAutoApproved ? 7 : 5, // Higher priority for auto-approved
+          active: isAutoApproved, // Auto-activate if relevant
+          status: isAutoApproved ? "approved" : "pending",
           refreshStrategy: "manual",
           lastFetchedAt: new Date(),
           agentId: agentId,
@@ -1069,6 +1157,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const validatedData = insertKnowledgeBaseSchema.parse(entryData);
           const created = await storage.createKnowledgeBaseEntry(validatedData);
           createdEntries.push(created);
+          
+          if (isAutoApproved) {
+            relevanceStats.approved++;
+          } else {
+            relevanceStats.pending++;
+          }
         } catch (err) {
           console.error("Error creating KB entry:", err);
         }
@@ -1076,8 +1170,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.status(201).json({
         success: true,
-        message: `Ingested ${createdEntries.length} entries from ${customApi.name}`,
+        message: `Ingested ${createdEntries.length} entries: ${relevanceStats.approved} auto-approved, ${relevanceStats.pending} pending review`,
         count: createdEntries.length,
+        autoApproved: relevanceStats.approved,
+        pendingReview: relevanceStats.pending,
         entries: createdEntries.slice(0, 5), // Return first 5 as sample
       });
     } catch (error) {
@@ -1086,6 +1182,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.error("Error ingesting KB data:", error);
       res.status(500).json({ error: "Failed to ingest KB data" });
+    }
+  });
+
+  // Manual refresh KB entries from API source
+  app.post("/api/agents/:agentId/knowledge/refresh/:sourceId", async (req, res) => {
+    try {
+      const { agentId, sourceId } = req.params;
+      
+      // Delete old entries from this source (keep them fresh)
+      const existingEntries = await storage.getKnowledgeBaseEntries(agentId);
+      const entriesToDelete = existingEntries.filter(e => e.sourceId === sourceId).map(e => e.id);
+      
+      if (entriesToDelete.length > 0) {
+        await storage.batchArchiveKnowledgeBase(agentId, entriesToDelete);
+      }
+      
+      // Re-fetch and ingest new data (reuse ingestion logic)
+      const customApi = await storage.getCustomApi(sourceId);
+      if (!customApi) {
+        return res.status(404).json({ error: "Custom API not found" });
+      }
+      
+      // Make a POST request to the ingestion endpoint
+      const ingestUrl = `/api/agents/${agentId}/knowledge/ingest/${sourceId}`;
+      const ingestResponse = await fetch(`http://localhost:5000${ingestUrl}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      
+      const result = await ingestResponse.json();
+      
+      res.json({
+        success: true,
+        message: `Refreshed KB from ${customApi.name}`,
+        removed: entriesToDelete.length,
+        added: result.count || 0,
+        autoApproved: result.autoApproved || 0,
+      });
+    } catch (error: any) {
+      console.error("Error refreshing KB:", error);
+      res.status(500).json({ error: "Failed to refresh KB", details: error.message });
     }
   });
 
@@ -1319,10 +1456,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ============= PLAYGROUND / TESTING ============= //
 
-  // Test tweet generation
+  // Test tweet generation (auto-generates from KB if no prompt provided)
   app.post("/api/playground/test-tweet", async (req, res) => {
     try {
       const { agentId, prompt } = req.body;
+      const conversationHistory: any[] = []; // Empty for tweet generation
       
       if (!agentId) {
         return res.status(400).json({ error: "Agent ID required" });
@@ -1333,22 +1471,100 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Agent not found" });
       }
 
-      // TODO: Implement actual AI model call here
-      // For now, return a simulated response
-      const simulatedTweet = `[SIMULATED] ${agent.name} says: This is a test tweet based on the prompt: "${prompt}". In production, this would use ${agent.modelProvider}/${agent.modelName} to generate content.`;
+      // Get active knowledge entries
+      const knowledgeEntries = await storage.getActiveKnowledgeBase(agentId);
+      
+      // Assemble prompt with KB entries
+      const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
+        includeKnowledge: true,
+        includeExamples: true,
+        includePersonality: true,
+        maxKbEntries: 20,
+        maxKbTokens: 2000,
+      });
+      
+      // Auto-generate prompt if not provided (use KB to inspire tweet)
+      const tweetPrompt = prompt || "Generate an insightful tweet for your audience based on recent knowledge base entries. Be engaging and authentic.";
+      
+      // Build messages for AI model
+      const messages = buildMessagesArray(
+        assembledPrompt,
+        conversationHistory || [],
+        tweetPrompt
+      );
+
+      let tweet = "";
+      
+      // Call appropriate AI model
+      if (agent.modelProvider === "openai") {
+        const OpenAI = (await import("openai")).default;
+        const openai = new OpenAI({ 
+          apiKey: process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+          baseURL: process.env.OPENAI_API_KEY ? undefined : process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+        });
+        
+        const completion = await openai.chat.completions.create({
+          model: agent.modelName || "gpt-4-turbo-preview",
+          messages: messages as any,
+          temperature: Number(agent.temperature) || 0.7,
+          max_tokens: 280, // Twitter character limit context
+        });
+        
+        tweet = completion.choices[0]?.message?.content || "No tweet generated";
+        
+      } else if (agent.modelProvider === "anthropic") {
+        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+        
+        const systemMessage = messages.find(m => m.role === "system");
+        const userMessages = messages.filter(m => m.role !== "system");
+        
+        const completion = await anthropic.messages.create({
+          model: agent.modelName || "claude-3-opus-20240229",
+          system: systemMessage?.content || "You are a helpful AI assistant.",
+          messages: userMessages.map(m => ({
+            role: m.role as "user" | "assistant",
+            content: m.content
+          })),
+          max_tokens: 280,
+          temperature: Number(agent.temperature) || 0.7,
+        });
+        
+        const textContent = completion.content.find((c) => c.type === "text") as any;
+        tweet = textContent?.text || "No tweet generated";
+      } else {
+        return res.status(400).json({ error: `Unsupported model provider: ${agent.modelProvider}` });
+      }
+
+      // Get active KB entries for logging
+      const kbSources = knowledgeEntries
+        .filter(kb => kb.active && kb.status === "approved")
+        .slice(0, assembledPrompt.metadata.kbEntriesUsed)
+        .map(entry => ({
+          id: entry.id,
+          title: entry.title,
+          source: entry.source,
+          category: entry.category,
+          priority: entry.priority
+        }));
 
       res.json({
         success: true,
-        tweet: simulatedTweet,
+        tweet,
+        mode: prompt ? "prompted" : "auto-generated",
+        kbEntriesCount: assembledPrompt.metadata.kbEntriesUsed,
+        kbSources,
         config: {
           provider: agent.modelProvider,
           model: agent.modelName,
           temperature: agent.temperature,
         },
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error testing tweet generation:", error);
-      res.status(500).json({ error: "Failed to test tweet generation" });
+      res.status(500).json({ 
+        error: "Failed to test tweet generation",
+        details: error.message 
+      });
     }
   });
 

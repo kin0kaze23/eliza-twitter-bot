@@ -1381,28 +1381,51 @@ export default function AgentConfigure() {
 
               <div className="space-y-2">
                 <Label>Post Frequency</Label>
-                <div className="flex gap-2">
+                <p className="text-xs text-muted-foreground">
+                  How often should this agent post automatically?
+                </p>
+                <div className="flex items-center gap-2">
                   <Input
                     type="number"
+                    min="0"
+                    step="0.5"
                     value={behavior.postFrequency}
                     onChange={(e) => setBehavior({ ...behavior, postFrequency: e.target.value })}
                     className="w-24"
                     disabled={!behavior.postingEnabled}
+                    data-testid="input-post-frequency"
                   />
+                  <span className="text-sm text-muted-foreground">
+                    posts per
+                  </span>
                   <Select
                     value={behavior.postInterval}
                     onValueChange={(v) => setBehavior({ ...behavior, postInterval: v })}
                     disabled={!behavior.postingEnabled}
                   >
-                    <SelectTrigger className="w-32">
+                    <SelectTrigger className="w-32" data-testid="select-post-interval">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="minutes">Minutes</SelectItem>
-                      <SelectItem value="hours">Hours</SelectItem>
+                      <SelectItem value="minutes">Minute(s)</SelectItem>
+                      <SelectItem value="hours">Hour(s)</SelectItem>
+                      <SelectItem value="days">Day(s)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+                {behavior.postingEnabled && behavior.postFrequency && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {behavior.postInterval === "hours" && (
+                      <>Approximately {Number(behavior.postFrequency) * 24} tweets per day</>
+                    )}
+                    {behavior.postInterval === "minutes" && (
+                      <>Approximately {Number(behavior.postFrequency) * 60} tweets per hour</>
+                    )}
+                    {behavior.postInterval === "days" && (
+                      <>{Number(behavior.postFrequency)} tweets per day</>
+                    )}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -1428,10 +1451,16 @@ export default function AgentConfigure() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="UTC">UTC</SelectItem>
-                    <SelectItem value="America/New_York">Eastern (US)</SelectItem>
-                    <SelectItem value="America/Los_Angeles">Pacific (US)</SelectItem>
-                    <SelectItem value="Europe/London">London</SelectItem>
-                    <SelectItem value="Asia/Tokyo">Tokyo</SelectItem>
+                    <SelectItem value="America/New_York">Eastern (US) - EST/EDT</SelectItem>
+                    <SelectItem value="America/Los_Angeles">Pacific (US) - PST/PDT</SelectItem>
+                    <SelectItem value="America/Chicago">Central (US) - CST/CDT</SelectItem>
+                    <SelectItem value="Europe/London">London - GMT/BST</SelectItem>
+                    <SelectItem value="Europe/Paris">Central Europe - CET/CEST</SelectItem>
+                    <SelectItem value="Asia/Singapore">Singapore - SGT (UTC+8)</SelectItem>
+                    <SelectItem value="Asia/Hong_Kong">Hong Kong - HKT (UTC+8)</SelectItem>
+                    <SelectItem value="Asia/Shanghai">Shanghai - CST (UTC+8)</SelectItem>
+                    <SelectItem value="Asia/Tokyo">Tokyo - JST (UTC+9)</SelectItem>
+                    <SelectItem value="Australia/Sydney">Sydney - AEDT/AEST</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

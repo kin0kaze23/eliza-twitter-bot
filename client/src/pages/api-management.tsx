@@ -24,6 +24,7 @@ import {
   Code,
   Eye,
   EyeOff,
+  RefreshCw,
 } from "lucide-react";
 
 export default function APIManagement() {
@@ -229,7 +230,7 @@ export default function APIManagement() {
       queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
       toast({
         title: "Data Ingested Successfully",
-        description: `${data.count} entries added to Review Queue`,
+        description: `${data.autoApproved || 0} auto-approved, ${data.pendingReview || 0} pending review`,
       });
       setSelectedAgentForIngest("");
     },
@@ -237,6 +238,35 @@ export default function APIManagement() {
       toast({
         title: "Ingestion Failed",
         description: error.message || "Failed to ingest data to agent",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Refresh KB entries from API source
+  const refreshMutation = useMutation({
+    mutationFn: async ({ apiId, agentId }: { apiId: string; agentId: string }) => {
+      const response = await fetch(`/api/agents/${agentId}/knowledge/refresh/${apiId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to refresh data");
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
+      toast({
+        title: "KB Refreshed Successfully",
+        description: `Removed ${data.removed} old entries, added ${data.added} new (${data.autoApproved} auto-approved)`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Refresh Failed",
+        description: error.message || "Failed to refresh KB data",
         variant: "destructive",
       });
     },
@@ -745,30 +775,58 @@ export default function APIManagement() {
               </Select>
             </div>
 
-            <div className="flex gap-2">
-              <Button
-                onClick={() => {
-                  if (!selectedAgentForIngest) {
-                    toast({
-                      title: "No Agent Selected",
-                      description: "Please select an agent to ingest data",
-                      variant: "destructive",
-                    });
-                    return;
-                  }
-                  if (testedApiId) {
-                    ingestMutation.mutate({ apiId: testedApiId, agentId: selectedAgentForIngest });
-                  }
-                }}
-                disabled={!selectedAgentForIngest || ingestMutation.isPending}
-                data-testid="button-ingest-now"
-              >
-                <PlayCircle className="mr-2 h-4 w-4" />
-                {ingestMutation.isPending ? "Ingesting..." : "Ingest Now"}
-              </Button>
-              <p className="text-sm text-muted-foreground flex items-center">
-                Entries will be added to the agent's Review Queue for approval
-              </p>
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => {
+                    if (!selectedAgentForIngest) {
+                      toast({
+                        title: "No Agent Selected",
+                        description: "Please select an agent to ingest data",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
+                    if (testedApiId) {
+                      ingestMutation.mutate({ apiId: testedApiId, agentId: selectedAgentForIngest });
+                    }
+                  }}
+                  disabled={!selectedAgentForIngest || ingestMutation.isPending}
+                  data-testid="button-ingest-now"
+                >
+                  <PlayCircle className="mr-2 h-4 w-4" />
+                  {ingestMutation.isPending ? "Ingesting..." : "Ingest Now"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (!selectedAgentForIngest) {
+                      toast({
+                        title: "No Agent Selected",
+                        description: "Please select an agent to refresh data",
+                        variant: "destructive",
+                      });
+                      return;
+                    }
+                    if (testedApiId) {
+                      refreshMutation.mutate({ apiId: testedApiId, agentId: selectedAgentForIngest });
+                    }
+                  }}
+                  disabled={!selectedAgentForIngest || refreshMutation.isPending}
+                  data-testid="button-refresh-kb"
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  {refreshMutation.isPending ? "Refreshing..." : "Refresh KB"}
+                </Button>
+              </div>
+              <div className="space-y-1 text-sm text-muted-foreground">
+                <p className="flex items-center gap-1">
+                  <span className="font-medium">Ingest:</span> AI filters for crypto/tech/twitter topics, auto-approves relevant entries
+                </p>
+                <p className="flex items-center gap-1">
+                  <span className="font-medium">Refresh:</span> Removes old entries and re-ingests fresh data from source
+                </p>
+              </div>
             </div>
           </CardContent>
         </Card>

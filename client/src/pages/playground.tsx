@@ -58,37 +58,80 @@ export default function Playground() {
   }, [agents, selectedAgent]);
   
   const [configValidation, setConfigValidation] = useState({
-    prompts: { valid: true, message: "All prompts configured" },
-    apiKeys: { valid: false, message: "Model API key may be missing" },
-    knowledge: { valid: true, message: "KB entries available" },
-    schedule: { valid: true, message: "Post schedule configured" },
-    modules: { valid: true, message: "Modules configured" },
+    prompts: { valid: false, message: "Not validated yet" },
+    apiKeys: { valid: false, message: "Not validated yet" },
+    knowledge: { valid: false, message: "Not validated yet" },
+    twitterCredentials: { valid: false, message: "Not validated yet" },
+    schedule: { valid: false, message: "Not validated yet" },
   });
 
-  const handleGenerate = () => {
+  // Get currently selected agent
+  const currentAgent = agents?.find(a => a.id === selectedAgent);
+
+  // Auto-validate when agent changes
+  useEffect(() => {
+    if (currentAgent) {
+      validateConfig(currentAgent);
+    }
+  }, [currentAgent]);
+
+  const handleGenerate = async () => {
+    if (!selectedAgent) {
+      toast({
+        title: "No Agent Selected",
+        description: "Please select an agent first",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsGenerating(true);
     setTestResult(null);
     
-    // Simulate API call
-    setTimeout(() => {
-      const mockResult: TestResult = {
-        success: true,
-        output: "🚀 Bitcoin holding strong above $43k support! \n\nOn-chain metrics showing accumulation by long-term holders. Reduced exchange reserves suggest supply squeeze building.\n\n📊 Key levels to watch:\n• Resistance: $45.5k\n• Support: $42k\n\nBullish structure intact as long as we hold $42k. #BTC #Bitcoin",
+    try {
+      const response = await fetch("/api/playground/test-tweet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: selectedAgent,
+          prompt: testPrompt.trim() || undefined, // Send undefined if empty (auto-generate)
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to generate tweet");
+      }
+
+      const data = await response.json();
+      
+      const result: TestResult = {
+        success: data.success,
+        output: data.tweet,
         errors: [],
-        warnings: [
-          "Reply delay set to 0s - might appear bot-like",
-        ],
+        warnings: [],
         timestamp: new Date(),
       };
       
-      setTestResult(mockResult);
-      setIsGenerating(false);
+      // Store KB sources for display
+      (result as any).kbSources = data.kbSources || [];
+      (result as any).kbEntriesCount = data.kbEntriesCount || 0;
+      (result as any).mode = data.mode;
+      
+      setTestResult(result);
       
       toast({
-        title: "Test completed",
-        description: "Tweet generated successfully with 1 warning.",
+        title: "Tweet Generated",
+        description: `${data.mode === "auto-generated" ? "Auto-generated" : "Generated"} using ${data.kbEntriesCount} KB entries`,
       });
-    }, 3000);
+    } catch (error: any) {
+      toast({
+        title: "Generation Failed",
+        description: error.message || "Failed to generate tweet",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleSendConversation = async () => {
@@ -157,18 +200,56 @@ export default function Playground() {
     });
   };
 
-  const handleValidateConfig = () => {
-    // Simulate validation
-    const newValidation = { ...configValidation };
-    const hasIssues = Object.values(newValidation).some(v => !v.valid);
+  const validateConfig = (agent: Agent) => {
+    // Check if posting is enabled and has valid frequency
+    const postingValid = agent.postingEnabled && agent.postFrequency && agent.postFrequency > 0;
     
-    toast({
-      title: hasIssues ? "Configuration issues found" : "Configuration valid",
-      description: hasIssues
-        ? "Please fix the issues before deploying"
-        : "Agent is ready to deploy",
-      variant: hasIssues ? "destructive" : "default",
-    });
+    const validation = {
+      prompts: {
+        valid: !!(agent.systemPrompt || agent.personalityPrompt),
+        message: (agent.systemPrompt || agent.personalityPrompt) 
+          ? "System or personality prompt configured"
+          : "Missing system prompt or personality prompt - configure in Agent → Prompts tab"
+      },
+      apiKeys: {
+        valid: !!(agent.modelProvider && agent.modelName),
+        message: (agent.modelProvider && agent.modelName)
+          ? `${agent.modelProvider}/${agent.modelName} configured (ensure API key is set in environment)`
+          : "Model provider or model name missing - configure in Agent → Model tab"
+      },
+      twitterCredentials: {
+        valid: !!(agent.twitterApiKey && agent.twitterApiSecret && agent.twitterAccessToken && agent.twitterAccessSecret),
+        message: (agent.twitterApiKey && agent.twitterApiSecret && agent.twitterAccessToken && agent.twitterAccessSecret)
+          ? "All Twitter OAuth 1.0a credentials configured"
+          : "Missing Twitter API credentials - configure in Agent → Credentials tab"
+      },
+      schedule: {
+        valid: postingValid,
+        message: postingValid
+          ? `Auto-posting enabled: ${agent.postFrequency} tweets per hour`
+          : agent.postingEnabled 
+            ? "Posting enabled but frequency not set - configure in Agent → Behavior tab"
+            : "Auto-posting disabled - enable in Agent → Behavior tab if needed"
+      },
+    };
+    
+    setConfigValidation(validation);
+  };
+
+  const handleValidateConfig = () => {
+    if (currentAgent) {
+      validateConfig(currentAgent);
+      
+      const hasIssues = Object.values(configValidation).some(v => !v.valid);
+      
+      toast({
+        title: hasIssues ? "Configuration issues found" : "Configuration valid",
+        description: hasIssues
+          ? "Please fix the issues before deploying"
+          : "Agent is ready to deploy",
+        variant: hasIssues ? "destructive" : "default",
+      });
+    }
   };
 
   return (
@@ -221,19 +302,22 @@ export default function Playground() {
           <Card>
             <CardHeader>
               <CardTitle>Test Tweet Generation</CardTitle>
-              <CardDescription>Provide a prompt to test how the agent would respond</CardDescription>
+              <CardDescription>Auto-generates tweets from KB entries. Optionally provide a custom prompt.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="test-prompt">Test Prompt</Label>
+                <Label htmlFor="test-prompt">Custom Prompt (Optional)</Label>
                 <Textarea
                   id="test-prompt"
                   value={testPrompt}
                   onChange={(e) => setTestPrompt(e.target.value)}
-                  placeholder="Enter a test prompt or scenario..."
+                  placeholder="Leave empty for auto-generation, or enter a custom prompt..."
                   className="min-h-[100px]"
                   data-testid="input-test-prompt"
                 />
+                <p className="text-xs text-muted-foreground">
+                  💡 Tip: Leave this empty to test auto-generation based on active knowledge base entries
+                </p>
               </div>
               <Button
                 onClick={handleGenerate}
@@ -320,6 +404,41 @@ export default function Playground() {
                         </div>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {/* KB Sources Used */}
+                {(testResult as any).kbSources && (testResult as any).kbSources.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Knowledge Sources Used ({(testResult as any).kbEntriesCount})</Label>
+                    <div className="space-y-2">
+                      {(testResult as any).kbSources.map((source: any, idx: number) => (
+                        <div key={idx} className="bg-muted/50 border border-border p-3 rounded-md text-sm">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1">
+                              <p className="font-medium">{source.title}</p>
+                              <div className="flex gap-2 mt-1 text-xs text-muted-foreground">
+                                {source.source && <span>Source: {source.source}</span>}
+                                {source.category && (
+                                  <>
+                                    <span>•</span>
+                                    <span>Category: {source.category}</span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            <Badge variant="outline" className="shrink-0">
+                              Priority: {source.priority}
+                            </Badge>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {(testResult as any).mode === "auto-generated" && (
+                      <p className="text-xs text-muted-foreground">
+                        🤖 This tweet was auto-generated using the above knowledge sources
+                      </p>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -535,30 +654,54 @@ export default function Playground() {
               <CardDescription>Technical details about the agent configuration</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>Agent ID</Label>
-                <code className="block bg-muted p-2 rounded text-sm font-mono">agent_1_cryptoanalyst</code>
-              </div>
-              <div className="space-y-2">
-                <Label>Active Model</Label>
-                <code className="block bg-muted p-2 rounded text-sm font-mono">openai/gpt-4-turbo-preview</code>
-              </div>
-              <div className="space-y-2">
-                <Label>Context Window</Label>
-                <code className="block bg-muted p-2 rounded text-sm font-mono">8000 tokens</code>
-              </div>
-              <div className="space-y-2">
-                <Label>Model Parameters</Label>
-                <pre className="bg-muted p-3 rounded text-xs font-mono overflow-auto">
-{`{
-  "temperature": 0.7,
-  "max_tokens": 500,
-  "top_p": 0.9,
-  "frequency_penalty": 0.5,
-  "presence_penalty": 0.5
-}`}
-                </pre>
-              </div>
+              {currentAgent ? (
+                <>
+                  <div className="space-y-2">
+                    <Label>Agent ID</Label>
+                    <code className="block bg-muted p-2 rounded text-sm font-mono">{currentAgent.id}</code>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Agent Name</Label>
+                    <code className="block bg-muted p-2 rounded text-sm font-mono">{currentAgent.name} (@{currentAgent.username})</code>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Active Model</Label>
+                    <code className="block bg-muted p-2 rounded text-sm font-mono">
+                      {currentAgent.modelProvider || 'Not set'}/{currentAgent.modelName || 'Not set'}
+                    </code>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Max Tokens</Label>
+                    <code className="block bg-muted p-2 rounded text-sm font-mono">{currentAgent.maxTokens || 'Not set'} tokens</code>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Model Parameters</Label>
+                    <pre className="bg-muted p-3 rounded text-xs font-mono overflow-auto">
+{JSON.stringify({
+  temperature: currentAgent.temperature ?? 'Not set',
+  maxTokens: currentAgent.maxTokens ?? 'Not set',
+  topP: currentAgent.topP ?? 'Not set',
+  frequencyPenalty: currentAgent.frequencyPenalty ?? 'Not set',
+  presencePenalty: currentAgent.presencePenalty ?? 'Not set'
+}, null, 2)}
+                    </pre>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Posting Schedule</Label>
+                    <code className="block bg-muted p-2 rounded text-sm font-mono">
+                      {currentAgent.postFrequency ? `${currentAgent.postFrequency} posts/hour` : 'Not configured'}
+                    </code>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Status</Label>
+                    <code className="block bg-muted p-2 rounded text-sm font-mono">
+                      {currentAgent.status || 'draft'}
+                    </code>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">Select an agent to view debug info</p>
+              )}
               <div className="space-y-2">
                 <Label>Active Modules</Label>
                 <div className="flex gap-2 flex-wrap">
