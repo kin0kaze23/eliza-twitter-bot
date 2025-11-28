@@ -612,11 +612,11 @@ export default function AgentConfigure() {
         volumeChangeThreshold: behavior.volumeChangeThreshold[0],
         autoTweetOnNews: behavior.autoTweetOnNews,
         minNewsSentiment: behavior.minNewsSentiment[0].toString(),
-        // Knowledge Base Settings
-        kbMaxEntries: parseInt(kbSettings.maxEntries),
-        kbMaxTokens: parseInt(kbSettings.maxTokens),
+        // Knowledge Base Settings (with defaults for empty/invalid values)
+        kbMaxEntries: parseInt(kbSettings.maxEntries) || 5,
+        kbMaxTokens: parseInt(kbSettings.maxTokens) || 1500,
         kbReusePolicy: kbSettings.reusePolicy,
-        kbReuseCooldownHours: parseInt(kbSettings.reuseCooldownHours),
+        kbReuseCooldownHours: parseInt(kbSettings.reuseCooldownHours) || 24,
       });
     },
     onSuccess: () => {
