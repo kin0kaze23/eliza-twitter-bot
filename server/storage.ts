@@ -289,6 +289,27 @@ export class DbStorage implements IStorage {
     return result.length;
   }
 
+  async markKnowledgeBaseAsUsed(ids: string[], tweetId: string): Promise<void> {
+    if (ids.length === 0) return;
+    
+    for (const id of ids) {
+      const entry = await db.select().from(knowledgeBase).where(eq(knowledgeBase.id, id)).limit(1);
+      if (entry[0]) {
+        const usedTweetIds = (entry[0].usedInTweetIds || []) as string[];
+        usedTweetIds.push(tweetId);
+        
+        await db.update(knowledgeBase)
+          .set({
+            usedAt: new Date(),
+            usedCount: (entry[0].usedCount || 0) + 1,
+            usedInTweetIds: usedTweetIds,
+            updatedAt: new Date(),
+          })
+          .where(eq(knowledgeBase.id, id));
+      }
+    }
+  }
+
   // Agent Activity (Monitoring)
   async getAgentActivity(agentId: string, startDate?: string, endDate?: string): Promise<AgentActivity[]> {
     if (startDate && endDate) {

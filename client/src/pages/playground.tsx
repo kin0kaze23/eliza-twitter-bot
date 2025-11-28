@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Play, RefreshCw, AlertCircle, CheckCircle2, XCircle, Send, ExternalLink } from "lucide-react";
+import { Play, RefreshCw, AlertCircle, CheckCircle2, XCircle, Send, ExternalLink, Zap } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
@@ -43,7 +43,9 @@ export default function Playground() {
   const [selectedAgent, setSelectedAgent] = useState<string | undefined>(agents?.[0]?.id);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPosting, setIsPosting] = useState(false);
+  const [isForcePosting, setIsForcePosting] = useState(false);
   const [postResult, setPostResult] = useState<{ success: boolean; tweetId?: string; tweetUrl?: string; error?: string } | null>(null);
+  const [forcePostResult, setForcePostResult] = useState<{ success: boolean; tweet?: string; tweetId?: string; tweetUrl?: string; error?: string; errorCode?: string; rateLimited?: boolean; kbEntriesUsed?: number } | null>(null);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   
   // Conversation mode state
@@ -75,6 +77,69 @@ export default function Playground() {
       validateConfig(currentAgent);
     }
   }, [currentAgent]);
+
+  const handleForceGenerateAndPost = async () => {
+    if (!selectedAgent) {
+      toast({
+        title: "No Agent Selected",
+        description: "Please select an agent first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsForcePosting(true);
+    setForcePostResult(null);
+
+    try {
+      const response = await fetch(`/api/agents/${selectedAgent}/force-post`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setForcePostResult({
+          success: true,
+          tweet: data.tweet,
+          tweetId: data.tweetId,
+          tweetUrl: data.tweetUrl,
+          kbEntriesUsed: data.kbEntriesUsed,
+        });
+        toast({
+          title: "Tweet Posted to X!",
+          description: `Generated and posted successfully using ${data.kbEntriesUsed} KB entries`,
+        });
+      } else {
+        setForcePostResult({
+          success: false,
+          tweet: data.tweet,
+          error: data.error || "Failed to post tweet",
+          errorCode: data.errorCode,
+          rateLimited: data.rateLimited,
+        });
+        toast({
+          title: data.rateLimited ? "Rate Limited" : "Failed to Post Tweet",
+          description: data.error || "Check Twitter credentials and try again",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      console.error("Force post error:", error);
+      setForcePostResult({
+        success: false,
+        error: error.message || "Network error",
+      });
+      toast({
+        title: "Error",
+        description: error.message || "Network error occurred",
+        variant: "destructive",
+      });
+    } finally {
+      setIsForcePosting(false);
+    }
+  };
 
   const handlePostToTwitter = async () => {
     if (!selectedAgent || !testResult?.output) {
@@ -363,22 +428,110 @@ export default function Playground() {
         </TabsList>
 
         <TabsContent value="generate" className="space-y-6">
-          <Card>
+          <Card className="border-primary/50">
             <CardHeader>
-              <CardTitle>Test Tweet Generation</CardTitle>
-              <CardDescription>Auto-generates tweets from active knowledge base entries using the agent's AI model.</CardDescription>
+              <CardTitle className="flex items-center gap-2">
+                <Zap className="h-5 w-5 text-primary" />
+                Force Generate & Post
+              </CardTitle>
+              <CardDescription>Generate a tweet from your knowledge base and post it directly to X/Twitter in one click.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <p className="text-sm text-muted-foreground">
-                  Click the button below to test tweet generation. The agent will automatically create a tweet based on your active knowledge base entries.
+              <Button
+                onClick={handleForceGenerateAndPost}
+                disabled={isForcePosting || !selectedAgent}
+                data-testid="button-force-post"
+                size="lg"
+                className="w-full"
+              >
+                {isForcePosting ? (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                    Generating & Posting...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="mr-2 h-4 w-4" />
+                    Force Generate & Post to X
+                  </>
+                )}
+              </Button>
+              
+              {forcePostResult && (
+                <div className={`p-4 rounded-lg border ${forcePostResult.success ? 'border-green-500 bg-green-500/10' : 'border-destructive bg-destructive/10'}`}>
+                  {forcePostResult.success ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
+                        <CheckCircle2 className="h-5 w-5" />
+                        <span className="font-medium">Posted Successfully!</span>
+                      </div>
+                      <div className="bg-muted p-3 rounded text-sm">
+                        {forcePostResult.tweet}
+                      </div>
+                      <div className="flex items-center gap-4 text-sm">
+                        <span className="text-muted-foreground">
+                          Used {forcePostResult.kbEntriesUsed} KB entries
+                        </span>
+                        {forcePostResult.tweetUrl && (
+                          <a
+                            href={forcePostResult.tweetUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-primary hover:underline"
+                            data-testid="link-force-post-tweet"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            View on X
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-destructive">
+                        <XCircle className="h-5 w-5" />
+                        <span className="font-medium">
+                          {forcePostResult.rateLimited ? "Rate Limited" : "Failed to Post"}
+                        </span>
+                      </div>
+                      <p className="text-sm">{forcePostResult.error}</p>
+                      {forcePostResult.errorCode && (
+                        <p className="text-xs text-muted-foreground">Error code: {forcePostResult.errorCode}</p>
+                      )}
+                      {forcePostResult.rateLimited && (
+                        <p className="text-xs text-muted-foreground">Please wait before trying again.</p>
+                      )}
+                      {forcePostResult.tweet && (
+                        <div className="bg-muted p-3 rounded text-sm mt-2">
+                          <p className="text-xs text-muted-foreground mb-1">Generated content:</p>
+                          {forcePostResult.tweet}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {!selectedAgent && (
+                <p className="text-xs text-yellow-600">
+                  <AlertCircle className="h-3 w-3 inline mr-1" />
+                  Please select an agent above
                 </p>
-              </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Test Tweet Generation (Preview Only)</CardTitle>
+              <CardDescription>Generate a test tweet without posting - useful for previewing before posting.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <Button
                 onClick={handleGenerate}
                 disabled={isGenerating || !selectedAgent}
                 data-testid="button-generate-test"
-                size="lg"
+                variant="outline"
               >
                 {isGenerating ? (
                   <>
@@ -388,15 +541,10 @@ export default function Playground() {
                 ) : (
                   <>
                     <Play className="mr-2 h-4 w-4" />
-                    Generate Test Tweet
+                    Generate Preview
                   </>
                 )}
               </Button>
-              {!selectedAgent && (
-                <p className="text-xs text-muted-foreground text-yellow-600">
-                  Please select an agent above to generate a tweet
-                </p>
-              )}
             </CardContent>
           </Card>
 

@@ -114,8 +114,8 @@ async function generateTweetContent(agent: Agent): Promise<{ content: string; kb
       includeKnowledge: true,
       includeExamples: true,
       includePersonality: true,
-      maxKbEntries: agent.kbMaxEntries || 20,
-      maxKbTokens: agent.kbMaxTokens || 2000,
+      maxKbEntries: 20,
+      maxKbTokens: 2000,
     });
     
     const tweetPrompt = "Generate an engaging tweet for your audience based on your knowledge base. Be authentic and insightful. Keep it under 280 characters.";
@@ -377,6 +377,16 @@ export async function initializeScheduler(): Promise<void> {
     
     for (const agent of activeAgents) {
       startAgent(agent);
+    }
+    
+    // Start KB refresh service for agents with auto-refresh enabled
+    const kbRefreshAgents = agents.filter(a => a.kbAutoRefreshEnabled);
+    if (kbRefreshAgents.length > 0) {
+      const { startKBRefreshService } = await import("./kbRefresh");
+      console.log(`[Scheduler] Starting KB refresh for ${kbRefreshAgents.length} agents`);
+      for (const agent of kbRefreshAgents) {
+        startKBRefreshService(agent.id);
+      }
     }
   } catch (error) {
     console.error("[Scheduler] Failed to initialize:", error);

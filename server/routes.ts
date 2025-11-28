@@ -1723,6 +1723,156 @@ Respond in JSON format:
 
   // ============= TWITTER POSTING ============= //
   
+  // Force Generate & Post - generates tweet and posts to Twitter in one action
+  app.post("/api/agents/:id/force-post", async (req, res) => {
+    try {
+      const { id } = req.params;
+      
+      const agent = await storage.getAgent(id);
+      if (!agent) {
+        return res.status(404).json({ error: "Agent not found" });
+      }
+      
+      const { postTweet, validateTwitterCredentials } = await import("./twitter");
+      
+      // Validate Twitter credentials
+      const validation = validateTwitterCredentials(agent);
+      if (!validation.valid) {
+        return res.status(400).json({
+          error: "Missing Twitter credentials",
+          missing: validation.missing,
+        });
+      }
+      
+      // Get active KB entries
+      const knowledgeEntries = await storage.getActiveKnowledgeBase(id);
+      
+      // Assemble prompt and generate tweet
+      const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
+        includeKnowledge: true,
+        includeExamples: true,
+        includePersonality: true,
+        maxKbEntries: 20,
+        maxKbTokens: 2000,
+      });
+      
+      const tweetPrompt = "Generate an engaging tweet for your audience based on your knowledge base. Be authentic and insightful. Keep it under 280 characters.";
+      const messages = buildMessagesArray(assembledPrompt, [], tweetPrompt);
+      
+      const postModelProvider = agent.postModelProvider || agent.modelProvider || "openai";
+      const postModelName = agent.postModelName || agent.modelName || "gpt-4-turbo-preview";
+      const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.7;
+      const postMaxTokens = agent.postMaxTokens || 280;
+      
+      let tweetContent = "";
+      
+      if (postModelProvider === "openai") {
+        const OpenAI = (await import("openai")).default;
+        const openai = new OpenAI({
+          apiKey: process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+          baseURL: process.env.OPENAI_API_KEY ? undefined : process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+        });
+        
+        const completion = await openai.chat.completions.create({
+          model: postModelName,
+          messages: messages as any,
+          temperature: postTemperature,
+          max_completion_tokens: postMaxTokens,
+        });
+        
+        tweetContent = completion.choices[0]?.message?.content || "";
+      } else if (postModelProvider === "anthropic") {
+        const Anthropic = (await import("@anthropic-ai/sdk")).default;
+        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+        
+        const systemMessage = messages.find((m) => m.role === "system");
+        const userMessages = messages.filter((m) => m.role !== "system");
+        
+        const completion = await anthropic.messages.create({
+          model: postModelName,
+          system: systemMessage?.content || "You are a helpful AI assistant.",
+          messages: userMessages.map((m) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          })),
+          max_tokens: postMaxTokens,
+          temperature: postTemperature,
+        });
+        
+        const textContent = completion.content.find((c) => c.type === "text") as any;
+        tweetContent = textContent?.text || "";
+      }
+      
+      if (!tweetContent.trim()) {
+        return res.status(500).json({ error: "Failed to generate tweet content" });
+      }
+      
+      tweetContent = tweetContent.trim();
+      
+      // Post to Twitter
+      const result = await postTweet(agent, tweetContent);
+      
+      // Mark KB entries as used
+      const kbUsedIds = assembledPrompt.metadata.kbEntriesUsedIds || [];
+      if (kbUsedIds.length > 0 && result.success && result.tweetId) {
+        await storage.markKnowledgeBaseAsUsed(kbUsedIds, result.tweetId);
+      }
+      
+      // Log activity
+      await storage.createActivityLog({
+        agentId: id,
+        eventType: "post",
+        status: result.success ? "success" : "failed",
+        tweetId: result.tweetId,
+        content: tweetContent,
+        characterCount: tweetContent.length,
+        modelProvider: postModelProvider,
+        modelName: postModelName,
+        kbEntriesUsed: kbUsedIds,
+        errorMessage: result.error,
+        errorCode: result.errorCode,
+        postedAt: result.success ? new Date() : undefined,
+      });
+      
+      if (result.success) {
+        if (agent.webhookEnabled && agent.webhookUrl) {
+          sendPostCreatedWebhook(agent, tweetContent, result.tweetId).catch(err =>
+            console.error("Webhook error:", err)
+          );
+        }
+        
+        res.json({
+          success: true,
+          tweet: tweetContent,
+          tweetId: result.tweetId,
+          tweetUrl: `https://twitter.com/i/status/${result.tweetId}`,
+          kbEntriesUsed: kbUsedIds.length,
+          message: "Tweet generated and posted successfully",
+        });
+      } else {
+        if (agent.webhookEnabled && agent.webhookUrl) {
+          sendPostFailedWebhook(agent, result.error || "Unknown error", tweetContent).catch(err =>
+            console.error("Webhook error:", err)
+          );
+        }
+        
+        res.status(400).json({
+          success: false,
+          tweet: tweetContent,
+          error: result.error,
+          errorCode: result.errorCode,
+          rateLimited: result.rateLimited,
+        });
+      }
+    } catch (error: any) {
+      console.error("Error in force-post:", error);
+      res.status(500).json({
+        error: "Failed to generate and post tweet",
+        details: error.message,
+      });
+    }
+  });
+  
   // Post tweet directly to Twitter
   app.post("/api/agents/:id/post-tweet", async (req, res) => {
     try {

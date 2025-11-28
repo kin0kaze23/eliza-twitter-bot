@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings } from "lucide-react";
+import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Link, useParams } from "wouter";
@@ -331,10 +331,12 @@ export default function AgentConfigure() {
 
   // Knowledge Base Settings
   const [kbSettings, setKbSettings] = useState({
-    maxEntries: "5",
-    maxTokens: "1500",
     reusePolicy: "deprioritize", // never, deprioritize, allow
     reuseCooldownHours: "24",
+    autoRefreshEnabled: false,
+    autoRefreshIntervalHours: "6",
+    priorityRuleEnabled: false,
+    priorityRule: "",
   });
 
   // Webhook Settings
@@ -621,11 +623,13 @@ export default function AgentConfigure() {
         volumeChangeThreshold: behavior.volumeChangeThreshold[0],
         autoTweetOnNews: behavior.autoTweetOnNews,
         minNewsSentiment: behavior.minNewsSentiment[0].toString(),
-        // Knowledge Base Settings (with defaults for empty/invalid values)
-        kbMaxEntries: parseInt(kbSettings.maxEntries) || 5,
-        kbMaxTokens: parseInt(kbSettings.maxTokens) || 1500,
+        // Knowledge Base Settings
         kbReusePolicy: kbSettings.reusePolicy,
         kbReuseCooldownHours: parseInt(kbSettings.reuseCooldownHours) || 24,
+        kbAutoRefreshEnabled: kbSettings.autoRefreshEnabled,
+        kbAutoRefreshIntervalHours: parseInt(kbSettings.autoRefreshIntervalHours) || 6,
+        kbPriorityRuleEnabled: kbSettings.priorityRuleEnabled,
+        kbPriorityRule: kbSettings.priorityRule || null,
         // Webhook Settings
         webhookEnabled: webhookSettings.enabled,
         webhookUrl: webhookSettings.url || undefined,
@@ -820,10 +824,12 @@ export default function AgentConfigure() {
     
     // Load KB settings
     setKbSettings({
-      maxEntries: (agent.kbMaxEntries || 5).toString(),
-      maxTokens: (agent.kbMaxTokens || 1500).toString(),
       reusePolicy: agent.kbReusePolicy || "deprioritize",
       reuseCooldownHours: (agent.kbReuseCooldownHours || 24).toString(),
+      autoRefreshEnabled: agent.kbAutoRefreshEnabled || false,
+      autoRefreshIntervalHours: (agent.kbAutoRefreshIntervalHours || 6).toString(),
+      priorityRuleEnabled: agent.kbPriorityRuleEnabled || false,
+      priorityRule: agent.kbPriorityRule || "",
     });
     
     // Load webhook settings
@@ -2008,36 +2014,6 @@ export default function AgentConfigure() {
               <CardDescription>Control how knowledge base entries are selected for posts</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="kb-max-entries">Max Entries Per Post</Label>
-                  <Input
-                    id="kb-max-entries"
-                    type="number"
-                    min="1"
-                    max="20"
-                    value={kbSettings.maxEntries}
-                    onChange={(e) => setKbSettings({ ...kbSettings, maxEntries: e.target.value })}
-                    data-testid="input-kb-max-entries"
-                  />
-                  <p className="text-xs text-muted-foreground">Maximum KB entries to include in each generation</p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="kb-max-tokens">Max KB Tokens</Label>
-                  <Input
-                    id="kb-max-tokens"
-                    type="number"
-                    min="100"
-                    max="10000"
-                    step="100"
-                    value={kbSettings.maxTokens}
-                    onChange={(e) => setKbSettings({ ...kbSettings, maxTokens: e.target.value })}
-                    data-testid="input-kb-max-tokens"
-                  />
-                  <p className="text-xs text-muted-foreground">Maximum tokens to use from knowledge base</p>
-                </div>
-              </div>
-              
               <div className="space-y-2">
                 <Label htmlFor="kb-reuse-policy">Reuse Policy</Label>
                 <Select
@@ -2069,6 +2045,89 @@ export default function AgentConfigure() {
                     data-testid="input-kb-cooldown"
                   />
                   <p className="text-xs text-muted-foreground">Hours to wait before allowing an entry to be reused</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* KB Auto-Refresh Settings */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <RefreshCw className="h-4 w-4" />
+                Auto-Refresh Settings
+              </CardTitle>
+              <CardDescription>Automatically refresh knowledge base entries from API sources</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label>Enable Auto-Refresh</Label>
+                  <p className="text-xs text-muted-foreground">Automatically refresh KB entries from custom APIs on a schedule</p>
+                </div>
+                <Switch
+                  checked={kbSettings.autoRefreshEnabled}
+                  onCheckedChange={(checked) => setKbSettings({ ...kbSettings, autoRefreshEnabled: checked })}
+                  data-testid="switch-kb-auto-refresh"
+                />
+              </div>
+              
+              {kbSettings.autoRefreshEnabled && (
+                <div className="space-y-2">
+                  <Label htmlFor="kb-refresh-interval">Refresh Interval (Hours)</Label>
+                  <Input
+                    id="kb-refresh-interval"
+                    type="number"
+                    min="1"
+                    max="168"
+                    value={kbSettings.autoRefreshIntervalHours}
+                    onChange={(e) => setKbSettings({ ...kbSettings, autoRefreshIntervalHours: e.target.value })}
+                    data-testid="input-kb-refresh-interval"
+                  />
+                  <p className="text-xs text-muted-foreground">How often to refresh KB entries from API sources (e.g., 6 = every 6 hours)</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* KB Priority Rules */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Zap className="h-4 w-4" />
+                Priority Rules
+              </CardTitle>
+              <CardDescription>Automatically adjust KB entry priorities based on rules</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label>Enable Priority Rules</Label>
+                  <p className="text-xs text-muted-foreground">Automatically update priority tags based on conditions</p>
+                </div>
+                <Switch
+                  checked={kbSettings.priorityRuleEnabled}
+                  onCheckedChange={(checked) => setKbSettings({ ...kbSettings, priorityRuleEnabled: checked })}
+                  data-testid="switch-kb-priority-rules"
+                />
+              </div>
+              
+              {kbSettings.priorityRuleEnabled && (
+                <div className="space-y-2">
+                  <Label htmlFor="kb-priority-rule">Priority Rule</Label>
+                  <Textarea
+                    id="kb-priority-rule"
+                    placeholder="e.g., if category=market-news then priority=high; if usedCount>3 then priority=low"
+                    className="min-h-[80px]"
+                    value={kbSettings.priorityRule}
+                    onChange={(e) => setKbSettings({ ...kbSettings, priorityRule: e.target.value })}
+                    data-testid="input-kb-priority-rule"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Define rules to auto-assign priorities. Format: <code className="bg-muted px-1 rounded">if condition then priority=value</code>
+                    <br />
+                    Conditions: category, source, usedCount, tags. Values: high, medium, low
+                  </p>
                 </div>
               )}
             </CardContent>

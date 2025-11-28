@@ -121,13 +121,21 @@ export const agents = pgTable("agents", {
   webhookEnabled: boolean("webhook_enabled").default(false),
   
   // Knowledge Base Selection Settings
-  kbMaxEntries: integer("kb_max_entries").default(5), // max KB entries per generation
-  kbMaxTokens: integer("kb_max_tokens").default(2000), // max tokens from KB
   kbCategoryWeights: jsonb("kb_category_weights").$type<Record<string, number>>().default(sql`'{}'`), // category priority weights
   kbPriorityBias: text("kb_priority_bias").default("0.5"), // 0-1, how much to favor high-priority
   kbInjectionMethod: text("kb_injection_method").default("prepend"), // prepend, append, context
   kbReusePolicy: text("kb_reuse_policy").default("deprioritize"), // never (exclude used), deprioritize (lower priority), allow (no restriction)
   kbReuseCooldownHours: integer("kb_reuse_cooldown_hours").default(24), // hours before entry can be reused (for 'never' policy)
+  
+  // KB Auto-Refresh Settings
+  kbAutoRefreshEnabled: boolean("kb_auto_refresh_enabled").default(false),
+  kbAutoRefreshIntervalHours: integer("kb_auto_refresh_interval_hours").default(6), // hours between auto-refresh
+  kbLastAutoRefreshedAt: timestamp("kb_last_auto_refreshed_at"),
+  
+  // KB Priority Rules - auto-update priority based on content rules
+  kbPriorityRuleEnabled: boolean("kb_priority_rule_enabled").default(false),
+  kbPriorityRule: text("kb_priority_rule"), // Rule text like "if content contains 'breaking' then priority 10"
+  kbPriorityRuleLastAppliedAt: timestamp("kb_priority_rule_last_applied_at"),
   
   // Metadata
   createdAt: timestamp("created_at").defaultNow().notNull(),
