@@ -1521,6 +1521,45 @@ export default function AgentConfigure() {
         </TabsContent>
 
         <TabsContent value="knowledge" className="space-y-6">
+          {/* Workflow Guide */}
+          <Card className="bg-muted/30">
+            <CardHeader>
+              <CardTitle className="text-base">How to Add Knowledge</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3 text-sm">
+                <div className="flex gap-3">
+                  <div className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground font-semibold text-xs">1</div>
+                  <div>
+                    <p className="font-medium">Set up API sources</p>
+                    <p className="text-muted-foreground">Go to <Link href="/api-management" className="text-primary hover:underline">Knowledge Sources</Link> to configure APIs (news, crypto prices, etc.)</p>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <div className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground font-semibold text-xs">2</div>
+                  <div>
+                    <p className="font-medium">Test and fetch data</p>
+                    <p className="text-muted-foreground">Test your API connection, then click "Ingest to Agent" to pull in fresh content</p>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <div className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground font-semibold text-xs">3</div>
+                  <div>
+                    <p className="font-medium">Review and approve</p>
+                    <p className="text-muted-foreground">New content appears in "Review Queue" below - approve what you want your agent to know</p>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <div className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground font-semibold text-xs">4</div>
+                  <div>
+                    <p className="font-medium">Manage active knowledge</p>
+                    <p className="text-muted-foreground">Approved entries appear in "Active Knowledge" and are used in conversations. Delete outdated items anytime.</p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           <Tabs value={kbSubtab} onValueChange={(v) => setKbSubtab(v as "review" | "active")} className="w-full">
             <div className="flex items-center justify-between mb-4">
               <TabsList>

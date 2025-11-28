@@ -46,38 +46,10 @@ const menuItems = [
     group: "overview",
   },
   {
-    title: "KB Snippets",
-    url: "/kb-snippets",
-    icon: Database,
-    testId: "link-kb-snippets",
-    group: "overview",
-  },
-  {
-    title: "API Management",
+    title: "Knowledge Sources",
     url: "/api-management",
-    icon: ExternalLink,
-    testId: "link-api-management",
-    group: "data",
-  },
-  {
-    title: "API Keys",
-    url: "/api-keys",
-    icon: Key,
-    testId: "link-api-keys",
-    group: "global",
-  },
-  {
-    title: "Integrations",
-    url: "/integrations",
-    icon: Plug,
-    testId: "link-integrations",
-    group: "data",
-  },
-  {
-    title: "Live Feeds",
-    url: "/live-feeds",
-    icon: Activity,
-    testId: "link-live-feeds",
+    icon: Database,
+    testId: "link-knowledge-sources",
     group: "data",
   },
   {
@@ -94,7 +66,6 @@ export function AppSidebar() {
 
   const groupedItems = {
     overview: menuItems.filter(item => item.group === "overview"),
-    global: menuItems.filter(item => item.group === "global"),
     data: menuItems.filter(item => item.group === "data"),
     testing: menuItems.filter(item => item.group === "testing"),
   };
@@ -118,28 +89,6 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {groupedItems.overview.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={location === item.url}
-                    data-testid={item.testId}
-                  >
-                    <Link href={item.url}>
-                      <item.icon className="h-4 w-4" />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Global Settings</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {groupedItems.global.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild

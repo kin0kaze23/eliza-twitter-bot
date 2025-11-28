@@ -234,7 +234,7 @@ export default function APIManagement() {
       description: api.description || "",
       baseUrl: api.baseUrl,
       method: api.method,
-      authType: api.authType,
+      authType: api.authType || "none",
       authKeyEnvVar: api.authKeyEnvVar || "",
       authHeaderName: api.authHeaderName || "",
       headers: JSON.stringify(api.headers || {}, null, 2),
@@ -274,10 +274,10 @@ export default function APIManagement() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">
-            API Management
+            Knowledge Sources
           </h1>
           <p className="text-sm text-muted-foreground">
-            Configure and test custom API sources for KB ingestion
+            Set up API sources to automatically fetch knowledge for your agents
           </p>
         </div>
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>

@@ -2,570 +2,253 @@
 
 ## Overview
 
-The Knowledge Base (KB) is your agent's memory and information source. It stores facts, data, and context that your agent uses when generating responses. This guide covers everything you need to know about adding, reviewing, and managing knowledge for your AI agents.
-
-## Table of Contents
-
-1. [Understanding the Knowledge Base](#understanding-the-knowledge-base)
-2. [Adding Knowledge Manually](#adding-knowledge-manually)
-3. [Using Custom APIs for Automatic Data Ingestion](#using-custom-apis-for-automatic-data-ingestion)
-4. [Reviewing Pending Entries](#reviewing-pending-entries)
-5. [Managing Active Knowledge](#managing-active-knowledge)
-6. [Best Practices](#best-practices)
-7. [Troubleshooting](#troubleshooting)
+The Knowledge Base system allows your AI agents to access up-to-date information from external APIs (news, crypto prices, market data, etc.). This guide explains the simplified workflow for setting up and managing your agent's knowledge.
 
 ---
 
-## Understanding the Knowledge Base
+## 🎯 Quick Start: 4-Step Workflow
 
-### What is the Knowledge Base?
+### Step 1: Set Up API Sources
 
-Your agent's Knowledge Base is a collection of information entries that the agent can reference when creating tweets or replies. Each entry contains:
+**Where:** `Knowledge Sources` page (in the sidebar under "Data Sources")
 
-- **Content**: The actual information (fact, data point, news, etc.)
-- **Category**: How the entry is organized (e.g., "market_data", "news", "facts")
-- **Tags**: Keywords for easy filtering
-- **Priority**: How important this entry is (1-10, where 10 is highest)
-- **Source**: Where this information came from
-- **Status**: pending, approved, or archived
+1. Click **"Add API Source"**
+2. Fill in basic details:
+   - **Name**: e.g., "GNews Headlines", "CoinGecko Prices"
+   - **Description**: What this API provides
+   - **Base URL**: The API endpoint (e.g., `https://gnews.io/api/v4/top-headlines`)
+   - **Method**: Usually `GET`
 
-### The Review Workflow
+3. Configure authentication (if needed):
+   - **Auth Type**: Choose `none`, `bearer`, `api_key`, or `basic`
+   - **Auth Key Environment Variable**: Enter your API key name from Replit Secrets (e.g., `GNEWS_API_KEY`)
+   - The system will automatically use the secret value from your environment
 
-The KB uses a review system similar to aixbt to ensure quality:
+4. Set up data extraction:
+   - **JSON Path**: Extract the array of items (e.g., `$.articles[*]`)
+   - **Title Path**: Extract title from each item (e.g., `$.title`)
+   - **Content Path**: Extract content from each item (e.g., `$.description`)
 
-```
-API Ingestion → Pending Review → Manual Approval → Active Knowledge → Used in Conversations
-```
-
-**Key Points:**
-- New entries start as **pending** and are NOT used by your agent
-- You must **manually review and approve** entries before they become active
-- Only **approved** entries are used when your agent generates responses
-- You can **archive** entries you don't want without deleting them
+5. Click **"Create API Source"**
 
 ---
 
-## Adding Knowledge Manually
+### Step 2: Test & Fetch Data
 
-### Step 1: Navigate to Knowledge Base Tab
+**Where:** `Knowledge Sources` page
 
-1. Go to **Agents** page
-2. Click on your agent
-3. Click the **Knowledge Base** tab
+1. Find your newly created API source in the list
+2. Click the **"Test"** button (▶️ icon)
+3. Review the test results:
+   - ✅ **Status: 200 OK** = Working correctly
+   - ✅ **Items Extracted**: Shows how many articles/items were found
+   - ✅ **Preview**: See sample data that will be ingested
 
-### Step 2: Add a New Entry
-
-1. Scroll to the "Add New Knowledge Entry" form
-2. Fill in the fields:
-   - **Content**: The information you want to add (required)
-   - **Category**: Group similar entries together (e.g., "crypto_facts", "news")
-   - **Tags**: Comma-separated keywords (e.g., "bitcoin, price, bullish")
-   - **Priority**: 1-10 (higher = more important, more likely to be included)
-   - **Source**: Where this info came from (optional)
-   - **Active**: Check to make it immediately available to your agent
-
-3. Click **Add Entry**
-
-### Manual Entry Best Practices
-
-**Good Example:**
-```
-Content: Bitcoin reached an all-time high of $69,000 in November 2021
-Category: market_data
-Tags: bitcoin, ATH, 2021, price
-Priority: 8
-Source: CoinGecko Historical Data
-```
-
-**Tips:**
-- Be specific and factual
-- Use consistent categories across entries
-- Higher priority for time-sensitive or critical information
-- Lower priority for general background information
+4. Once the test succeeds, scroll down to find the **"Ingest to Agent"** section
+5. Select your agent from the dropdown
+6. Click **"Ingest Now"** to pull fresh content into the agent's knowledge base
 
 ---
 
-## Using Custom APIs for Automatic Data Ingestion
+### Step 3: Review & Approve Content
 
-Custom APIs allow you to automatically fetch and ingest data from external sources into your Knowledge Base. This is perfect for staying updated with live market data, news, or any other real-time information.
+**Where:** Your Agent → Configure → `Knowledge Base` tab → `Review Queue`
 
-### Step 1: Set Up a Custom API
+1. Navigate to your agent's configuration page
+2. Click the **"Knowledge Base"** tab
+3. Select the **"Review Queue"** sub-tab
+4. You'll see all newly ingested entries waiting for approval:
+   - Each entry shows: **Title**, **Content preview**, **Tags**, **Source**
+   - Check the boxes next to entries you want to approve
+   - Click **"Approve"** to activate them (they'll be used in conversations)
+   - Click **"Archive"** to remove unwanted entries
 
-1. Go to the **Custom APIs** page
-2. Click **Add New API**
-3. Configure your API:
-   - **Name**: Descriptive name (e.g., "Bitcoin Price Feed")
-   - **URL**: The API endpoint (e.g., `https://api.coingecko.com/api/v3/simple/price`)
-   - **Method**: Usually GET for data fetching
-   - **Headers**: Any required headers (API keys, content-type, etc.)
-   - **Query Parameters**: URL parameters (e.g., `ids=bitcoin&vs_currencies=usd`)
-   - **Body**: For POST requests (usually not needed for data fetching)
-
-### Step 2: Test the API Response
-
-1. Click **Test API** to see the raw response
-2. Review the JSON structure to identify what data you want to extract
-
-**Example Response:**
-```json
-{
-  "bitcoin": {
-    "usd": 43250.50
-  }
-}
-```
-
-### Step 3: Configure Data Extraction
-
-Use **JSONPath** to extract specific values from the API response:
-
-1. In the **JSONPath Expression** field, enter a path to the data you want
-2. Click **Test Extraction** to preview what will be extracted
-
-**Example JSONPath Expressions:**
-```
-$.bitcoin.usd                    → Extracts: 43250.50
-$.data[*].title                  → Extracts all titles from a data array
-$.news[0].headline               → Extracts first news headline
-$..price                         → Extracts all "price" fields recursively
-```
-
-**JSONPath Syntax Quick Reference:**
-- `$` = root of the document
-- `.` = child element
-- `[0]` = first array element
-- `[*]` = all array elements
-- `..` = recursive descent (search all levels)
-
-### Step 4: Configure Ingestion
-
-1. **Target Agent**: Select which agent should receive this data
-2. **Category**: What category to assign ingested entries (e.g., "price_data")
-3. **Tags**: Tags to automatically apply (e.g., "bitcoin, live_price")
-4. **Priority**: Default priority for ingested entries (1-10)
-5. **Polling Interval**: How often to fetch data (in minutes)
-   - 5 minutes = very frequent updates
-   - 60 minutes = hourly updates
-   - 1440 minutes = daily updates
-
-6. Click **Save API Configuration**
-
-### Step 5: Enable Polling
-
-1. Toggle **Enable Polling** to ON
-2. The system will now automatically fetch data at your specified interval
-3. New entries will be created as **pending** and appear in the Review Queue
-
-### Real-World Example: Bitcoin Price Tracking
-
-**API Configuration:**
-```
-Name: CoinGecko Bitcoin Price
-URL: https://api.coingecko.com/api/v3/simple/price
-Method: GET
-Query Params: ids=bitcoin&vs_currencies=usd
-JSONPath: $.bitcoin.usd
-Target Agent: @crypto_analyst
-Category: market_data
-Tags: bitcoin, price, live
-Priority: 9
-Polling Interval: 15 minutes
-```
-
-**Result:** Every 15 minutes, a new pending KB entry is created:
-```
-Content: 43250.50
-Category: market_data
-Tags: bitcoin, price, live
-Priority: 9
-Status: pending
-```
-
-### Advanced Example: News Headlines
-
-**API Configuration:**
-```
-Name: Crypto News Feed
-URL: https://api.cryptonews.com/v1/headlines
-Method: GET
-Headers: X-API-Key: your_api_key_here
-JSONPath: $.articles[*].headline
-Target Agent: @crypto_news_bot
-Category: news
-Tags: crypto, headlines, breaking
-Priority: 8
-Polling Interval: 30 minutes
-```
-
-**Result:** Creates multiple pending entries, one for each headline extracted.
+**Tip:** Use "Select All" for batch operations if you trust the source
 
 ---
 
-## Reviewing Pending Entries
+### Step 4: Manage Active Knowledge
 
-All automatically ingested data (and manually added pending entries) must be reviewed before they become active.
+**Where:** Your Agent → Configure → `Knowledge Base` tab → `Active Knowledge`
 
-### Step 1: Access Review Queue
+1. Switch to the **"Active Knowledge"** sub-tab
+2. Here you'll see all approved entries that your agent can use
+3. To remove outdated knowledge:
+   - Click the trash icon (🗑️) next to any entry
+   - Confirm deletion
 
-1. Go to your agent's **Knowledge Base** tab
-2. Click the **Review Queue** sub-tab
-3. You'll see all pending entries waiting for review
+4. To refresh knowledge:
+   - Go back to `Knowledge Sources`
+   - Click **"Ingest Now"** again on your API source
+   - New/updated entries will appear in the Review Queue
 
-### Step 2: Review Each Entry
+---
 
-For each pending entry, check:
-- **Content**: Is the information accurate and useful?
-- **Category**: Is it categorized correctly?
-- **Tags**: Are the tags appropriate?
-- **Priority**: Does the priority level make sense?
-- **Source**: Where did this come from?
+## 🔧 Advanced Configuration
 
-### Step 3: Approve or Archive
+### Auto-Refresh (Polling)
 
-**To Approve Single Entries:**
-1. Click the checkbox next to entries you want to approve
-2. Click **Approve Selected** button
-3. Entries move to Active Knowledge and become available to your agent
+**Where:** `Knowledge Sources` page → Edit your API source
 
-**To Archive Unwanted Entries:**
-1. Click the checkbox next to entries you want to remove
-2. Click **Archive Selected** button
-3. Entries are archived and won't appear in either tab
+1. Edit an existing API source
+2. Scroll to **"Refresh Interval"**
+3. Set the interval in minutes (e.g., `60` = refresh every hour)
+4. The system will automatically fetch new data and add it to the Review Queue
+5. You'll still need to manually approve new entries
 
-**Keyboard Shortcuts:**
-- Click checkbox while holding Shift to select a range
-- Click "Select All" to review everything at once
+### Query Parameters
 
-### Review Tips
+For APIs that require parameters (e.g., `?apikey=xxx&country=us`):
 
-**Approve entries that are:**
-- Factually accurate
-- Relevant to your agent's purpose
-- Well-formatted and clear
-- Recent and timely (for time-sensitive data)
+1. In the API source form, find **"Query Parameters"**
+2. Enter as JSON:
+   ```json
+   {
+     "apikey": "your-key-here",
+     "country": "us",
+     "max": 10
+   }
+   ```
 
-**Archive entries that are:**
-- Duplicate information
-- Outdated or stale
-- Irrelevant to your agent's topics
-- Poorly formatted or confusing
-- From unreliable sources
+### Custom Headers
 
-### Batch Operations
+For APIs requiring custom headers:
 
-For efficiency, you can review multiple entries at once:
+1. Find **"Headers"** in the API source form
+2. Enter as JSON:
+   ```json
+   {
+     "User-Agent": "ElizaOS-Agent/1.0",
+     "Accept": "application/json"
+   }
+   ```
 
-1. **Select multiple entries** using checkboxes
-2. **Approve all selected** to bulk-approve quality entries
-3. **Archive all selected** to bulk-remove unwanted entries
+---
 
-**Example Workflow:**
+## 🌐 Recommended API Sources
+
+### News APIs
+- **GNews API** - `https://gnews.io/api/v4/top-headlines`
+  - JSONPath: `$.articles[*]`
+  - Title: `$.title`
+  - Content: `$.description`
+
+- **NewsAPI** - `https://newsapi.org/v2/top-headlines`
+  - JSONPath: `$.articles[*]`
+  - Title: `$.title`
+  - Content: `$.content`
+
+### Crypto Data
+- **CoinGecko** - `https://api.coingecko.com/api/v3/coins/markets`
+  - JSONPath: `$[*]`
+  - Title: `$.name`
+  - Content: Combine `$.current_price` and `$.price_change_percentage_24h`
+
+- **DexScreener** - `https://api.dexscreener.com/latest/dex/tokens/{address}`
+  - JSONPath: `$.pairs[*]`
+  - Title: `$.baseToken.name`
+  - Content: Combine `$.priceUsd` and `$.volume.h24`
+
+---
+
+## 🔐 API Key Management
+
+**Where:** Replit Secrets (not in the app UI)
+
+1. Go to your Replit project
+2. Click the **"Secrets"** tab (🔐 icon in sidebar)
+3. Add your API keys:
+   - Key name: `GNEWS_API_KEY`
+   - Value: `your-actual-api-key-here`
+
+4. Reference them in API sources using the key name (e.g., `GNEWS_API_KEY`)
+5. The system will automatically fetch the value from Replit Secrets
+
+**Why this approach?**
+- 🔒 Secrets never appear in your code or UI
+- 🔄 Easy to rotate keys without changing configuration
+- 👥 Works seamlessly with team members
+
+---
+
+## 📊 Knowledge Entry Lifecycle
+
 ```
-Morning Review:
-1. Check Review Queue (50 new entries from overnight)
-2. Scan for duplicates → Archive (10 entries)
-3. Scan for irrelevant data → Archive (5 entries)
-4. Approve remaining quality entries → Approve (35 entries)
-Total time: 5-10 minutes
+API Source (configured)
+     ↓
+Test Connection (verify it works)
+     ↓
+Ingest to Agent (fetch fresh data)
+     ↓
+Review Queue (pending approval) ← You are here
+     ↓
+Approve/Archive (your decision)
+     ↓
+Active Knowledge (used in conversations)
+     ↓
+Delete (when outdated)
 ```
 
 ---
 
-## Managing Active Knowledge
+## ❓ Common Issues
 
-Once entries are approved, they appear in the **Active Knowledge** tab and are used by your agent.
+### "jp.query is not a function" Error
+**Fixed!** This was caused by incorrect JSONPath import. The latest version resolves this automatically.
 
-### Viewing Active Entries
-
-1. Go to **Knowledge Base** → **Active Knowledge** tab
-2. See all currently active knowledge entries
-3. Entries are sorted by priority (highest first)
-
-### Understanding Priority
-
-When your agent generates a response, it:
-1. Looks at ALL active knowledge entries
-2. Selects the most relevant entries based on:
-   - **Priority level** (higher = more likely to be included)
-   - **Relevance to the conversation context**
-   - **KB limit** (you can set max entries per conversation)
-
-**Priority Guidelines:**
-- **10**: Critical information, always include if relevant
-- **8-9**: Very important, high relevance
-- **6-7**: Standard important information
-- **4-5**: Background context, nice to have
-- **1-3**: Low priority, filler information
-
-### Editing Active Entries
-
-You cannot directly edit entries from the Knowledge Base tab. To modify:
-
-1. **Archive the old entry** (select it and click Archive)
-2. **Add a new entry** with the updated information
-
-This maintains a clear audit trail of what information was used when.
-
-### Archiving Outdated Information
-
-As information becomes stale:
-
-1. Go to **Active Knowledge** tab
-2. Select outdated entries
-3. Click **Archive Selected**
-4. The entries are removed from active use but not deleted
-
-**Example: Archiving Old Price Data**
-```
-Archive entries like:
-- "Bitcoin price: $30,000" (if current price is $43,000)
-- "Ethereum ATH: $4,800" (if new ATH is reached)
-- "Q1 2023 market analysis" (when you're in Q4 2023)
-```
-
----
-
-## Best Practices
-
-### 1. Organize with Consistent Categories
-
-Use a consistent categorization system across your knowledge base:
-
-**Good Category System:**
-```
-market_data      → Prices, volumes, market caps
-news             → Headlines, articles, announcements  
-facts            → General crypto facts and information
-technical        → Technical analysis, indicators
-sentiment        → Market sentiment, social metrics
-fundamentals     → Project fundamentals, metrics
-```
-
-**Avoid:**
-```
-random           → Too vague
-miscellaneous    → Lacks structure
-data             → Too broad
-```
-
-### 2. Use Descriptive Tags
-
-Tags make filtering and retrieval easier:
-
-**Good Tags:**
-```
-bitcoin, btc, price, bullish, breakout
-ethereum, eth, upgrade, merge, pos
-regulation, sec, legal, compliance
-```
-
-**Avoid:**
-```
-crypto          → Too broad
-important       → Not descriptive
-news           → Already covered by category
-```
-
-### 3. Set Appropriate Priorities
-
-Balance your priority levels:
-
-**Suggested Distribution:**
-- 10% of entries at priority 9-10 (critical info)
-- 30% of entries at priority 7-8 (very important)
-- 40% of entries at priority 5-6 (standard)
-- 20% of entries at priority 1-4 (background)
-
-This ensures variety in your agent's responses while prioritizing key information.
-
-### 4. Regular Maintenance
-
-Schedule regular KB maintenance:
-
-**Daily:**
-- Review pending entries from API ingestion (5-10 min)
-- Archive obviously outdated price data
-
-**Weekly:**
-- Review active knowledge for stale information
-- Check if priority levels still make sense
-- Update categories/tags if needed
-
-**Monthly:**
-- Full KB audit
-- Archive entries older than X days (depending on your needs)
-- Review API configurations for changes
-
-### 5. Set Reasonable KB Limits
-
-In your agent's Settings tab, configure the KB limit:
-
-- **Limit = 10**: Agent uses up to 10 highest-priority relevant entries per conversation
-- **Limit = 50**: More context, but longer prompts and higher API costs
-- **Limit = 100**: Maximum context, highest costs
-
-**Recommended Settings:**
-```
-General purpose bot: 20-30 entries
-News/analysis bot: 40-60 entries  
-Data-heavy bot: 60-100 entries
-Simple bot: 10-20 entries
-```
-
-### 6. Monitor Your Agent's Usage
-
-Use the **Playground** to test how your agent uses KB:
-
-1. Go to **Playground** tab
-2. Select your agent
-3. Enter a test prompt
-4. Click **Test Conversation**
-5. Review which KB entries were included in the response
-
-This helps you understand if your priority levels and categories are working well.
-
-### 7. Quality Over Quantity
-
-**Better to have:**
-- 50 high-quality, well-categorized, accurate entries
-- That are regularly reviewed and updated
-
-**Than:**
-- 500 low-quality entries
-- With duplicates, outdated info, and poor organization
-
----
-
-## Troubleshooting
-
-### Problem: API Ingestion Not Creating Entries
-
-**Check:**
-1. Is polling enabled? (Toggle should be ON)
-2. Is the API returning data? (Click "Test API")
-3. Is your JSONPath expression correct? (Click "Test Extraction")
-4. Check for API errors in the Custom APIs table (Status column)
-
-**Solution:**
-- Verify API credentials and URL
-- Test JSONPath expression with the actual response structure
-- Check API rate limits (you might be polling too frequently)
-
-### Problem: Too Many Pending Entries
-
+### "0 Items Extracted"
 **Causes:**
-- API polling too frequently
-- Multiple APIs ingesting similar data
-- Not reviewing regularly
+- Incorrect JSON Path - Use the Test feature to preview your API response structure
+- API returned no data - Check if the API endpoint is working
+- Auth failed - Verify your API key is correct in Replit Secrets
 
 **Solution:**
-- Increase polling interval (e.g., from 5 min to 15 min)
-- Consolidate duplicate APIs
-- Set up a daily review routine
-- Use batch approval/archive to clear backlog quickly
+1. Click "Show Raw Response" in test results
+2. Inspect the JSON structure
+3. Adjust your JSON Path accordingly (use online JSONPath testers if needed)
 
-### Problem: Agent Not Using My Knowledge
-
-**Check:**
-1. Are entries **approved** and in Active Knowledge?
-2. Is priority high enough? (Try 8-9 for important info)
-3. Is the KB limit too low? (Increase in Settings tab)
-4. Are tags/categories relevant to your agent's topics?
-
-**Solution:**
-- Move important entries to priority 9-10
-- Increase KB limit from 20 to 50
-- Test in Playground to see which entries are being used
-
-### Problem: Duplicate Entries
-
+### No Entries in Review Queue
 **Causes:**
-- API polling creating the same data repeatedly
-- Manual entries duplicating ingested data
+- You haven't run "Ingest to Agent" yet
+- All entries were already approved/archived
 
 **Solution:**
-- Review and archive duplicates in batches
-- Adjust API polling interval
-- Check if JSONPath is extracting unique values
-- Consider using timestamps in entry content to differentiate
-
-### Problem: Outdated Information
-
-**Causes:**
-- Old entries not being archived
-- APIs not updating
-- Not reviewing Active Knowledge regularly
-
-**Solution:**
-- Schedule weekly KB maintenance
-- Check API status and polling
-- Archive entries older than X days based on your use case
-- For price data, keep only the most recent entry
+- Go to Knowledge Sources → Click "Ingest Now" on your API source
+- New entries will appear in Review Queue immediately
 
 ---
 
-## Quick Reference
+## 💡 Best Practices
 
-### Common JSONPath Patterns
+1. **Test First, Ingest Later**
+   - Always test your API source before ingesting
+   - Verify the extracted data looks correct
 
-```javascript
-$.price                           // Single value
-$.data[0]                        // First item in array
-$.data[*]                        // All items in array
-$.data[*].title                  // All titles from array
-$..price                         // All "price" fields anywhere
-$.data[?(@.verified == true)]    // Filtered items (verified only)
-```
+2. **Review Regularly**
+   - Check your Review Queue daily if you have auto-refresh enabled
+   - Archive low-quality or irrelevant entries
 
-### Workflow Cheat Sheet
+3. **Organize with Tags**
+   - Manually added entries should have clear tags
+   - Use categories like: `crypto`, `news`, `market-analysis`
 
-**Setting Up Automatic Ingestion:**
-```
-1. Custom APIs → Add New API
-2. Configure URL, headers, params
-3. Test API response
-4. Set JSONPath expression
-5. Test extraction
-6. Configure target agent, category, tags
-7. Enable polling
-```
+4. **Refresh Strategically**
+   - News: Every 30-60 minutes
+   - Crypto prices: Every 5-15 minutes
+   - General data: Every 1-24 hours
 
-**Daily Review Routine:**
-```
-1. Knowledge Base → Review Queue
-2. Scan for duplicates → Archive
-3. Scan for irrelevant → Archive  
-4. Approve quality entries
-5. Check Active Knowledge for outdated info
-```
-
-**Testing Your KB:**
-```
-1. Playground → Select Agent
-2. Enter test prompt
-3. Review KB entries included
-4. Adjust priorities if needed
-5. Test again
-```
+5. **Monitor Active Knowledge Size**
+   - Keep it under 50-100 entries for optimal performance
+   - Delete outdated entries regularly
 
 ---
 
-## Additional Resources
+## 🚀 Next Steps
 
-- **TWITTER_SETUP_GUIDE.md**: Setting up Twitter API credentials
-- **TWITTER_AUTH_GUIDE.md**: Understanding OAuth authentication
-- **USER_GUIDE.md**: Complete platform usage guide
-- **README.md**: Technical documentation and API reference
+1. **Set up your first API source** - Try GNews API (free tier available)
+2. **Test the connection** - Verify data extraction works
+3. **Ingest to your agent** - Pull in fresh content
+4. **Approve entries** - Review and activate knowledge
+5. **Test in Playground** - See your agent use the knowledge in conversations!
 
----
-
-## Support
-
-If you encounter issues not covered in this guide:
-
-1. Check the browser console for error messages
-2. Verify API endpoints are accessible
-3. Test JSONPath expressions with online validators
-4. Review the Playground to see how your agent uses KB entries
-
-The Knowledge Base is the foundation of your agent's intelligence. Regular maintenance and quality control will result in better, more accurate responses from your AI agent.
+Need help? The in-app workflow guide (in the Knowledge Base tab) provides quick reference.
