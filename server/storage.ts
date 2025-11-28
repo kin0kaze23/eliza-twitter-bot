@@ -13,12 +13,15 @@ import {
   type InsertApiKey,
   type AgentActivity,
   type InsertAgentActivity,
+  type ActivityLog,
+  type InsertActivityLog,
   users,
   agents,
   knowledgeBase,
   customApis,
   apiKeys,
   agentActivity,
+  activityLogs,
 } from "@shared/schema";
 import { eq, desc, and, sql, inArray } from "drizzle-orm";
 
@@ -70,6 +73,11 @@ export interface IStorage {
   createApiKey(key: InsertApiKey): Promise<ApiKey>;
   updateApiKey(id: string, key: Partial<InsertApiKey>): Promise<ApiKey | undefined>;
   deleteApiKey(id: string): Promise<boolean>;
+  
+  // Activity Logs
+  getActivityLogs(agentId?: string, limit?: number): Promise<ActivityLog[]>;
+  getRecentActivityLogs(limit?: number): Promise<ActivityLog[]>;
+  createActivityLog(log: InsertActivityLog): Promise<ActivityLog>;
 }
 
 export class DbStorage implements IStorage {
@@ -410,6 +418,36 @@ export class DbStorage implements IStorage {
   async deleteApiKey(id: string): Promise<boolean> {
     const result = await db.delete(apiKeys).where(eq(apiKeys.id, id)).returning();
     return result.length > 0;
+  }
+
+  // Activity Logs
+  async getActivityLogs(agentId?: string, limit: number = 50): Promise<ActivityLog[]> {
+    if (agentId) {
+      return await db
+        .select()
+        .from(activityLogs)
+        .where(eq(activityLogs.agentId, agentId))
+        .orderBy(desc(activityLogs.createdAt))
+        .limit(limit);
+    }
+    return await db
+      .select()
+      .from(activityLogs)
+      .orderBy(desc(activityLogs.createdAt))
+      .limit(limit);
+  }
+
+  async getRecentActivityLogs(limit: number = 50): Promise<ActivityLog[]> {
+    return await db
+      .select()
+      .from(activityLogs)
+      .orderBy(desc(activityLogs.createdAt))
+      .limit(limit);
+  }
+
+  async createActivityLog(log: InsertActivityLog): Promise<ActivityLog> {
+    const result = await db.insert(activityLogs).values(log as any).returning();
+    return result[0];
   }
 }
 

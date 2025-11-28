@@ -1721,6 +1721,203 @@ Respond in JSON format:
     }
   });
 
+  // ============= TWITTER POSTING ============= //
+  
+  // Post tweet directly to Twitter
+  app.post("/api/agents/:id/post-tweet", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { content } = req.body;
+      
+      if (!content) {
+        return res.status(400).json({ error: "Tweet content is required" });
+      }
+      
+      const agent = await storage.getAgent(id);
+      if (!agent) {
+        return res.status(404).json({ error: "Agent not found" });
+      }
+      
+      const { postTweet, validateTwitterCredentials } = await import("./twitter");
+      
+      const validation = validateTwitterCredentials(agent);
+      if (!validation.valid) {
+        return res.status(400).json({
+          error: "Missing Twitter credentials",
+          missing: validation.missing,
+        });
+      }
+      
+      const result = await postTweet(agent, content);
+      
+      // Log the activity
+      await storage.createActivityLog({
+        agentId: id,
+        eventType: "post",
+        status: result.success ? "success" : "failed",
+        tweetId: result.tweetId,
+        content,
+        characterCount: content.length,
+        modelProvider: agent.postModelProvider || agent.modelProvider,
+        modelName: agent.postModelName || agent.modelName,
+        errorMessage: result.error,
+        errorCode: result.errorCode,
+        postedAt: result.success ? new Date() : undefined,
+      });
+      
+      if (result.success) {
+        // Send webhook notification
+        if (agent.webhookEnabled && agent.webhookUrl) {
+          sendPostCreatedWebhook(agent, content, result.tweetId).catch(err =>
+            console.error("Webhook error:", err)
+          );
+        }
+        
+        res.json({
+          success: true,
+          tweetId: result.tweetId,
+          message: "Tweet posted successfully",
+          tweetUrl: `https://twitter.com/i/status/${result.tweetId}`,
+        });
+      } else {
+        if (agent.webhookEnabled && agent.webhookUrl) {
+          sendPostFailedWebhook(agent, result.error || "Unknown error", content).catch(err =>
+            console.error("Webhook error:", err)
+          );
+        }
+        
+        res.status(400).json({
+          success: false,
+          error: result.error,
+          errorCode: result.errorCode,
+          rateLimited: result.rateLimited,
+        });
+      }
+    } catch (error: any) {
+      console.error("Error posting tweet:", error);
+      res.status(500).json({
+        error: "Failed to post tweet",
+        details: error.message,
+      });
+    }
+  });
+
+  // ============= SCHEDULER CONTROL ============= //
+  
+  // Start agent scheduler
+  app.post("/api/agents/:id/scheduler/start", async (req, res) => {
+    try {
+      const agent = await storage.getAgent(req.params.id);
+      if (!agent) {
+        return res.status(404).json({ error: "Agent not found" });
+      }
+      
+      const { startAgent, isAgentRunning } = await import("./scheduler");
+      
+      if (isAgentRunning(agent.id)) {
+        return res.json({ success: true, message: "Agent is already running" });
+      }
+      
+      // Update agent status to active
+      await storage.updateAgentStatus(agent.id, "active");
+      startAgent(agent);
+      
+      res.json({
+        success: true,
+        message: `Agent ${agent.name} started`,
+        status: "active",
+      });
+    } catch (error: any) {
+      console.error("Error starting agent scheduler:", error);
+      res.status(500).json({ error: "Failed to start agent", details: error.message });
+    }
+  });
+  
+  // Stop agent scheduler
+  app.post("/api/agents/:id/scheduler/stop", async (req, res) => {
+    try {
+      const agent = await storage.getAgent(req.params.id);
+      if (!agent) {
+        return res.status(404).json({ error: "Agent not found" });
+      }
+      
+      const { stopAgent, isAgentRunning } = await import("./scheduler");
+      
+      // Update agent status to inactive
+      await storage.updateAgentStatus(agent.id, "inactive");
+      stopAgent(agent.id);
+      
+      res.json({
+        success: true,
+        message: `Agent ${agent.name} stopped`,
+        status: "inactive",
+      });
+    } catch (error: any) {
+      console.error("Error stopping agent scheduler:", error);
+      res.status(500).json({ error: "Failed to stop agent", details: error.message });
+    }
+  });
+  
+  // Get scheduler status
+  app.get("/api/scheduler/status", async (req, res) => {
+    try {
+      const { getSchedulerStatus } = await import("./scheduler");
+      const status = getSchedulerStatus();
+      res.json(status);
+    } catch (error: any) {
+      console.error("Error getting scheduler status:", error);
+      res.status(500).json({ error: "Failed to get scheduler status" });
+    }
+  });
+
+  // ============= ACTIVITY LOGS ============= //
+  
+  // Get all activity logs
+  app.get("/api/activity-logs", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const agentId = req.query.agentId as string | undefined;
+      
+      const logs = await storage.getActivityLogs(agentId, limit);
+      
+      // Enrich logs with agent names
+      const agents = await storage.getAllAgents();
+      const agentMap = new Map(agents.map(a => [a.id, a.name]));
+      
+      const enrichedLogs = logs.map(log => ({
+        ...log,
+        agentName: agentMap.get(log.agentId) || "Unknown Agent",
+      }));
+      
+      res.json(enrichedLogs);
+    } catch (error: any) {
+      console.error("Error fetching activity logs:", error);
+      res.status(500).json({ error: "Failed to fetch activity logs" });
+    }
+  });
+
+  // Get activity logs for specific agent
+  app.get("/api/agents/:id/activity-logs", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 50;
+      const logs = await storage.getActivityLogs(req.params.id, limit);
+      res.json(logs);
+    } catch (error: any) {
+      console.error("Error fetching agent activity logs:", error);
+      res.status(500).json({ error: "Failed to fetch activity logs" });
+    }
+  });
+
+  // Initialize scheduler on server start
+  (async () => {
+    try {
+      const { initializeScheduler } = await import("./scheduler");
+      await initializeScheduler();
+    } catch (error) {
+      console.error("Failed to initialize scheduler:", error);
+    }
+  })();
+
   const httpServer = createServer(app);
   return httpServer;
 }

@@ -227,8 +227,8 @@ export default function Playground() {
           : "Missing Twitter API credentials - configure in Agent → Credentials tab"
       },
       schedule: {
-        valid: postingValid,
-        message: postingValid
+        valid: Boolean(postingValid),
+        message: Boolean(postingValid)
           ? `Auto-posting enabled: ${agent.postFrequency} tweets per hour`
           : agent.postingEnabled 
             ? "Posting enabled but frequency not set - configure in Agent → Behavior tab"
