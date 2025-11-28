@@ -2800,14 +2800,6 @@ export default function AgentConfigure() {
                                 <Pencil className="h-4 w-4" />
                               </Button>
                             )}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleDeleteKBEntry(entry.id)}
-                              data-testid={`button-delete-kb-${entry.id}`}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
                           </div>
                         </div>
                       </div>
