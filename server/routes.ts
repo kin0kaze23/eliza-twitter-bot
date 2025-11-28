@@ -982,7 +982,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Build URL with query parameters
-      let url = customApi.url;
+      let url = customApi.baseUrl;
       if (Object.keys(customApi.queryParams || {}).length > 0) {
         const params = new URLSearchParams(customApi.queryParams || {});
         url += `?${params.toString()}`;
@@ -1021,7 +1021,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       if (!extractedData || extractedData.length === 0) {
-        console.warn(`No data extracted from ${customApi.url} using path: ${customApi.jsonPath}`);
+        console.warn(`No data extracted from ${customApi.baseUrl} using path: ${customApi.jsonPath}`);
         return res.status(400).json({
           error: "No data extracted",
           details: "JSONPath query returned no results. Please verify the path is correct.",
@@ -1058,8 +1058,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           tags: ["auto-generated", "api-ingestion"],
           source: customApi.name,
           sourceId: sourceId,
-          sourceUrl: customApi.url,
-          category: customApi.category || "general",
+          sourceUrl: customApi.baseUrl,
+          category: "news", // Default category for API-ingested entries
           priority: 5,
           active: false, // Inactive until approved
           status: "pending", // Requires review before becoming active
