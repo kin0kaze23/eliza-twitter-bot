@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle } from "lucide-react";
+import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Link, useParams } from "wouter";
@@ -77,6 +77,11 @@ export default function AgentConfigure() {
   const { data: approvedKB = [] } = useQuery<KnowledgeBase[]>({
     queryKey: ["/api/agents", id, "knowledge/approved"],
     enabled: !!id,
+  });
+
+  // Fetch custom APIs for KB refresh controls
+  const { data: customApis = [] } = useQuery<any[]>({
+    queryKey: ["/api/custom-apis"],
   });
 
   // KB batch operations state
@@ -571,6 +576,46 @@ export default function AgentConfigure() {
 
   const handleForceGenerateTweet = () => {
     forceGenerateMutation.mutate();
+  };
+
+  // KB refresh mutation
+  const [refreshingApiId, setRefreshingApiId] = useState<string | null>(null);
+  const refreshKBMutation = useMutation({
+    mutationFn: async ({ apiId, agentId }: { apiId: string; agentId: string }) => {
+      const response = await fetch(`/api/agents/${agentId}/knowledge/refresh/${apiId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to refresh data");
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/pending"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/approved"] });
+      toast({
+        title: "KB Refreshed Successfully",
+        description: `Removed ${data.removed} old entries, added ${data.added} new (${data.autoApproved} auto-approved)`,
+      });
+      setRefreshingApiId(null);
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Refresh Failed",
+        description: error.message || "Failed to refresh KB data",
+        variant: "destructive",
+      });
+      setRefreshingApiId(null);
+    },
+  });
+
+  const handleRefreshAPI = (apiId: string) => {
+    if (!id) return;
+    setRefreshingApiId(apiId);
+    refreshKBMutation.mutate({ apiId, agentId: id });
   };
 
   // Load agent data into state when fetched
@@ -1618,6 +1663,67 @@ export default function AgentConfigure() {
                   </div>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* API Data Sources & Refresh Controls */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base">API Data Sources</CardTitle>
+                  <CardDescription>Refresh knowledge from configured API sources</CardDescription>
+                </div>
+                <Link href="/api-management">
+                  <Button size="sm" variant="outline">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Manage Sources
+                  </Button>
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {customApis.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <p className="mb-2">No API sources configured</p>
+                  <p className="text-sm">
+                    <Link href="/api-management" className="text-primary hover:underline">
+                      Add API sources
+                    </Link>
+                    {" "}to automatically fetch knowledge for this agent
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {customApis.map((api: any) => (
+                    <div
+                      key={api.id}
+                      className="flex items-center justify-between p-3 border rounded-lg hover-elevate"
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h4 className="font-medium">{api.name}</h4>
+                          <Badge variant="outline" className="text-xs">{api.category}</Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground line-clamp-1">{api.description}</p>
+                        {api.endpoint && (
+                          <p className="text-xs text-muted-foreground mt-1 font-mono">{api.endpoint}</p>
+                        )}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleRefreshAPI(api.id)}
+                        disabled={refreshingApiId === api.id}
+                        data-testid={`button-refresh-${api.id}`}
+                      >
+                        <RefreshCw className={`mr-2 h-4 w-4 ${refreshingApiId === api.id ? 'animate-spin' : ''}`} />
+                        {refreshingApiId === api.id ? "Refreshing..." : "Refresh"}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 
