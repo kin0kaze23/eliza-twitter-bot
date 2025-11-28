@@ -2625,10 +2625,59 @@ export default function AgentConfigure() {
 
             {/* Active Knowledge Tab */}
             <TabsContent value="active" className="space-y-4">
+              {selectedKBIds.size > 0 && kbSubtab === "active" && (
+                <Card className="bg-primary/5 border-primary/20">
+                  <CardContent className="flex items-center justify-between gap-4 py-3">
+                    <span className="text-sm font-medium">{selectedKBIds.size} selected</span>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleBatchDeactivateKB}
+                        disabled={batchDeactivateMutation.isPending}
+                        data-testid="button-batch-deactivate"
+                      >
+                        {batchDeactivateMutation.isPending ? "Deactivating..." : "Deactivate"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={handleBatchDeleteActive}
+                        disabled={batchDeleteActiveMutation.isPending}
+                        data-testid="button-batch-delete-active"
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        {batchDeleteActiveMutation.isPending ? "Deleting..." : "Delete"}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               <Card>
                 <CardHeader>
-                  <CardTitle>Active Knowledge</CardTitle>
-                  <CardDescription>Approved entries used in agent conversations</CardDescription>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle>Active Knowledge</CardTitle>
+                      <CardDescription>Approved entries used in agent conversations</CardDescription>
+                    </div>
+                    {approvedKB.length > 0 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (selectedKBIds.size === approvedKB.length) {
+                            setSelectedKBIds(new Set());
+                          } else {
+                            setSelectedKBIds(new Set(approvedKB.map(kb => kb.id)));
+                          }
+                        }}
+                        data-testid="button-select-all-active"
+                      >
+                        {selectedKBIds.size === approvedKB.length ? "Deselect All" : "Select All"}
+                      </Button>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {approvedKB.length === 0 ? (
@@ -2638,7 +2687,22 @@ export default function AgentConfigure() {
                   ) : (
                     approvedKB.map((entry) => (
                       <div key={entry.id} className="p-3 border rounded-lg space-y-2" data-testid={`active-kb-entry-${entry.id}`}>
-                        <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedKBIds.has(entry.id)}
+                            onChange={() => {
+                              const newSet = new Set(selectedKBIds);
+                              if (newSet.has(entry.id)) {
+                                newSet.delete(entry.id);
+                              } else {
+                                newSet.add(entry.id);
+                              }
+                              setSelectedKBIds(newSet);
+                            }}
+                            className="mt-1"
+                            data-testid={`checkbox-active-kb-${entry.id}`}
+                          />
                           <div className="flex-1">
                             <div className="flex items-start justify-between gap-2">
                               <h4 className="font-medium">{entry.title}</h4>
