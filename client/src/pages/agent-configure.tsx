@@ -596,6 +596,30 @@ export default function AgentConfigure() {
     },
   });
 
+  // Update KB entry priority with feedback tracking
+  const updatePriorityMutation = useMutation({
+    mutationFn: async ({ entryId, priority }: { entryId: string; priority: string }) => {
+      return apiRequest("PATCH", `/api/knowledge/${entryId}/priority`, { priority });
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/approved"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
+      toast({ 
+        title: "Priority Updated", 
+        description: data.originalPriority 
+          ? `Changed from ${data.originalPriority} to ${data.priority} - this helps the AI learn your preferences!`
+          : `Priority set to ${data.priority}`
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update priority",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleBatchDeactivateKB = () => {
     if (selectedKBIds.size === 0) return;
     batchDeactivateMutation.mutate(Array.from(selectedKBIds));
@@ -2773,16 +2797,49 @@ export default function AgentConfigure() {
                               </div>
                             </div>
                             <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{entry.content}</p>
-                            <div className="flex gap-2 mt-2 flex-wrap">
+                            <div className="flex gap-2 mt-2 flex-wrap items-center">
                               {entry.tags?.map((tag: string) => (
                                 <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
                               ))}
-                              <Badge 
-                                variant={entry.priority === "high" ? "default" : entry.priority === "medium" ? "secondary" : "outline"} 
-                                className="text-xs capitalize"
+                              <Select
+                                value={entry.priority || "medium"}
+                                onValueChange={(value) => {
+                                  updatePriorityMutation.mutate({ entryId: entry.id, priority: value });
+                                }}
+                                disabled={updatePriorityMutation.isPending}
                               >
-                                {entry.priority} priority
-                              </Badge>
+                                <SelectTrigger 
+                                  className="h-6 w-[110px] text-xs"
+                                  data-testid={`select-priority-${entry.id}`}
+                                >
+                                  <SelectValue placeholder="Priority" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="high" data-testid={`priority-high-${entry.id}`}>
+                                    <span className="flex items-center gap-1">
+                                      <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                                      High
+                                    </span>
+                                  </SelectItem>
+                                  <SelectItem value="medium" data-testid={`priority-medium-${entry.id}`}>
+                                    <span className="flex items-center gap-1">
+                                      <span className="w-2 h-2 rounded-full bg-yellow-500"></span>
+                                      Medium
+                                    </span>
+                                  </SelectItem>
+                                  <SelectItem value="low" data-testid={`priority-low-${entry.id}`}>
+                                    <span className="flex items-center gap-1">
+                                      <span className="w-2 h-2 rounded-full bg-gray-500"></span>
+                                      Low
+                                    </span>
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                              {entry.originalPriority && entry.originalPriority !== entry.priority && (
+                                <Badge variant="outline" className="text-xs text-muted-foreground">
+                                  was: {entry.originalPriority}
+                                </Badge>
+                              )}
                             </div>
                           </div>
                           <div className="flex gap-1">
