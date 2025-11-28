@@ -126,6 +126,7 @@ export const agents = pgTable("agents", {
   kbInjectionMethod: text("kb_injection_method").default("prepend"), // prepend, append, context
   kbReusePolicy: text("kb_reuse_policy").default("deprioritize"), // never (exclude used), deprioritize (lower priority), allow (no restriction)
   kbReuseCooldownHours: integer("kb_reuse_cooldown_hours").default(24), // hours before entry can be reused (for 'never' policy)
+  kbMaxEntries: integer("kb_max_entries").default(10), // max KB entries to include per post
   
   // KB Auto-Refresh Settings
   kbAutoRefreshEnabled: boolean("kb_auto_refresh_enabled").default(false),

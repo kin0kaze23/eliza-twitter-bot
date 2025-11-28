@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap } from "lucide-react";
+import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap, Pencil } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Link, useParams } from "wouter";
@@ -331,6 +331,7 @@ export default function AgentConfigure() {
 
   // Knowledge Base Settings
   const [kbSettings, setKbSettings] = useState({
+    maxEntries: "10",
     reusePolicy: "deprioritize", // never, deprioritize, allow
     reuseCooldownHours: "24",
     autoRefreshEnabled: false,
@@ -351,6 +352,8 @@ export default function AgentConfigure() {
   // Knowledge Base (Per-Agent)
   const [knowledgeBase, setKnowledgeBase] = useState<KBEntry[]>([]);
   const [isAddKBDialogOpen, setIsAddKBDialogOpen] = useState(false);
+  const [isEditKBDialogOpen, setIsEditKBDialogOpen] = useState(false);
+  const [editingKBEntry, setEditingKBEntry] = useState<KnowledgeBase | null>(null);
   const [newKBEntry, setNewKBEntry] = useState({
     title: "",
     content: "",
@@ -426,6 +429,55 @@ export default function AgentConfigure() {
       });
     },
   });
+
+  const updateKBMutation = useMutation({
+    mutationFn: async ({ entryId, data }: { entryId: string; data: any }) => {
+      return apiRequest("PATCH", `/api/knowledge/${entryId}`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/approved"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/pending"] });
+      setIsEditKBDialogOpen(false);
+      setEditingKBEntry(null);
+      toast({ title: "Knowledge entry updated" });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update knowledge entry",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const [isApplyingPriorityRules, setIsApplyingPriorityRules] = useState(false);
+  const handleApplyPriorityRules = async () => {
+    if (!kbSettings.priorityRule.trim()) {
+      toast({ title: "No priority rules defined", variant: "destructive" });
+      return;
+    }
+    setIsApplyingPriorityRules(true);
+    try {
+      const response = await fetch(`/api/agents/${id}/knowledge/apply-priority-rules`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rule: kbSettings.priorityRule }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/approved"] });
+        toast({ title: "Priority rules applied", description: `Updated ${data.updated} entries` });
+      } else {
+        toast({ title: "Failed to apply rules", description: data.error, variant: "destructive" });
+      }
+    } catch (error) {
+      toast({ title: "Error applying priority rules", variant: "destructive" });
+    } finally {
+      setIsApplyingPriorityRules(false);
+    }
+  };
 
   // Batch approve KB entries
   const batchApproveMutation = useMutation({
@@ -624,6 +676,7 @@ export default function AgentConfigure() {
         autoTweetOnNews: behavior.autoTweetOnNews,
         minNewsSentiment: behavior.minNewsSentiment[0].toString(),
         // Knowledge Base Settings
+        kbMaxEntries: parseInt(kbSettings.maxEntries) || 10,
         kbReusePolicy: kbSettings.reusePolicy,
         kbReuseCooldownHours: parseInt(kbSettings.reuseCooldownHours) || 24,
         kbAutoRefreshEnabled: kbSettings.autoRefreshEnabled,
@@ -824,6 +877,7 @@ export default function AgentConfigure() {
     
     // Load KB settings
     setKbSettings({
+      maxEntries: (agent.kbMaxEntries || 10).toString(),
       reusePolicy: agent.kbReusePolicy || "deprioritize",
       reuseCooldownHours: (agent.kbReuseCooldownHours || 24).toString(),
       autoRefreshEnabled: agent.kbAutoRefreshEnabled || false,
@@ -2015,6 +2069,20 @@ export default function AgentConfigure() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
+                <Label htmlFor="kb-max-entries">Max KB Entries Per Post</Label>
+                <Input
+                  id="kb-max-entries"
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={kbSettings.maxEntries}
+                  onChange={(e) => setKbSettings({ ...kbSettings, maxEntries: e.target.value })}
+                  data-testid="input-kb-max-entries"
+                />
+                <p className="text-xs text-muted-foreground">Maximum number of KB entries to include when generating posts (default: 10)</p>
+              </div>
+              
+              <div className="space-y-2">
                 <Label htmlFor="kb-reuse-policy">Reuse Policy</Label>
                 <Select
                   value={kbSettings.reusePolicy}
@@ -2113,21 +2181,40 @@ export default function AgentConfigure() {
               </div>
               
               {kbSettings.priorityRuleEnabled && (
-                <div className="space-y-2">
-                  <Label htmlFor="kb-priority-rule">Priority Rule</Label>
-                  <Textarea
-                    id="kb-priority-rule"
-                    placeholder="e.g., if category=market-news then priority=high; if usedCount>3 then priority=low"
-                    className="min-h-[80px]"
-                    value={kbSettings.priorityRule}
-                    onChange={(e) => setKbSettings({ ...kbSettings, priorityRule: e.target.value })}
-                    data-testid="input-kb-priority-rule"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Define rules to auto-assign priorities. Format: <code className="bg-muted px-1 rounded">if condition then priority=value</code>
-                    <br />
-                    Conditions: category, source, usedCount, tags. Values: high, medium, low
-                  </p>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="kb-priority-rule">Priority Rule</Label>
+                    <Textarea
+                      id="kb-priority-rule"
+                      placeholder="e.g., if content contains 'breaking' then priority 10&#10;if content contains 'news' then priority 8"
+                      className="min-h-[80px]"
+                      value={kbSettings.priorityRule}
+                      onChange={(e) => setKbSettings({ ...kbSettings, priorityRule: e.target.value })}
+                      data-testid="input-kb-priority-rule"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Define rules to auto-assign priorities (1-10, higher = more important).
+                      <br />
+                      Format: <code className="bg-muted px-1 rounded">if content contains 'keyword' then priority N</code>
+                    </p>
+                  </div>
+                  <Button
+                    onClick={handleApplyPriorityRules}
+                    disabled={isApplyingPriorityRules || !kbSettings.priorityRule.trim()}
+                    data-testid="button-apply-priority-rules"
+                  >
+                    {isApplyingPriorityRules ? (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                        Applying...
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="mr-2 h-4 w-4" />
+                        Apply Priority Rules Now
+                      </>
+                    )}
+                  </Button>
                 </div>
               )}
             </CardContent>
@@ -2329,6 +2416,133 @@ export default function AgentConfigure() {
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
+
+              {/* Edit KB Entry Dialog */}
+              <Dialog open={isEditKBDialogOpen} onOpenChange={setIsEditKBDialogOpen}>
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Edit Knowledge Entry</DialogTitle>
+                    <DialogDescription>Update the content and settings for this entry</DialogDescription>
+                  </DialogHeader>
+                  {editingKBEntry && (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="edit-kb-title">Title</Label>
+                          <Input
+                            id="edit-kb-title"
+                            value={editingKBEntry.title}
+                            onChange={(e) => setEditingKBEntry({ ...editingKBEntry, title: e.target.value })}
+                            placeholder="Entry title..."
+                            data-testid="input-edit-kb-title"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="edit-kb-category">Category</Label>
+                          <Select
+                            value={editingKBEntry.category}
+                            onValueChange={(value) => setEditingKBEntry({ ...editingKBEntry, category: value })}
+                          >
+                            <SelectTrigger data-testid="select-edit-kb-category">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="general">General</SelectItem>
+                              <SelectItem value="crypto">Crypto</SelectItem>
+                              <SelectItem value="theology">Theology</SelectItem>
+                              <SelectItem value="narratives">Narratives</SelectItem>
+                              <SelectItem value="solana">Solana</SelectItem>
+                              <SelectItem value="mental_models">Mental Models</SelectItem>
+                              <SelectItem value="memes">Memes</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-kb-content">Content</Label>
+                        <Textarea
+                          id="edit-kb-content"
+                          value={editingKBEntry.content}
+                          onChange={(e) => setEditingKBEntry({ ...editingKBEntry, content: e.target.value })}
+                          placeholder="Knowledge content..."
+                          className="min-h-[120px] font-mono text-sm"
+                          data-testid="textarea-edit-kb-content"
+                        />
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Priority: {editingKBEntry.priority >= 8 ? "High" : editingKBEntry.priority >= 5 ? "Medium" : "Low"} ({editingKBEntry.priority})</Label>
+                          <Slider
+                            value={[editingKBEntry.priority]}
+                            onValueChange={([value]) => setEditingKBEntry({ ...editingKBEntry, priority: value })}
+                            min={1}
+                            max={10}
+                            step={1}
+                            data-testid="slider-edit-kb-priority"
+                          />
+                          <p className="text-xs text-muted-foreground">1-4: Low, 5-7: Medium, 8-10: High</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="edit-kb-refresh">Refresh Strategy</Label>
+                          <Select
+                            value={editingKBEntry.refreshStrategy}
+                            onValueChange={(value) => setEditingKBEntry({ ...editingKBEntry, refreshStrategy: value })}
+                          >
+                            <SelectTrigger data-testid="select-edit-kb-refresh">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="static">Static (Never refresh)</SelectItem>
+                              <SelectItem value="daily">Daily</SelectItem>
+                              <SelectItem value="weekly">Weekly</SelectItem>
+                              <SelectItem value="on_demand">On Demand</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center justify-between py-2 px-3 bg-muted/50 rounded-lg">
+                        <Label htmlFor="edit-kb-active" className="cursor-pointer">Active (Include in generations)</Label>
+                        <Switch
+                          id="edit-kb-active"
+                          checked={editingKBEntry.active}
+                          onCheckedChange={(checked) => setEditingKBEntry({ ...editingKBEntry, active: checked })}
+                          data-testid="switch-edit-kb-active"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => {
+                      setIsEditKBDialogOpen(false);
+                      setEditingKBEntry(null);
+                    }}>Cancel</Button>
+                    <Button
+                      onClick={() => {
+                        if (editingKBEntry) {
+                          updateKBMutation.mutate({
+                            entryId: editingKBEntry.id,
+                            data: {
+                              title: editingKBEntry.title,
+                              content: editingKBEntry.content,
+                              category: editingKBEntry.category,
+                              priority: editingKBEntry.priority,
+                              active: editingKBEntry.active,
+                              refreshStrategy: editingKBEntry.refreshStrategy,
+                            }
+                          });
+                        }
+                      }}
+                      disabled={updateKBMutation.isPending}
+                      data-testid="button-save-kb-entry"
+                    >
+                      {updateKBMutation.isPending ? "Saving..." : "Save Changes"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
 
             {/* Review Queue Tab */}
@@ -2441,7 +2655,11 @@ export default function AgentConfigure() {
                               <h4 className="font-medium">{entry.title}</h4>
                               <div className="flex gap-1">
                                 <Badge variant="outline" className="text-xs">{entry.category}</Badge>
-                                {entry.active && <Badge variant="default" className="text-xs">Active</Badge>}
+                                {entry.active ? (
+                                  <Badge variant="default" className="text-xs">Active</Badge>
+                                ) : (
+                                  <Badge variant="secondary" className="text-xs">Disabled</Badge>
+                                )}
                               </div>
                             </div>
                             <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{entry.content}</p>
@@ -2449,17 +2667,32 @@ export default function AgentConfigure() {
                               {entry.tags?.map((tag: string) => (
                                 <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
                               ))}
-                              <Badge variant="outline" className="text-xs">Priority: {entry.priority}</Badge>
+                              <Badge variant="outline" className="text-xs">
+                                Priority: {entry.priority >= 8 ? "High" : entry.priority >= 5 ? "Medium" : "Low"} ({entry.priority})
+                              </Badge>
                             </div>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleDeleteKBEntry(entry.id)}
-                            data-testid={`button-delete-kb-${entry.id}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <div className="flex gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setEditingKBEntry(entry);
+                                setIsEditKBDialogOpen(true);
+                              }}
+                              data-testid={`button-edit-kb-${entry.id}`}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleDeleteKBEntry(entry.id)}
+                              data-testid={`button-delete-kb-${entry.id}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </div>
                       </div>
                     ))

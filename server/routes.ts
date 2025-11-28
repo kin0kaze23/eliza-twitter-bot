@@ -318,6 +318,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Apply priority rules to knowledge base entries
+  app.post("/api/agents/:agentId/knowledge/apply-priority-rules", async (req, res) => {
+    try {
+      const { agentId } = req.params;
+      const { rule } = req.body;
+
+      if (!rule || typeof rule !== "string") {
+        return res.status(400).json({ error: "Priority rule is required" });
+      }
+
+      const { applyPriorityRulesForAgent } = await import("./kbRefresh");
+      const result = await applyPriorityRulesForAgent(agentId, rule);
+
+      res.json({
+        success: true,
+        updated: result.updated,
+        message: `Updated ${result.updated} knowledge base entry priorities`,
+      });
+    } catch (error) {
+      console.error("Error applying priority rules:", error);
+      res.status(500).json({ error: "Failed to apply priority rules" });
+    }
+  });
+
   // ============= AGENT MONITORING/ACTIVITY ============= //
 
   // Get agent activity (with optional date range)
