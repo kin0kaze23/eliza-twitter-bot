@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2 } from "lucide-react";
+import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Link, useParams } from "wouter";
@@ -540,6 +540,38 @@ export default function AgentConfigure() {
       });
     },
   });
+
+  // Force generate tweet mutation
+  const forceGenerateMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch("/api/playground/test-tweet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: id,
+        }),
+      });
+      if (!response.ok) throw new Error("Failed to generate tweet");
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Tweet Generated Successfully",
+        description: data.tweet ? `${data.tweet.substring(0, 100)}...` : "Tweet generated from KB",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Generation Failed",
+        description: "Failed to generate tweet. Check your agent configuration and KB entries.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleForceGenerateTweet = () => {
+    forceGenerateMutation.mutate();
+  };
 
   // Load agent data into state when fetched
   useEffect(() => {
@@ -1882,15 +1914,27 @@ export default function AgentConfigure() {
             )}
           </Badge>
         </div>
-        <Button
-          onClick={handleSave}
-          size="lg"
-          disabled={updateAgentMutation.isPending}
-          data-testid="button-save-all"
-        >
-          <Save className="mr-2 h-4 w-4" />
-          {updateAgentMutation.isPending ? "Saving..." : "Save All Configuration"}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={handleForceGenerateTweet}
+            variant="outline"
+            size="lg"
+            disabled={forceGenerateMutation.isPending || !agent}
+            data-testid="button-force-tweet"
+          >
+            <PlayCircle className="mr-2 h-4 w-4" />
+            {forceGenerateMutation.isPending ? "Generating..." : "Force Generate Tweet"}
+          </Button>
+          <Button
+            onClick={handleSave}
+            size="lg"
+            disabled={updateAgentMutation.isPending}
+            data-testid="button-save-all"
+          >
+            <Save className="mr-2 h-4 w-4" />
+            {updateAgentMutation.isPending ? "Saving..." : "Save All Configuration"}
+          </Button>
+        </div>
       </div>
     </div>
   );

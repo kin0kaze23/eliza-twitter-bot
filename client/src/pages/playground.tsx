@@ -41,7 +41,6 @@ export default function Playground() {
   });
   
   const [selectedAgent, setSelectedAgent] = useState<string | undefined>(agents?.[0]?.id);
-  const [testPrompt, setTestPrompt] = useState("What's the current state of Bitcoin? Should I be bullish or bearish?");
   const [isGenerating, setIsGenerating] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   
@@ -94,7 +93,7 @@ export default function Playground() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentId: selectedAgent,
-          prompt: testPrompt.trim() || undefined, // Send undefined if empty (auto-generate)
+          // No prompt provided - auto-generate from KB
         }),
       });
 
@@ -302,27 +301,19 @@ export default function Playground() {
           <Card>
             <CardHeader>
               <CardTitle>Test Tweet Generation</CardTitle>
-              <CardDescription>Auto-generates tweets from KB entries. Optionally provide a custom prompt.</CardDescription>
+              <CardDescription>Auto-generates tweets from active knowledge base entries using the agent's AI model.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="test-prompt">Custom Prompt (Optional)</Label>
-                <Textarea
-                  id="test-prompt"
-                  value={testPrompt}
-                  onChange={(e) => setTestPrompt(e.target.value)}
-                  placeholder="Leave empty for auto-generation, or enter a custom prompt..."
-                  className="min-h-[100px]"
-                  data-testid="input-test-prompt"
-                />
-                <p className="text-xs text-muted-foreground">
-                  💡 Tip: Leave this empty to test auto-generation based on active knowledge base entries
+                <p className="text-sm text-muted-foreground">
+                  Click the button below to test tweet generation. The agent will automatically create a tweet based on your active knowledge base entries.
                 </p>
               </div>
               <Button
                 onClick={handleGenerate}
-                disabled={isGenerating}
+                disabled={isGenerating || !selectedAgent}
                 data-testid="button-generate-test"
+                size="lg"
               >
                 {isGenerating ? (
                   <>
@@ -336,6 +327,11 @@ export default function Playground() {
                   </>
                 )}
               </Button>
+              {!selectedAgent && (
+                <p className="text-xs text-muted-foreground text-yellow-600">
+                  Please select an agent above to generate a tweet
+                </p>
+              )}
             </CardContent>
           </Card>
 
