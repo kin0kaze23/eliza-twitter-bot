@@ -214,7 +214,7 @@ export default function AgentConfigure() {
   const [isAddCustomPromptOpen, setIsAddCustomPromptOpen] = useState(false);
   const [newCustomPrompt, setNewCustomPrompt] = useState({ key: "", value: "" });
   
-  // Model Configuration
+  // Model Configuration (default/fallback)
   const [modelConfig, setModelConfig] = useState({
     provider: "openai",
     model: "gpt-4-turbo-preview",
@@ -225,6 +225,22 @@ export default function AgentConfigure() {
     frequencyPenalty: [0.5],
     presencePenalty: [0.5],
     contextWindow: "8000",
+  });
+
+  // Post generation specific model
+  const [postModelConfig, setPostModelConfig] = useState({
+    provider: "",
+    model: "",
+    temperature: [0.7],
+    maxTokens: [280],
+  });
+
+  // Conversation specific model
+  const [conversationModelConfig, setConversationModelConfig] = useState({
+    provider: "",
+    model: "",
+    temperature: [0.7],
+    maxTokens: [500],
   });
   
   // Behavior Configuration (Combined posting, replies, modules)
@@ -492,7 +508,7 @@ export default function AgentConfigure() {
         adjectives: character.adjectives,
         messageExamples: character.messageExamples,
         customPrompts: customPromptsObj,
-        // Model
+        // Model (default)
         modelProvider: modelConfig.provider,
         modelName: modelConfig.model,
         modelApiKey: modelConfig.apiKey,
@@ -502,6 +518,16 @@ export default function AgentConfigure() {
         frequencyPenalty: modelConfig.frequencyPenalty[0],
         presencePenalty: modelConfig.presencePenalty[0],
         contextWindow: parseInt(modelConfig.contextWindow),
+        // Post specific model
+        postModelProvider: postModelConfig.provider || undefined,
+        postModelName: postModelConfig.model || undefined,
+        postTemperature: postModelConfig.temperature[0] || undefined,
+        postMaxTokens: postModelConfig.maxTokens[0] || undefined,
+        // Conversation specific model
+        conversationModelProvider: conversationModelConfig.provider || undefined,
+        conversationModelName: conversationModelConfig.model || undefined,
+        conversationTemperature: conversationModelConfig.temperature[0] || undefined,
+        conversationMaxTokens: conversationModelConfig.maxTokens[0] || undefined,
         // Behavior
         postingEnabled: behavior.postingEnabled,
         postFrequency: parseInt(behavior.postFrequency),

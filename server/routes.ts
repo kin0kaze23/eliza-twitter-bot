@@ -630,15 +630,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       let response: string;
       
+      // Use conversation-specific model if configured, otherwise use default
+      const modelProvider = agent.conversationModelProvider || agent.modelProvider || "openai";
+      const modelName = agent.conversationModelName || agent.modelName || "gpt-4-turbo-preview";
+      const temperature = agent.conversationTemperature !== null ? Number(agent.conversationTemperature) : Number(agent.temperature) || 0.7;
+      const maxTokens = agent.conversationMaxTokens || agent.maxTokens || 500;
+      
       // Call the appropriate AI provider
-      if (agent.modelProvider === "openai" || !agent.modelProvider) {
+      if (modelProvider === "openai") {
         const openai = new OpenAI({ apiKey });
         
-        const params = buildOpenAIParams(agent.modelName, {
-          model: agent.modelName || "gpt-4-turbo-preview",
+        const params = buildOpenAIParams(modelName, {
+          model: modelName,
           messages: messages as any,
-          temperature: Number(agent.temperature) || 0.7,
-          max_completion_tokens: agent.maxTokens || 500,
+          temperature,
+          max_completion_tokens: maxTokens,
           top_p: Number(agent.topP) || 0.9,
           frequency_penalty: Number(agent.frequencyPenalty) || 0.5,
           presence_penalty: Number(agent.presencePenalty) || 0.5,
@@ -648,7 +654,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         response = completion.choices[0]?.message?.content || "No response generated";
         
-      } else if (agent.modelProvider === "anthropic") {
+      } else if (modelProvider === "anthropic") {
         const anthropic = new Anthropic({ apiKey });
         
         // Anthropic requires system message separately
@@ -656,14 +662,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const conversationMessages = messages.filter(m => m.role !== "system");
         
         const completion = await anthropic.messages.create({
-          model: agent.modelName || "claude-3-opus-20240229",
+          model: modelName,
           system: systemMessage?.content || "You are a helpful AI assistant.",
           messages: conversationMessages.map(m => ({
             role: m.role as "user" | "assistant",
             content: m.content
           })),
-          max_tokens: agent.maxTokens || 500,
-          temperature: Number(agent.temperature) || 0.7,
+          max_tokens: maxTokens,
+          temperature,
           top_p: Number(agent.topP) || 0.9,
         });
         
@@ -1554,40 +1560,46 @@ Respond in JSON format:
 
       let tweet = "";
       
+      // Use post-specific model if configured, otherwise use default
+      const postModelProvider = agent.postModelProvider || agent.modelProvider || "openai";
+      const postModelName = agent.postModelName || agent.modelName || "gpt-4-turbo-preview";
+      const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.7;
+      const postMaxTokens = agent.postMaxTokens || 280;
+      
       // Call appropriate AI model
-      if (agent.modelProvider === "openai") {
+      if (postModelProvider === "openai") {
         const OpenAI = (await import("openai")).default;
         const openai = new OpenAI({ 
           apiKey: process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
           baseURL: process.env.OPENAI_API_KEY ? undefined : process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
         });
         
-        const params = buildOpenAIParams(agent.modelName, {
-          model: agent.modelName || "gpt-4-turbo-preview",
+        const params = buildOpenAIParams(postModelName, {
+          model: postModelName,
           messages: messages as any,
-          temperature: Number(agent.temperature) || 0.7,
-          max_completion_tokens: 280, // Twitter character limit context
+          temperature: postTemperature,
+          max_completion_tokens: postMaxTokens,
         });
         
         const completion = await safeOpenAICall(openai, params);
         
         tweet = completion.choices[0]?.message?.content || "No tweet generated";
         
-      } else if (agent.modelProvider === "anthropic") {
+      } else if (postModelProvider === "anthropic") {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
         
         const systemMessage = messages.find(m => m.role === "system");
         const userMessages = messages.filter(m => m.role !== "system");
         
         const completion = await anthropic.messages.create({
-          model: agent.modelName || "claude-3-opus-20240229",
+          model: postModelName,
           system: systemMessage?.content || "You are a helpful AI assistant.",
           messages: userMessages.map(m => ({
             role: m.role as "user" | "assistant",
             content: m.content
           })),
-          max_tokens: 280,
-          temperature: Number(agent.temperature) || 0.7,
+          max_tokens: postMaxTokens,
+          temperature: postTemperature,
         });
         
         const textContent = completion.content.find((c) => c.type === "text") as any;

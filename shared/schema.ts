@@ -51,7 +51,7 @@ export const agents = pgTable("agents", {
   // Custom prompts (layered on top of ElizaOS)
   customPrompts: jsonb("custom_prompts").$type<Record<string, string>>().default(sql`'{}'`),
   
-  // AI Model configuration
+  // AI Model configuration (default/fallback)
   modelProvider: text("model_provider").default("openai"),
   modelName: text("model_name").default("gpt-4-turbo-preview"),
   modelFamily: text("model_family").default("gpt-4"), // gpt-4, gpt-5, claude-3, claude-4
@@ -63,6 +63,18 @@ export const agents = pgTable("agents", {
   frequencyPenalty: real("frequency_penalty").default(0.5),
   presencePenalty: real("presence_penalty").default(0.5),
   contextWindow: integer("context_window").default(8000),
+  
+  // Post generation specific model
+  postModelProvider: text("post_model_provider"),
+  postModelName: text("post_model_name"),
+  postTemperature: real("post_temperature"),
+  postMaxTokens: integer("post_max_tokens"),
+  
+  // Conversation specific model
+  conversationModelProvider: text("conversation_model_provider"),
+  conversationModelName: text("conversation_model_name"),
+  conversationTemperature: real("conversation_temperature"),
+  conversationMaxTokens: integer("conversation_max_tokens"),
   
   // Posting behavior
   postingEnabled: boolean("posting_enabled").default(true),
