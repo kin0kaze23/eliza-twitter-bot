@@ -1032,10 +1032,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ============= KB AUTO-INGESTION ============= //
 
-  // Helper function to evaluate news relevance using AI with numeric scoring
+  // Helper function to evaluate news relevance and priority using AI
   async function evaluateRelevance(title: string, content: string, customFilterPrompt?: string): Promise<{ 
     isRelevant: boolean; 
     relevanceScore: number;
+    priority: "high" | "medium" | "low";
     topics: string[]; 
     reason: string 
   }> {
@@ -1060,7 +1061,9 @@ News item:
 Title: ${title}
 Content: ${content.substring(0, 1000)}
 
-Rate the content's relevance (0.0 to 1.0) based on how well it matches the criteria above.`
+Based on the criteria above:
+1. Rate the content's relevance (0.0 to 1.0)
+2. Assign a priority tag: "high" (breaking news, urgent, highly actionable), "medium" (interesting, worth posting), or "low" (general info, backup content)`
         : `You are a content relevance filter for a Twitter AI agent focused on crypto, tech, and Twitter/social media topics.
 
 Evaluate this news item for relevance:
@@ -1070,7 +1073,9 @@ Content: ${content.substring(0, 1000)}
 Rate the content's relevance (0.0 to 1.0) to audiences interested in:
 - Cryptocurrency, blockchain, DeFi, NFTs, Web3
 - Technology, AI, software development, startups
-- Twitter/X, social media trends, digital culture`;
+- Twitter/X, social media trends, digital culture
+
+Also assign a priority tag: "high" (breaking news, urgent, highly actionable), "medium" (interesting, worth posting), or "low" (general info, backup content)`;
 
       const prompt = `${basePrompt}
 
@@ -1080,11 +1085,17 @@ Scoring guide:
 - 0.6-0.7: Relevant (auto-approve threshold)
 - 0.8-1.0: Highly relevant
 
+Priority guide:
+- "high": Breaking news, major announcements, time-sensitive, highly engaging
+- "medium": Standard relevant content, interesting insights, good for regular posting
+- "low": General information, filler content, low urgency
+
 Respond in JSON format:
 {
   "relevanceScore": 0.75,
+  "priority": "medium",
   "topics": ["topic1", "topic2"],
-  "reason": "brief explanation of score"
+  "reason": "brief explanation of score and priority"
 }`;
 
       // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
@@ -1103,11 +1114,18 @@ Respond in JSON format:
       // Auto-approve if score >= 0.6 (stated threshold)
       const isRelevant = relevanceScore >= 0.6;
       
+      // Get priority from AI response, default based on relevance if not provided
+      const priority: "high" | "medium" | "low" = 
+        result.priority === "high" || result.priority === "medium" || result.priority === "low"
+          ? result.priority
+          : relevanceScore >= 0.8 ? "high" : relevanceScore >= 0.6 ? "medium" : "low";
+      
       return {
         isRelevant,
         relevanceScore,
+        priority,
         topics: result.topics || [],
-        reason: result.reason || `Score: ${relevanceScore.toFixed(2)}`
+        reason: result.reason || `Score: ${relevanceScore.toFixed(2)}, Priority: ${priority}`
       };
     } catch (error) {
       console.error("AI relevance evaluation failed:", error);
@@ -1115,6 +1133,7 @@ Respond in JSON format:
       return { 
         isRelevant: false, 
         relevanceScore: 0.0,
+        priority: "low",
         topics: [], 
         reason: "AI evaluation failed - requires manual review" 
       };
@@ -1236,7 +1255,8 @@ Respond in JSON format:
           "auto-generated",
           "api-ingestion",
           ...relevanceEval.topics,
-          isAutoApproved ? "ai-approved" : "ai-review-required"
+          isAutoApproved ? "ai-approved" : "ai-review-required",
+          `priority-${relevanceEval.priority}` // Tag with priority for easy filtering
         ];
         
         const entryData = {
@@ -1247,7 +1267,7 @@ Respond in JSON format:
           sourceId: sourceId,
           sourceUrl: customApi.baseUrl,
           category: "news",
-          priority: isAutoApproved ? 7 : 5, // Higher priority for auto-approved
+          priority: relevanceEval.priority, // AI-determined priority (high/medium/low)
           active: isAutoApproved, // Auto-activate if relevant
           status: isAutoApproved ? "approved" : "pending",
           refreshStrategy: "manual",

@@ -191,14 +191,18 @@ export class DbStorage implements IStorage {
   }
 
   async getKnowledgeBaseByCategory(agentId: string, category: string): Promise<KnowledgeBase[]> {
+    // Order by priority (high > medium > low) then by newest first
+    const priorityOrder = sql`CASE WHEN ${knowledgeBase.priority} = 'high' THEN 3 WHEN ${knowledgeBase.priority} = 'medium' THEN 2 ELSE 1 END`;
     return await db
       .select()
       .from(knowledgeBase)
       .where(and(eq(knowledgeBase.agentId, agentId), eq(knowledgeBase.category, category)))
-      .orderBy(desc(knowledgeBase.priority), desc(knowledgeBase.createdAt));
+      .orderBy(desc(priorityOrder), desc(knowledgeBase.createdAt));
   }
 
   async getActiveKnowledgeBase(agentId: string): Promise<KnowledgeBase[]> {
+    // Order by priority (high > medium > low) then by newest first
+    const priorityOrder = sql`CASE WHEN ${knowledgeBase.priority} = 'high' THEN 3 WHEN ${knowledgeBase.priority} = 'medium' THEN 2 ELSE 1 END`;
     return await db
       .select()
       .from(knowledgeBase)
@@ -209,10 +213,11 @@ export class DbStorage implements IStorage {
           eq(knowledgeBase.status, "approved")
         )
       )
-      .orderBy(desc(knowledgeBase.priority), desc(knowledgeBase.createdAt));
+      .orderBy(desc(priorityOrder), desc(knowledgeBase.createdAt));
   }
 
   async getPendingKnowledgeBase(agentId: string): Promise<KnowledgeBase[]> {
+    // Order by newest first for pending entries
     return await db
       .select()
       .from(knowledgeBase)
@@ -221,11 +226,13 @@ export class DbStorage implements IStorage {
   }
 
   async getApprovedKnowledgeBase(agentId: string): Promise<KnowledgeBase[]> {
+    // Order by priority (high > medium > low) then by newest first
+    const priorityOrder = sql`CASE WHEN ${knowledgeBase.priority} = 'high' THEN 3 WHEN ${knowledgeBase.priority} = 'medium' THEN 2 ELSE 1 END`;
     return await db
       .select()
       .from(knowledgeBase)
       .where(and(eq(knowledgeBase.agentId, agentId), eq(knowledgeBase.status, "approved")))
-      .orderBy(desc(knowledgeBase.priority), desc(knowledgeBase.createdAt));
+      .orderBy(desc(priorityOrder), desc(knowledgeBase.createdAt));
   }
 
   async batchApproveKnowledgeBase(agentId: string, ids: string[], approvedBy?: string): Promise<number> {
