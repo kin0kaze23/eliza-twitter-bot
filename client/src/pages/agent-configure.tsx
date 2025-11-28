@@ -550,6 +550,62 @@ export default function AgentConfigure() {
     batchArchiveMutation.mutate(Array.from(selectedKBIds));
   };
 
+  // Batch deactivate KB entries (active tab)
+  const batchDeactivateMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      return apiRequest("POST", `/api/agents/${id}/knowledge/batch/deactivate`, { ids });
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/approved"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
+      setSelectedKBIds(new Set());
+      toast({ 
+        title: "Deactivated!", 
+        description: data.message || `Deactivated ${data.deactivatedCount} entries`
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to deactivate entries",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Batch delete KB entries (active tab)
+  const batchDeleteActiveMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      return apiRequest("POST", `/api/agents/${id}/knowledge/batch/delete`, { ids });
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/approved"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
+      setSelectedKBIds(new Set());
+      toast({ 
+        title: "Deleted!", 
+        description: data.message || `Deleted ${data.deletedCount} entries`
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to delete entries",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleBatchDeactivateKB = () => {
+    if (selectedKBIds.size === 0) return;
+    batchDeactivateMutation.mutate(Array.from(selectedKBIds));
+  };
+
+  const handleBatchDeleteActive = () => {
+    if (selectedKBIds.size === 0) return;
+    batchDeleteActiveMutation.mutate(Array.from(selectedKBIds));
+  };
+
   const handleAddCustomPrompt = () => {
     if (!newCustomPrompt.key || !newCustomPrompt.value) return;
     

@@ -318,6 +318,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Batch deactivate knowledge base entries (toggle active status to false)
+  app.post("/api/agents/:agentId/knowledge/batch/deactivate", async (req, res) => {
+    try {
+      const { agentId } = req.params;
+      const { ids } = req.body;
+
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: "ids array is required and cannot be empty" });
+      }
+
+      // Update entries to set active = false
+      let deactivatedCount = 0;
+      for (const id of ids) {
+        const entry = await storage.getKnowledgeBaseEntry(id);
+        if (entry && entry.agentId === agentId && entry.active) {
+          await storage.updateKnowledgeBaseEntry(id, { active: false });
+          deactivatedCount++;
+        }
+      }
+
+      if (deactivatedCount === 0) {
+        return res.status(404).json({ 
+          error: "No entries were deactivated.",
+          deactivatedCount: 0
+        });
+      }
+
+      res.json({
+        success: true,
+        deactivatedCount,
+        message: `Successfully deactivated ${deactivatedCount} knowledge base entries`,
+      });
+    } catch (error) {
+      console.error("Error batch deactivating knowledge entries:", error);
+      res.status(500).json({ error: "Failed to deactivate knowledge entries" });
+    }
+  });
+
+  // Batch delete knowledge base entries
+  app.post("/api/agents/:agentId/knowledge/batch/delete", async (req, res) => {
+    try {
+      const { agentId } = req.params;
+      const { ids } = req.body;
+
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: "ids array is required and cannot be empty" });
+      }
+
+      let deletedCount = 0;
+      for (const id of ids) {
+        const entry = await storage.getKnowledgeBaseEntry(id);
+        if (entry && entry.agentId === agentId) {
+          await storage.deleteKnowledgeBaseEntry(id);
+          deletedCount++;
+        }
+      }
+
+      if (deletedCount === 0) {
+        return res.status(404).json({ 
+          error: "No entries were deleted.",
+          deletedCount: 0
+        });
+      }
+
+      res.json({
+        success: true,
+        deletedCount,
+        message: `Successfully deleted ${deletedCount} knowledge base entries`,
+      });
+    } catch (error) {
+      console.error("Error batch deleting knowledge entries:", error);
+      res.status(500).json({ error: "Failed to delete knowledge entries" });
+    }
+  });
+
   // Get knowledge base entries by category
   app.get("/api/agents/:agentId/knowledge/category/:category", async (req, res) => {
     try {
