@@ -181,15 +181,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Update knowledge base entry
+  // Update knowledge base entry (only manual entries can be edited)
   app.patch("/api/knowledge/:id", async (req, res) => {
     try {
+      // First check if entry exists and is a manual entry
+      const existingEntry = await storage.getKnowledgeBaseEntry(req.params.id);
+      if (!existingEntry) {
+        return res.status(404).json({ error: "Knowledge entry not found" });
+      }
+      
+      // Only allow editing of manually added entries
+      if (existingEntry.source !== "manual") {
+        return res.status(403).json({ 
+          error: "Cannot edit this entry", 
+          message: "Only manually added entries can be edited. API-extracted entries are managed by the AI filter prompt."
+        });
+      }
+      
       const partialSchema = insertKnowledgeBaseSchema.partial().omit({ agentId: true });
       const validatedData = partialSchema.parse(req.body);
       const entry = await storage.updateKnowledgeBaseEntry(req.params.id, validatedData);
-      if (!entry) {
-        return res.status(404).json({ error: "Knowledge entry not found" });
-      }
       res.json(entry);
     } catch (error) {
       if (error instanceof z.ZodError) {

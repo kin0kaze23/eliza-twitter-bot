@@ -179,7 +179,7 @@ export const knowledgeBase = pgTable("knowledge_base", {
   
   // Enhanced management
   category: text("category").notNull().default("general"), // crypto, theology, narratives, solana, mental_models, memes, general
-  priority: integer("priority").default(5).notNull(), // 1-10, higher = more important
+  priority: text("priority").default("medium").notNull(), // high, medium, low - set by AI filter prompt
   status: text("status").default("approved").notNull(), // pending, approved, archived
   active: boolean("active").default(true).notNull(), // toggle on/off (only applies to approved entries)
   refreshStrategy: text("refresh_strategy").default("static").notNull(), // static, daily, weekly, on_demand

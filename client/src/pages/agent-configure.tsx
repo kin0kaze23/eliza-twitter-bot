@@ -39,7 +39,7 @@ type KBEntry = {
   content: string;
   tags: string[];
   category: string;
-  priority: number;
+  priority: string; // high, medium, low
   active: boolean;
   refreshStrategy: string;
 };
@@ -336,8 +336,6 @@ export default function AgentConfigure() {
     reuseCooldownHours: "24",
     autoRefreshEnabled: false,
     autoRefreshIntervalHours: "6",
-    priorityRuleEnabled: false,
-    priorityRule: "",
   });
 
   // Webhook Settings
@@ -359,7 +357,7 @@ export default function AgentConfigure() {
     content: "",
     tags: "",
     category: "general",
-    priority: 5,
+    priority: "medium" as "high" | "medium" | "low",
     active: true,
     refreshStrategy: "static",
   });
@@ -376,7 +374,7 @@ export default function AgentConfigure() {
 
   // Knowledge base mutations
   const addKBMutation = useMutation({
-    mutationFn: async (entry: { title: string; content: string; tags: string[]; category: string; priority: number; active: boolean; refreshStrategy: string }) => {
+    mutationFn: async (entry: { title: string; content: string; tags: string[]; category: string; priority: string; active: boolean; refreshStrategy: string }) => {
       return apiRequest("POST", `/api/agents/${id}/knowledge`, {
         title: entry.title,
         content: entry.content,
@@ -394,7 +392,7 @@ export default function AgentConfigure() {
         content: "",
         tags: "",
         category: "general",
-        priority: 5,
+        priority: "medium",
         active: true,
         refreshStrategy: "static",
       });
@@ -450,34 +448,6 @@ export default function AgentConfigure() {
       });
     },
   });
-
-  const [isApplyingPriorityRules, setIsApplyingPriorityRules] = useState(false);
-  const handleApplyPriorityRules = async () => {
-    if (!kbSettings.priorityRule.trim()) {
-      toast({ title: "No priority rules defined", variant: "destructive" });
-      return;
-    }
-    setIsApplyingPriorityRules(true);
-    try {
-      const response = await fetch(`/api/agents/${id}/knowledge/apply-priority-rules`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rule: kbSettings.priorityRule }),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/approved"] });
-        toast({ title: "Priority rules applied", description: `Updated ${data.updated} entries` });
-      } else {
-        toast({ title: "Failed to apply rules", description: data.error, variant: "destructive" });
-      }
-    } catch (error) {
-      toast({ title: "Error applying priority rules", variant: "destructive" });
-    } finally {
-      setIsApplyingPriorityRules(false);
-    }
-  };
 
   // Batch approve KB entries
   const batchApproveMutation = useMutation({
@@ -681,8 +651,6 @@ export default function AgentConfigure() {
         kbReuseCooldownHours: parseInt(kbSettings.reuseCooldownHours) || 24,
         kbAutoRefreshEnabled: kbSettings.autoRefreshEnabled,
         kbAutoRefreshIntervalHours: parseInt(kbSettings.autoRefreshIntervalHours) || 6,
-        kbPriorityRuleEnabled: kbSettings.priorityRuleEnabled,
-        kbPriorityRule: kbSettings.priorityRule || null,
         // Webhook Settings
         webhookEnabled: webhookSettings.enabled,
         webhookUrl: webhookSettings.url || undefined,
@@ -882,8 +850,6 @@ export default function AgentConfigure() {
       reuseCooldownHours: (agent.kbReuseCooldownHours || 24).toString(),
       autoRefreshEnabled: agent.kbAutoRefreshEnabled || false,
       autoRefreshIntervalHours: (agent.kbAutoRefreshIntervalHours || 6).toString(),
-      priorityRuleEnabled: agent.kbPriorityRuleEnabled || false,
-      priorityRule: agent.kbPriorityRule || "",
     });
     
     // Load webhook settings
@@ -907,7 +873,7 @@ export default function AgentConfigure() {
       content: kb.content,
       tags: kb.tags || [],
       category: kb.category || "general",
-      priority: kb.priority || 5,
+      priority: kb.priority || "medium",
       active: kb.active ?? true,
       refreshStrategy: kb.refreshStrategy || "static",
     }));
@@ -2158,68 +2124,6 @@ export default function AgentConfigure() {
             </CardContent>
           </Card>
 
-          {/* KB Priority Rules */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Zap className="h-4 w-4" />
-                Priority Rules
-              </CardTitle>
-              <CardDescription>Automatically adjust KB entry priorities based on rules</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Enable Priority Rules</Label>
-                  <p className="text-xs text-muted-foreground">Automatically update priority tags based on conditions</p>
-                </div>
-                <Switch
-                  checked={kbSettings.priorityRuleEnabled}
-                  onCheckedChange={(checked) => setKbSettings({ ...kbSettings, priorityRuleEnabled: checked })}
-                  data-testid="switch-kb-priority-rules"
-                />
-              </div>
-              
-              {kbSettings.priorityRuleEnabled && (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="kb-priority-rule">Priority Rule</Label>
-                    <Textarea
-                      id="kb-priority-rule"
-                      placeholder="e.g., if content contains 'breaking' then priority 10&#10;if content contains 'news' then priority 8"
-                      className="min-h-[80px]"
-                      value={kbSettings.priorityRule}
-                      onChange={(e) => setKbSettings({ ...kbSettings, priorityRule: e.target.value })}
-                      data-testid="input-kb-priority-rule"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Define rules to auto-assign priorities (1-10, higher = more important).
-                      <br />
-                      Format: <code className="bg-muted px-1 rounded">if content contains 'keyword' then priority N</code>
-                    </p>
-                  </div>
-                  <Button
-                    onClick={handleApplyPriorityRules}
-                    disabled={isApplyingPriorityRules || !kbSettings.priorityRule.trim()}
-                    data-testid="button-apply-priority-rules"
-                  >
-                    {isApplyingPriorityRules ? (
-                      <>
-                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                        Applying...
-                      </>
-                    ) : (
-                      <>
-                        <Zap className="mr-2 h-4 w-4" />
-                        Apply Priority Rules Now
-                      </>
-                    )}
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
           {/* API Data Sources & Refresh Controls */}
           <Card>
             <CardHeader>
@@ -2362,18 +2266,20 @@ export default function AgentConfigure() {
                     
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <Label>Priority: {newKBEntry.priority}</Label>
-                          <span className="text-xs text-muted-foreground">1 (low) - 10 (high)</span>
-                        </div>
-                        <Slider
-                          value={[newKBEntry.priority]}
-                          onValueChange={([value]) => setNewKBEntry({ ...newKBEntry, priority: value })}
-                          min={1}
-                          max={10}
-                          step={1}
-                          data-testid="slider-kb-priority"
-                        />
+                        <Label htmlFor="kb-priority">Priority</Label>
+                        <Select
+                          value={newKBEntry.priority}
+                          onValueChange={(value: "high" | "medium" | "low") => setNewKBEntry({ ...newKBEntry, priority: value })}
+                        >
+                          <SelectTrigger data-testid="select-kb-priority">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="high">High</SelectItem>
+                            <SelectItem value="medium">Medium</SelectItem>
+                            <SelectItem value="low">Low</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="kb-refresh">Refresh Strategy</Label>
@@ -2473,16 +2379,20 @@ export default function AgentConfigure() {
                       
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <Label>Priority: {editingKBEntry.priority >= 8 ? "High" : editingKBEntry.priority >= 5 ? "Medium" : "Low"} ({editingKBEntry.priority})</Label>
-                          <Slider
-                            value={[editingKBEntry.priority]}
-                            onValueChange={([value]) => setEditingKBEntry({ ...editingKBEntry, priority: value })}
-                            min={1}
-                            max={10}
-                            step={1}
-                            data-testid="slider-edit-kb-priority"
-                          />
-                          <p className="text-xs text-muted-foreground">1-4: Low, 5-7: Medium, 8-10: High</p>
+                          <Label htmlFor="edit-kb-priority">Priority</Label>
+                          <Select
+                            value={editingKBEntry.priority}
+                            onValueChange={(value) => setEditingKBEntry({ ...editingKBEntry, priority: value })}
+                          >
+                            <SelectTrigger data-testid="select-edit-kb-priority">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="high">High</SelectItem>
+                              <SelectItem value="medium">Medium</SelectItem>
+                              <SelectItem value="low">Low</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
                         <div className="space-y-2">
                           <Label htmlFor="edit-kb-refresh">Refresh Strategy</Label>
@@ -2655,6 +2565,7 @@ export default function AgentConfigure() {
                               <h4 className="font-medium">{entry.title}</h4>
                               <div className="flex gap-1">
                                 <Badge variant="outline" className="text-xs">{entry.category}</Badge>
+                                <Badge variant="outline" className="text-xs">{entry.source}</Badge>
                                 {entry.active ? (
                                   <Badge variant="default" className="text-xs">Active</Badge>
                                 ) : (
@@ -2667,23 +2578,29 @@ export default function AgentConfigure() {
                               {entry.tags?.map((tag: string) => (
                                 <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
                               ))}
-                              <Badge variant="outline" className="text-xs">
-                                Priority: {entry.priority >= 8 ? "High" : entry.priority >= 5 ? "Medium" : "Low"} ({entry.priority})
+                              <Badge 
+                                variant={entry.priority === "high" ? "default" : entry.priority === "medium" ? "secondary" : "outline"} 
+                                className="text-xs capitalize"
+                              >
+                                {entry.priority} priority
                               </Badge>
                             </div>
                           </div>
                           <div className="flex gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                setEditingKBEntry(entry);
-                                setIsEditKBDialogOpen(true);
-                              }}
-                              data-testid={`button-edit-kb-${entry.id}`}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
+                            {/* Only show edit button for manually added entries */}
+                            {entry.source === "manual" && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => {
+                                  setEditingKBEntry(entry);
+                                  setIsEditKBDialogOpen(true);
+                                }}
+                                data-testid={`button-edit-kb-${entry.id}`}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"
