@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Play, RefreshCw, AlertCircle, CheckCircle2, XCircle } from "lucide-react";
+import { Play, RefreshCw, AlertCircle, CheckCircle2, XCircle, Send, ExternalLink } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
@@ -42,6 +42,8 @@ export default function Playground() {
   
   const [selectedAgent, setSelectedAgent] = useState<string | undefined>(agents?.[0]?.id);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isPosting, setIsPosting] = useState(false);
+  const [postResult, setPostResult] = useState<{ success: boolean; tweetId?: string; tweetUrl?: string; error?: string } | null>(null);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   
   // Conversation mode state
@@ -74,6 +76,64 @@ export default function Playground() {
     }
   }, [currentAgent]);
 
+  const handlePostToTwitter = async () => {
+    if (!selectedAgent || !testResult?.output) {
+      toast({
+        title: "No Tweet to Post",
+        description: "Generate a tweet first before posting",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsPosting(true);
+    setPostResult(null);
+
+    try {
+      const response = await fetch(`/api/agents/${selectedAgent}/post-tweet`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: testResult.output }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setPostResult({
+          success: true,
+          tweetId: data.tweetId,
+          tweetUrl: data.tweetUrl,
+        });
+        toast({
+          title: "Tweet Posted Successfully",
+          description: "Your tweet is now live on X/Twitter!",
+        });
+      } else {
+        setPostResult({
+          success: false,
+          error: data.error || "Failed to post tweet",
+        });
+        toast({
+          title: "Failed to Post Tweet",
+          description: data.error || "Check Twitter credentials",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      setPostResult({
+        success: false,
+        error: error.message || "Network error",
+      });
+      toast({
+        title: "Error Posting Tweet",
+        description: error.message || "Network error occurred",
+        variant: "destructive",
+      });
+    } finally {
+      setIsPosting(false);
+    }
+  };
+
   const handleGenerate = async () => {
     if (!selectedAgent) {
       toast({
@@ -86,6 +146,7 @@ export default function Playground() {
 
     setIsGenerating(true);
     setTestResult(null);
+    setPostResult(null);
     
     try {
       const response = await fetch("/api/playground/test-tweet", {
@@ -436,7 +497,62 @@ export default function Playground() {
                     </div>
                     {(testResult as any).mode === "auto-generated" && (
                       <p className="text-xs text-muted-foreground">
-                        🤖 This tweet was auto-generated using the above knowledge sources
+                        This tweet was auto-generated using the above knowledge sources
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Post to Twitter Section */}
+                {testResult.success && (
+                  <div className="space-y-3 pt-4 border-t">
+                    <Label>Post This Tweet to X/Twitter</Label>
+                    <div className="flex items-center gap-3">
+                      <Button
+                        onClick={handlePostToTwitter}
+                        disabled={isPosting || postResult?.success}
+                        className="gap-2"
+                        data-testid="button-post-to-twitter"
+                      >
+                        {isPosting ? (
+                          <>
+                            <RefreshCw className="h-4 w-4 animate-spin" />
+                            Posting...
+                          </>
+                        ) : postResult?.success ? (
+                          <>
+                            <CheckCircle2 className="h-4 w-4" />
+                            Posted!
+                          </>
+                        ) : (
+                          <>
+                            <Send className="h-4 w-4" />
+                            Post to X
+                          </>
+                        )}
+                      </Button>
+                      {postResult?.success && postResult.tweetUrl && (
+                        <a
+                          href={postResult.tweetUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                          data-testid="link-view-posted-tweet"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          View on X
+                        </a>
+                      )}
+                    </div>
+                    {postResult?.error && (
+                      <div className="bg-destructive/10 border border-destructive/20 p-3 rounded text-sm text-destructive">
+                        {postResult.error}
+                      </div>
+                    )}
+                    {!configValidation.twitterCredentials.valid && (
+                      <p className="text-xs text-yellow-600">
+                        <AlertCircle className="h-3 w-3 inline mr-1" />
+                        Twitter credentials may not be configured. Check the Credentials tab in Agent settings.
                       </p>
                     )}
                   </div>
