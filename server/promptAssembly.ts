@@ -1,5 +1,13 @@
 import type { Agent, KnowledgeBase, BibleVerseUsage, ContentTypeUsage } from "@shared/schema";
 
+// All 7 content types for rotation
+export const ALL_CONTENT_TYPES = [
+  "EVENT_BASED", "VERSE_REFLECTION", "DEEP_QUESTION", 
+  "WISDOM_BITE", "CULTURAL_INSIGHT", "ENCOURAGEMENT", "ETERNITY_ANCHOR"
+] as const;
+
+export type ContentType = typeof ALL_CONTENT_TYPES[number];
+
 export interface PromptAssemblyOptions {
   includeKnowledge?: boolean;
   includeExamples?: boolean;
@@ -8,6 +16,64 @@ export interface PromptAssemblyOptions {
   maxKbTokens?: number;
   recentVerses?: BibleVerseUsage[]; // Recently used Bible verses to avoid
   recentContentTypes?: ContentTypeUsage[]; // Recently used content types to avoid
+  selectedContentType?: ContentType; // Server-selected content type (for rotation)
+}
+
+/**
+ * Server-side content type selection based on rotation history
+ * This removes the burden from the AI and ensures proper rotation
+ */
+export function selectNextContentType(
+  recentContentTypes: ContentTypeUsage[],
+  hasKnowledgeBase: boolean,
+  rotationPolicy: "rotate_all" | "avoid_last" | "allow" = "rotate_all"
+): ContentType {
+  // If no rotation, pick randomly
+  if (rotationPolicy === "allow") {
+    const validTypes = hasKnowledgeBase 
+      ? ALL_CONTENT_TYPES 
+      : ALL_CONTENT_TYPES.filter(t => t !== "EVENT_BASED" && t !== "CULTURAL_INSIGHT");
+    return validTypes[Math.floor(Math.random() * validTypes.length)];
+  }
+
+  const recentTypeNames = recentContentTypes.slice(0, 7).map(ct => ct.contentType);
+  
+  // Find unused types
+  let unusedTypes = ALL_CONTENT_TYPES.filter(t => !recentTypeNames.includes(t));
+  
+  // If no KB, exclude types that require current events
+  if (!hasKnowledgeBase) {
+    unusedTypes = unusedTypes.filter(t => t !== "EVENT_BASED" && t !== "CULTURAL_INSIGHT");
+  }
+  
+  if (rotationPolicy === "rotate_all") {
+    if (unusedTypes.length > 0) {
+      // Pick randomly from unused types
+      return unusedTypes[Math.floor(Math.random() * unusedTypes.length)];
+    } else {
+      // All types used - reset cycle, pick randomly from all valid types
+      const validTypes = hasKnowledgeBase 
+        ? [...ALL_CONTENT_TYPES]
+        : ALL_CONTENT_TYPES.filter(t => t !== "EVENT_BASED" && t !== "CULTURAL_INSIGHT");
+      return validTypes[Math.floor(Math.random() * validTypes.length)];
+    }
+  } else if (rotationPolicy === "avoid_last") {
+    const lastType = recentTypeNames[0];
+    const validTypes = hasKnowledgeBase
+      ? ALL_CONTENT_TYPES.filter(t => t !== lastType)
+      : ALL_CONTENT_TYPES.filter(t => t !== lastType && t !== "EVENT_BASED" && t !== "CULTURAL_INSIGHT");
+    return validTypes[Math.floor(Math.random() * validTypes.length)];
+  }
+  
+  // Fallback
+  return "VERSE_REFLECTION";
+}
+
+/**
+ * Format content type for human-readable display
+ */
+export function formatContentType(type: string): string {
+  return type.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
 }
 
 export interface AssembledPrompt {
@@ -48,6 +114,7 @@ export async function assemblePrompt(
     maxKbTokens = 2000,
     recentVerses = [],
     recentContentTypes = [],
+    selectedContentType,
   } = options;
 
   const componentsIncluded: string[] = [];
@@ -58,20 +125,14 @@ export async function assemblePrompt(
   let systemPrompt = "";
 
   // 1. Message examples FIRST (highest priority - must follow format exactly)
+  // CRITICAL: Only include examples matching the server-selected content type
   let examplesUsed = 0;
   const examplesWithTypes: { content: string; contentType?: string }[] = [];
   
   if (includeExamples && agent.messageExamples && agent.messageExamples.length > 0) {
-    systemPrompt += "## PRIMARY DIRECTIVE: Message Format Examples\n";
-    systemPrompt += "YOUR TWEETS MUST FOLLOW THESE EXAMPLES EXACTLY. This is your PRIMARY responsibility.\n\n";
-    systemPrompt += "CRITICAL FORMAT RULES:\n";
-    systemPrompt += "- Match the exact structure shown in examples\n";
-    systemPrompt += "- Preserve ALL line breaks and spacing exactly\n";
-    systemPrompt += "- Use the exact tone and style from examples\n";
-    systemPrompt += "- Do NOT collapse lines or remove spacing\n";
-    systemPrompt += "- Do NOT add decorative elements unless in examples\n\n";
-    
-    for (const example of agent.messageExamples.slice(0, 10)) {
+    // Parse all examples and extract content types
+    const allExamples: { content: string; contentType?: string }[] = [];
+    for (const example of agent.messageExamples) {
       let content: string | null = null;
       let contentType: string | undefined = undefined;
       
@@ -83,24 +144,75 @@ export async function assemblePrompt(
       }
       
       if (content) {
-        const typeLabel = contentType 
-          ? contentType.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
-          : null;
-        
-        if (typeLabel) {
-          systemPrompt += `### ${typeLabel} Example:\n${content}\n\n`;
-        } else {
-          systemPrompt += `${content}\n\n`;
-        }
-        
-        examplesUsed++;
-        examplesWithTypes.push({ content, contentType });
+        allExamples.push({ content, contentType });
       }
     }
     
-    if (examplesUsed > 0) {
-      systemPrompt += "\nEND OF FORMAT EXAMPLES - Follow these exactly when generating content.\n\n";
+    // Filter examples: if selectedContentType is set, only include matching examples
+    let filteredExamples = allExamples;
+    if (selectedContentType) {
+      const matchingExamples = allExamples.filter(ex => {
+        if (!ex.contentType) return false;
+        // Normalize: uppercase, replace spaces/hyphens/dashes with underscores
+        const normalizedType = ex.contentType
+          .toUpperCase()
+          .replace(/[\s\-–—]+/g, "_") // Handle spaces, hyphens, en-dashes, em-dashes
+          .replace(/[^A-Z_]/g, ""); // Remove any other non-letter/underscore chars
+        return normalizedType === selectedContentType;
+      });
+      // Use matching examples if found, otherwise fall back to all (shouldn't happen if examples are properly tagged)
+      if (matchingExamples.length > 0) {
+        filteredExamples = matchingExamples;
+        console.log(`[PROMPT] Filtered to ${matchingExamples.length} examples for content type: ${selectedContentType}`);
+      } else {
+        console.log(`[PROMPT] WARNING: No matching examples found for content type: ${selectedContentType}. Using all ${allExamples.length} examples as fallback.`);
+      }
+    }
+    
+    // Build the example section with clear formatting instructions
+    const selectedTypeLabel = selectedContentType ? formatContentType(selectedContentType) : null;
+    
+    if (selectedContentType && filteredExamples.length > 0) {
+      // Single content type mode - very focused instructions
+      const typeLabel = formatContentType(selectedContentType);
+      systemPrompt += `## YOUR TASK: Generate a "${typeLabel}" Post\n\n`;
+      systemPrompt += `You MUST generate a post that follows this EXACT format:\n\n`;
+      
+      for (const ex of filteredExamples.slice(0, 2)) { // Max 2 examples for the selected type
+        systemPrompt += `### EXAMPLE FORMAT:\n${ex.content}\n\n`;
+        examplesUsed++;
+        examplesWithTypes.push(ex);
+      }
+      
+      systemPrompt += `### FORMAT CHECKLIST FOR ${typeLabel.toUpperCase()}:\n`;
+      systemPrompt += `- Copy the EXACT structure shown above\n`;
+      systemPrompt += `- Match all line breaks and spacing EXACTLY\n`;
+      systemPrompt += `- Use the same tone and style\n`;
+      systemPrompt += `- Do NOT add extra decorations (---, ###, etc.)\n`;
+      systemPrompt += `- Do NOT add hashtags unless shown in example\n`;
+      systemPrompt += `- Keep same paragraph structure\n\n`;
+      
       componentsIncluded.push("messageExamples");
+      componentsIncluded.push(`contentType:${selectedContentType}`);
+    } else {
+      // No specific type selected - include multiple examples (fallback mode)
+      systemPrompt += "## Message Format Examples\n";
+      systemPrompt += "Follow these examples exactly when generating content:\n\n";
+      
+      for (const ex of filteredExamples.slice(0, 7)) {
+        const typeLabel = ex.contentType ? formatContentType(ex.contentType) : null;
+        if (typeLabel) {
+          systemPrompt += `### ${typeLabel} Example:\n${ex.content}\n\n`;
+        } else {
+          systemPrompt += `${ex.content}\n\n`;
+        }
+        examplesUsed++;
+        examplesWithTypes.push(ex);
+      }
+      
+      if (examplesUsed > 0) {
+        componentsIncluded.push("messageExamples");
+      }
     }
   }
 
@@ -244,45 +356,14 @@ export async function assemblePrompt(
     systemPrompt += "Feel free to use any Scripture that fits your content. Include book, chapter, and verse references.\n\n";
   }
 
-  // 5b. Content Type Selection Instructions (if content type tracking is enabled)
-  const contentTypeTrackingEnabled = (agent as any).contentTypeTrackingEnabled !== false; // Default true
-  const contentTypeReusePolicy = (agent as any).contentTypeReusePolicy || "rotate_all";
-  
-  const allContentTypes = [
-    "EVENT_BASED", "VERSE_REFLECTION", "DEEP_QUESTION", 
-    "WISDOM_BITE", "CULTURAL_INSIGHT", "ENCOURAGEMENT", "ETERNITY_ANCHOR"
-  ];
-  
-  systemPrompt += "## Content Type Selection Guidelines\n";
-  systemPrompt += "Available content types: Event-based, Verse Reflection, Deep Question, Wisdom Bite, Cultural Insight, Encouragement, Eternity Anchor\n\n";
-  
-  if (contentTypeTrackingEnabled && contentTypeReusePolicy !== "allow" && recentContentTypes.length > 0) {
-    const recentTypeNames = recentContentTypes.slice(0, 3).map(ct => ct.contentType);
-    const unusedTypes = allContentTypes.filter(t => !recentTypeNames.includes(t));
-    
-    if (contentTypeReusePolicy === "rotate_all") {
-      if (unusedTypes.length > 0) {
-        // Format unused types for readability
-        const formattedUnused = unusedTypes.map(t => t.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase())).join(", ");
-        systemPrompt += `SELECT FROM: ${formattedUnused}\n`;
-        systemPrompt += `These content types have NOT been used recently - pick one of these.\n\n`;
-      } else {
-        // All types recently used - reset cycle
-        systemPrompt += `All 7 content types have been used in the rotation cycle.\n`;
-        systemPrompt += `You may now select ANY content type - the cycle will reset.\n\n`;
-      }
-      
-      const formattedRecent = recentTypeNames.map(t => t.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase())).join(", ");
-      systemPrompt += `RECENTLY USED (lower priority): ${formattedRecent}\n\n`;
-    } else if (contentTypeReusePolicy === "avoid_last") {
-      const lastType = recentTypeNames[0]?.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
-      systemPrompt += `SKIP: "${lastType}" was just used.\n`;
-      systemPrompt += `Select any OTHER content type for this post.\n\n`;
-    }
-    
+  // 5b. Content Type - Now handled server-side, only add if NOT using server selection
+  // If selectedContentType is set, the task header already specifies what type to generate
+  if (!selectedContentType) {
+    // Fallback mode: Let AI choose (not recommended but supported)
+    systemPrompt += "## Content Type Selection\n";
+    systemPrompt += "Available types: Event-based, Verse Reflection, Deep Question, Wisdom Bite, Cultural Insight, Encouragement, Eternity Anchor\n";
+    systemPrompt += "Choose one that fits your inspiration and follow its example format exactly.\n\n";
     componentsIncluded.push("contentTypeGuidance");
-  } else {
-    systemPrompt += "Choose any content type that fits your inspiration for this post.\n\n";
   }
 
 

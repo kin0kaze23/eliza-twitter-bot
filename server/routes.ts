@@ -8,7 +8,7 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import OAuth from "oauth-1.0a";
 import crypto from "crypto";
-import { assemblePrompt, buildMessagesArray } from "./promptAssembly";
+import { assemblePrompt, buildMessagesArray, selectNextContentType, formatContentType, type ContentType } from "./promptAssembly";
 import { sendPostCreatedWebhook, sendPostFailedWebhook } from "./webhook";
 import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
 
@@ -1747,7 +1747,24 @@ Respond in JSON format:
       };
       console.log(`[TWEET TEST] Bible verse avoidance: ${recentVerses.length} recent verses to avoid`);
       
-      // Assemble prompt with KB entries and verse avoidance
+      // SERVER-SIDE CONTENT TYPE SELECTION (critical for proper rotation)
+      const recentContentTypes = await storage.getRecentContentTypeUsages(agentId, 7);
+      const hasKnowledgeBase = knowledgeEntries.length > 0;
+      const rotationPolicy = ((agent as any).contentTypeReusePolicy || "rotate_all") as "rotate_all" | "avoid_last" | "allow";
+      
+      // Select next content type based on rotation history
+      const selectedContentType = selectNextContentType(recentContentTypes, hasKnowledgeBase, rotationPolicy);
+      
+      auditLog.contentTypeSelection = {
+        recentTypes: recentContentTypes.map(ct => ct.contentType),
+        hasKB: hasKnowledgeBase,
+        rotationPolicy,
+        selectedType: selectedContentType,
+        selectedTypeLabel: formatContentType(selectedContentType),
+      };
+      console.log(`[TWEET TEST] Content type rotation: Selected "${formatContentType(selectedContentType)}" (recent: ${recentContentTypes.map(ct => ct.contentType).join(", ") || "none"})`);
+      
+      // Assemble prompt with KB entries, verse avoidance, and SERVER-SELECTED content type
       const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
         includeKnowledge: true,
         includeExamples: true,
@@ -1755,6 +1772,8 @@ Respond in JSON format:
         maxKbEntries: 20,
         maxKbTokens: 2000,
         recentVerses,
+        recentContentTypes,
+        selectedContentType, // CRITICAL: Pass server-selected type
       });
       
       const kbUsedIds = assembledPrompt.metadata.kbEntriesUsedIds || [];
@@ -1775,13 +1794,20 @@ Respond in JSON format:
       console.log(`[TWEET TEST] KB entries selected: ${assembledPrompt.metadata.kbEntriesUsed}`);
       console.log(`[TWEET TEST] Prompt components: ${assembledPrompt.metadata.componentsIncluded.join(", ")}`);
       
-      // Dynamic prompt that respects content type rotation rules from system prompt
-      const defaultPrompt = `Generate a single post following these rules:
-1. SELECT a content type based on the Content Type Selection Guidelines in your system prompt (prioritize unused types if rotation is enabled)
-2. MATCH the exact format and structure shown in the message examples for that content type
-3. USE Knowledge Base content for Event-based or Cultural posts; for other types (Verse Reflection, Wisdom Bite, Encouragement, Deep Question, Eternity Anchor), write from Scripture and wisdom without requiring KB
-4. AVOID recently used Bible verses as specified in the verse guidelines
-5. Keep the post under 280 characters unless creating a thread`;
+      // Simplified prompt - content type is already selected server-side
+      const selectedTypeLabel = formatContentType(selectedContentType);
+      const needsKB = selectedContentType === "EVENT_BASED" || selectedContentType === "CULTURAL_INSIGHT";
+      
+      const defaultPrompt = `Generate a "${selectedTypeLabel}" post.
+
+CRITICAL INSTRUCTIONS:
+1. Follow the EXACT format shown in the example above - copy its structure precisely
+2. Match all line breaks, spacing, and paragraph structure exactly
+3. ${needsKB ? "Use the Knowledge Base content provided" : "Write from Scripture and spiritual wisdom"}
+4. Avoid recently used Bible verses (see guidelines above)
+5. Keep under 280 characters unless the example shows multi-paragraph format
+
+OUTPUT: Write ONLY the tweet content, nothing else.`;
       const tweetPrompt = prompt || defaultPrompt;
       auditLog.prompt = tweetPrompt;
       console.log(`[TWEET TEST] Using ${prompt ? "custom" : "default"} prompt`);
@@ -1802,9 +1828,10 @@ Respond in JSON format:
       // Use post-specific model if configured, otherwise use default
       const postModelProvider = agent.postModelProvider || agent.modelProvider || "openai";
       const postModelName = agent.postModelName || agent.modelName || "gpt-4-turbo-preview";
-      // Lower temperature (0.3) for deterministic output that closely follows message examples
-      const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.3;
-      const postMaxTokens = agent.postMaxTokens || 500;
+      // Lower temperature (0.2) for highly deterministic output that closely follows message examples
+      const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.2;
+      // Increased max_tokens to 600 for thorough content generation
+      const postMaxTokens = agent.postMaxTokens || 600;
       
       auditLog.modelConfig = {
         provider: postModelProvider,
@@ -1860,16 +1887,30 @@ Respond in JSON format:
       console.log(`[TWEET TEST] Generation took ${generationTime}ms`);
       console.log(`[TWEET TEST] Raw output (before cleanup): ${tweet.substring(0, 100)}...`);
       
-      // Detect content type BEFORE stripping labels (for accurate tracking)
+      // Content type is already known from server-side selection
+      // Detect only for verification/logging purposes
       const detectedContentType = detectContentType(tweet);
+      const actualContentType = selectedContentType; // Use server-selected type for tracking
       auditLog.contentTypeDetected = detectedContentType;
-      console.log(`[TWEET TEST] Content type detected: ${detectedContentType}`);
+      auditLog.contentTypeUsed = actualContentType;
+      console.log(`[TWEET TEST] Content type: selected=${actualContentType}, detected=${detectedContentType}`);
       
       // Strip content type labels from generated content (labels are for detection, not output)
       tweet = stripContentTypeLabels(tweet);
       auditLog.finalTweetLength = tweet.length;
       auditLog.generationTimeMs = generationTime;
       console.log(`[TWEET TEST] Final tweet (${tweet.length} chars): ${tweet}`);
+      
+      // LOG CONTENT TYPE USAGE for rotation tracking (CRITICAL for rotation to work)
+      try {
+        const tweetId = `tweet_test_${Date.now()}`;
+        await storage.logContentTypeUsage(agentId, actualContentType, tweetId);
+        console.log(`[TWEET TEST] Logged content type usage: ${actualContentType}`);
+        auditLog.contentTypeLogged = true;
+      } catch (err) {
+        console.error(`[TWEET TEST] Failed to log content type usage:`, err);
+        auditLog.contentTypeLogged = false;
+      }
 
       // Get active KB entries for logging using the IDs from prompt assembly
       const kbSources = knowledgeEntries
@@ -1916,7 +1957,8 @@ Respond in JSON format:
       res.json({
         success: true,
         tweet,
-        contentType: detectedContentType,
+        contentType: actualContentType, // Server-selected content type
+        contentTypeLabel: formatContentType(actualContentType),
         mode: prompt ? "prompted" : "auto-generated",
         kbEntriesCount: assembledPrompt.metadata.kbEntriesUsed,
         kbSources,
@@ -2040,9 +2082,10 @@ Respond in JSON format:
       
       const postModelProvider = agent.postModelProvider || agent.modelProvider || "openai";
       const postModelName = agent.postModelName || agent.modelName || "gpt-4-turbo-preview";
-      // Lower temperature (0.3) for deterministic output that closely follows message examples
-      const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.3;
-      const postMaxTokens = agent.postMaxTokens || 500;
+      // Lower temperature (0.2) for highly deterministic output that closely follows message examples
+      const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.2;
+      // Increased max_tokens to 600 for thorough content generation
+      const postMaxTokens = agent.postMaxTokens || 600;
       
       let tweetContent = "";
       

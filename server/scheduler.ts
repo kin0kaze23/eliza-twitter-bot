@@ -1,7 +1,7 @@
 import { storage, db } from "./storage";
 import { activityLogs } from "@shared/schema";
 import { postTweet, validateTwitterCredentials } from "./twitter";
-import { assemblePrompt, buildMessagesArray } from "./promptAssembly";
+import { assemblePrompt, buildMessagesArray, selectNextContentType, formatContentType, type ContentType } from "./promptAssembly";
 import { sendPostCreatedWebhook, sendPostFailedWebhook } from "./webhook";
 import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
 import type { Agent } from "@shared/schema";
@@ -198,7 +198,7 @@ function canPostNow(agent: Agent): boolean {
   return true;
 }
 
-async function generateTweetContent(agent: Agent): Promise<{ content: string; kbIds: string[] } | null> {
+async function generateTweetContent(agent: Agent): Promise<{ content: string; kbIds: string[]; contentType: ContentType } | null> {
   try {
     const knowledgeEntries = await storage.getActiveKnowledgeBase(agent.id);
     
@@ -210,6 +210,13 @@ async function generateTweetContent(agent: Agent): Promise<{ content: string; kb
     const contentTypeWindow = (agent as any).contentTypeWindow || 7;
     const recentContentTypes = await storage.getRecentContentTypeUsages(agent.id, contentTypeWindow);
     
+    // SERVER-SIDE CONTENT TYPE SELECTION (critical for proper rotation)
+    const hasKnowledgeBase = knowledgeEntries.length > 0;
+    const rotationPolicy = ((agent as any).contentTypeReusePolicy || "rotate_all") as "rotate_all" | "avoid_last" | "allow";
+    const selectedContentType = selectNextContentType(recentContentTypes, hasKnowledgeBase, rotationPolicy);
+    
+    console.log(`[SCHEDULER] Content type rotation: Selected "${formatContentType(selectedContentType)}" for agent ${agent.id}`);
+    
     const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
       includeKnowledge: true,
       includeExamples: true,
@@ -218,22 +225,32 @@ async function generateTweetContent(agent: Agent): Promise<{ content: string; kb
       maxKbTokens: 2000,
       recentVerses,
       recentContentTypes,
+      selectedContentType, // CRITICAL: Pass server-selected type
     });
     
-    // Dynamic prompt that respects content type rotation rules from system prompt
-    const tweetPrompt = `Generate a single post following these rules:
-1. SELECT a content type based on the Content Type Selection Guidelines in your system prompt (prioritize unused types if rotation is enabled)
-2. MATCH the exact format and structure shown in the message examples for that content type
-3. USE Knowledge Base content for Event-based or Cultural posts; for other types (Verse Reflection, Wisdom Bite, Encouragement, Deep Question, Eternity Anchor), write from Scripture and wisdom without requiring KB
-4. AVOID recently used Bible verses as specified in the verse guidelines
-5. Keep the post under 280 characters unless creating a thread`;
+    // Simplified prompt - content type is already selected server-side
+    const selectedTypeLabel = formatContentType(selectedContentType);
+    const needsKB = selectedContentType === "EVENT_BASED" || selectedContentType === "CULTURAL_INSIGHT";
+    
+    const tweetPrompt = `Generate a "${selectedTypeLabel}" post.
+
+CRITICAL INSTRUCTIONS:
+1. Follow the EXACT format shown in the example above - copy its structure precisely
+2. Match all line breaks, spacing, and paragraph structure exactly
+3. ${needsKB ? "Use the Knowledge Base content provided" : "Write from Scripture and spiritual wisdom"}
+4. Avoid recently used Bible verses (see guidelines above)
+5. Keep under 280 characters unless the example shows multi-paragraph format
+
+OUTPUT: Write ONLY the tweet content, nothing else.`;
     
     const messages = buildMessagesArray(assembledPrompt, [], tweetPrompt);
     
     const postModelProvider = agent.postModelProvider || agent.modelProvider || "openai";
     const postModelName = agent.postModelName || agent.modelName || "gpt-4-turbo-preview";
-    const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.7;
-    const postMaxTokens = agent.postMaxTokens || 500;
+    // Lower temperature (0.2) for highly deterministic output that closely follows message examples
+    const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.2;
+    // Increased max_tokens to 600 for thorough content generation
+    const postMaxTokens = agent.postMaxTokens || 600;
     
     let content = "";
     
@@ -282,6 +299,7 @@ async function generateTweetContent(agent: Agent): Promise<{ content: string; kb
     return {
       content: content.trim(),
       kbIds: assembledPrompt.metadata.kbEntriesUsedIds || [],
+      contentType: selectedContentType, // Return the server-selected content type
     };
   } catch (error) {
     console.error(`Failed to generate tweet for agent ${agent.id}:`, error);
@@ -340,10 +358,8 @@ async function executePost(agent: Agent): Promise<void> {
       return;
     }
     
-    // Detect content type BEFORE stripping labels (for accurate detection)
-    const detectedContentType = (agent as any).contentTypeTrackingEnabled !== false 
-      ? detectContentType(generated.content) 
-      : null;
+    // Use server-selected content type (not detection) for accurate rotation tracking
+    const contentTypeToLog = generated.contentType;
     
     // Strip content type labels from content before posting
     const cleanedContent = stripContentTypeLabels(generated.content);
@@ -379,10 +395,10 @@ async function executePost(agent: Agent): Promise<void> {
         }
       }
       
-      // Log pre-detected content type
-      if (result.tweetId && detectedContentType) {
-        await storage.logContentTypeUsage(agent.id, detectedContentType, result.tweetId);
-        console.log(`[Scheduler] Logged content type: ${detectedContentType}`);
+      // Log server-selected content type (CRITICAL for rotation to work)
+      if (result.tweetId && contentTypeToLog) {
+        await storage.logContentTypeUsage(agent.id, contentTypeToLog, result.tweetId);
+        console.log(`[Scheduler] Logged content type: ${contentTypeToLog}`);
       }
       
       await logActivity({
