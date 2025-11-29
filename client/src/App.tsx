@@ -12,6 +12,8 @@ import AgentConfigure from "@/pages/agent-configure";
 import Activity from "@/pages/activity";
 import Settings from "@/pages/settings";
 import Playground from "@/pages/playground";
+import KnowledgeBase from "@/pages/knowledge-base";
+import APIManagement from "@/pages/api-management";
 import Login from "@/pages/login";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
@@ -21,7 +23,9 @@ function Router() {
     <Switch>
       <Route path="/" component={Dashboard} />
       <Route path="/configure" component={AgentConfigure} />
+      <Route path="/knowledge-base" component={KnowledgeBase} />
       <Route path="/activity" component={Activity} />
+      <Route path="/api-management" component={APIManagement} />
       <Route path="/settings" component={Settings} />
       <Route path="/playground" component={Playground} />
       <Route component={NotFound} />
