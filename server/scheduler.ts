@@ -1,7 +1,7 @@
 import { storage, db } from "./storage";
 import { activityLogs } from "@shared/schema";
 import { postTweet, validateTwitterCredentials, replyToTweet, fetchMentions, fetchRepliesToTweet, type TwitterMention } from "./twitter";
-import { assemblePrompt, buildMessagesArray, selectNextContentType, formatContentType, type ContentType } from "./promptAssembly";
+import { assemblePrompt, buildMessagesArray, selectNextContentType, formatContentType, assembleConversationPrompt, buildConversationMessages, type ContentType } from "./promptAssembly";
 import { sendPostCreatedWebhook, sendPostFailedWebhook, sendReplyCreatedWebhook, sendReplyFailedWebhook } from "./webhook";
 import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
 import type { Agent } from "@shared/schema";
@@ -643,40 +643,33 @@ export function stopAgent(agentId: string): void {
 
 /**
  * Generate a reply to a mention using the AI model
+ * Uses CONVERSATIONAL prompt (not auto-post prompt) for natural dialogue
  */
 async function generateReply(agent: Agent, mention: TwitterMention): Promise<string> {
-  console.log(`[MentionBot] Generating reply for mention from @${mention.authorUsername}: "${mention.text.substring(0, 50)}..."`);
+  console.log(`[MentionBot] Generating CONVERSATIONAL reply for mention from @${mention.authorUsername}: "${mention.text.substring(0, 50)}..."`);
   
   // Get knowledge base entries for context
   const knowledgeEntries = await storage.getActiveKnowledgeBase(agent.id);
   
-  // Assemble prompt for conversation/reply mode
-  const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
+  // Use CONVERSATIONAL prompt builder (not auto-post builder)
+  const conversationPrompt = await assembleConversationPrompt(agent, knowledgeEntries, {
     includeKnowledge: true,
-    includeExamples: true,
     includePersonality: true,
     maxKbEntries: 10,
     maxKbTokens: 1000,
   });
   
-  // Build conversation-style prompt for the reply
-  const replyPrompt = `Someone (@${mention.authorUsername}) mentioned you on Twitter with this message:
+  console.log(`[MentionBot] Using conversational prompt with components: ${conversationPrompt.metadata.componentsIncluded.join(', ')}`);
+  
+  // Build the user message for the reply context
+  const replyContext = `@${mention.authorUsername} said: "${mention.text}"
 
-"${mention.text}"
+Respond naturally to this person. Keep your reply under 280 characters, no hashtags.`;
 
-Generate a thoughtful, engaging reply that:
-1. Directly addresses their message
-2. Stays true to your character and voice
-3. Is under 280 characters
-4. Does NOT include hashtags
-5. Is warm and conversational
-
-Reply only with the tweet text, nothing else.`;
-
-  const messages = buildMessagesArray(
-    assembledPrompt,
+  const messages = buildConversationMessages(
+    conversationPrompt,
     [],
-    replyPrompt
+    replyContext
   );
   
   // Use conversation model if available, otherwise use post model

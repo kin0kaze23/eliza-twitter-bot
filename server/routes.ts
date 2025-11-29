@@ -8,7 +8,7 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import OAuth from "oauth-1.0a";
 import crypto from "crypto";
-import { assemblePrompt, buildMessagesArray, selectNextContentType, formatContentType, type ContentType } from "./promptAssembly";
+import { assemblePrompt, buildMessagesArray, selectNextContentType, formatContentType, assembleConversationPrompt, buildConversationMessages, type ContentType } from "./promptAssembly";
 import { sendPostCreatedWebhook, sendPostFailedWebhook } from "./webhook";
 import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
 import { requireAuth, verifyPassword, hashPassword } from "./auth";
@@ -998,18 +998,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? await storage.getActiveKnowledgeBase(agentId)
         : [];
       
-      // Assemble comprehensive prompt using all agent configuration
-      const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
+      // Use CONVERSATIONAL prompt (not auto-post prompt) for natural dialogue
+      const conversationPrompt = await assembleConversationPrompt(agent, knowledgeEntries, {
         includeKnowledge,
-        includeExamples: true,
         includePersonality: true,
-        maxKbEntries: 20,
-        maxKbTokens: 2000,
+        maxKbEntries: 15,
+        maxKbTokens: 1500,
       });
       
-      // Build messages array with assembled prompt
-      const messages = buildMessagesArray(
-        assembledPrompt,
+      console.log(`[ConversationTest] Using conversational prompt with components: ${conversationPrompt.metadata.componentsIncluded.join(', ')}`);
+      
+      // Build messages array with conversational prompt
+      const messages = buildConversationMessages(
+        conversationPrompt,
         conversationHistory,
         message
       );
@@ -1071,11 +1072,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         response,
         timestamp: new Date().toISOString(),
         contextUsed: conversationHistory?.length || 0,
-        modelUsed: `${agent.modelProvider || 'openai'}/${agent.modelName || 'gpt-4-turbo-preview'}`,
+        modelUsed: `${modelProvider}/${modelName}`,
+        promptType: "conversational", // Indicates this uses the conversational prompt, not auto-post
         promptInfo: {
-          kbEntriesUsed: assembledPrompt.metadata.kbEntriesUsed,
-          examplesUsed: assembledPrompt.metadata.examplesUsed,
-          componentsIncluded: assembledPrompt.metadata.componentsIncluded,
+          kbEntriesUsed: conversationPrompt.metadata.kbEntriesUsed,
+          componentsIncluded: conversationPrompt.metadata.componentsIncluded,
         },
       });
     } catch (error: any) {

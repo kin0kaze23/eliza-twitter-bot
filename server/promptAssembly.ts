@@ -403,6 +403,174 @@ export async function assemblePrompt(
   };
 }
 
+export interface ConversationPromptOptions {
+  includeKnowledge?: boolean;
+  includePersonality?: boolean;
+  maxKbEntries?: number;
+  maxKbTokens?: number;
+}
+
+export interface AssembledConversationPrompt {
+  systemPrompt: string;
+  metadata: {
+    kbEntriesUsed: number;
+    componentsIncluded: string[];
+  };
+}
+
+/**
+ * Assembles a CONVERSATIONAL prompt for replies and chat interactions.
+ * This is DIFFERENT from assemblePrompt which is for auto-posts.
+ * 
+ * Key differences:
+ * - No content type rotation
+ * - No post formatting instructions
+ * - Focused on natural, engaging dialogue
+ * - Uses personality for conversation, not broadcasting
+ */
+export async function assembleConversationPrompt(
+  agent: Agent,
+  knowledgeEntries: KnowledgeBase[],
+  options: ConversationPromptOptions = {}
+): Promise<AssembledConversationPrompt> {
+  const {
+    includeKnowledge = true,
+    includePersonality = true,
+    maxKbEntries = 10,
+    maxKbTokens = 1500,
+  } = options;
+
+  const componentsIncluded: string[] = [];
+  let systemPrompt = "";
+
+  // 1. Core Identity & Conversational Role
+  systemPrompt += `# Who You Are\n\n`;
+  systemPrompt += `You are ${agent.name || "an AI assistant"}`;
+  
+  if (agent.personalityPrompt && agent.personalityPrompt.trim().length > 0) {
+    systemPrompt += `. ${agent.personalityPrompt}\n\n`;
+    componentsIncluded.push("personality");
+  } else {
+    systemPrompt += `, a helpful and engaging conversationalist.\n\n`;
+    if (includePersonality) {
+      componentsIncluded.push("personality-default"); // Track that default personality was used
+    }
+  }
+
+  // 2. Conversational Style Guidelines
+  systemPrompt += `## How You Communicate\n\n`;
+  
+  // Add topics, style, and adjectives if available
+  if (agent.topics && agent.topics.trim().length > 0) {
+    systemPrompt += `**Your Areas of Expertise**: ${agent.topics}\n`;
+    componentsIncluded.push("topics");
+  }
+  
+  if (agent.postStyle && agent.postStyle.trim().length > 0) {
+    systemPrompt += `**Your Communication Style**: ${agent.postStyle}\n`;
+    componentsIncluded.push("style");
+  }
+  
+  if (agent.adjectives && agent.adjectives.trim().length > 0) {
+    systemPrompt += `**Your Tone**: ${agent.adjectives}\n`;
+    componentsIncluded.push("adjectives");
+  }
+  
+  systemPrompt += `\n`;
+
+  // 3. Conversational Behavior Rules
+  systemPrompt += `## Conversation Guidelines\n\n`;
+  systemPrompt += `- Be warm, genuine, and engaging in your responses\n`;
+  systemPrompt += `- Listen carefully to what the person is saying and respond thoughtfully\n`;
+  systemPrompt += `- Keep responses concise and conversational (aim for 1-3 sentences when possible)\n`;
+  systemPrompt += `- Ask follow-up questions when appropriate to show genuine interest\n`;
+  systemPrompt += `- Share insights and wisdom naturally, without lecturing\n`;
+  systemPrompt += `- Match the energy and tone of the person you're talking to\n`;
+  systemPrompt += `- Be helpful and supportive, offering encouragement when needed\n`;
+  systemPrompt += `- Stay true to your character and voice\n\n`;
+  componentsIncluded.push("conversationGuidelines");
+
+  // 4. Add knowledge base context (if available and requested)
+  let kbEntriesUsed = 0;
+  
+  if (includeKnowledge && knowledgeEntries.length > 0) {
+    const activeKb = knowledgeEntries
+      .filter(kb => kb.active && kb.status === "approved")
+      .sort((a, b) => {
+        const aPriority = priorityToNumber(a.priority);
+        const bPriority = priorityToNumber(b.priority);
+        if (bPriority !== aPriority) return bPriority - aPriority;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      })
+      .slice(0, maxKbEntries);
+
+    if (activeKb.length > 0) {
+      systemPrompt += `## Your Knowledge (Reference When Relevant)\n\n`;
+      systemPrompt += `Use this information naturally in conversation when it helps answer questions or add value:\n\n`;
+
+      let tokenCount = 0;
+      for (const kb of activeKb) {
+        const estimatedTokens = (kb.title.length + kb.content.length) / 4;
+        if (tokenCount + estimatedTokens > maxKbTokens) break;
+
+        systemPrompt += `**${kb.title}**: ${kb.content}\n\n`;
+        tokenCount += estimatedTokens;
+        kbEntriesUsed++;
+      }
+      
+      componentsIncluded.push("knowledgeBase");
+    }
+  }
+
+  // 5. Important reminders for conversational context
+  systemPrompt += `## Important Reminders\n\n`;
+  systemPrompt += `- You are having a CONVERSATION, not writing a social media post\n`;
+  systemPrompt += `- Respond directly to what the person said\n`;
+  systemPrompt += `- Don't use hashtags or post-style formatting\n`;
+  systemPrompt += `- Keep it natural and human-like\n`;
+  componentsIncluded.push("conversationalReminders");
+
+  return {
+    systemPrompt: systemPrompt.trim(),
+    metadata: {
+      kbEntriesUsed,
+      componentsIncluded,
+    },
+  };
+}
+
+/**
+ * Build messages array specifically for conversational contexts
+ */
+export function buildConversationMessages(
+  conversationPrompt: AssembledConversationPrompt,
+  conversationHistory: Array<{ role: string; content: string }> = [],
+  currentMessage?: string
+): Array<{ role: string; content: string }> {
+  const messages: Array<{ role: string; content: string }> = [];
+
+  // Add system prompt
+  messages.push({
+    role: "system",
+    content: conversationPrompt.systemPrompt,
+  });
+
+  // Add conversation history
+  if (conversationHistory && conversationHistory.length > 0) {
+    messages.push(...conversationHistory);
+  }
+
+  // Add current message
+  if (currentMessage) {
+    messages.push({
+      role: "user",
+      content: currentMessage,
+    });
+  }
+
+  return messages;
+}
+
 /**
  * Helper to build messages array for LLM API calls
  */
