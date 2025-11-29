@@ -1516,11 +1516,11 @@ export default function AgentConfigure() {
                     <div className="flex items-center gap-2 flex-1">
                       <Label className="whitespace-nowrap">Example {idx + 1}</Label>
                       <Select
-                        value={getExampleContentType(example) || ""}
+                        value={getExampleContentType(example) || "none"}
                         onValueChange={(value) => {
                           const newExamples = [...character.messageExamples];
                           const content = getExampleContent(example);
-                          newExamples[idx] = value ? { content, contentType: value as any } : content;
+                          newExamples[idx] = value !== "none" ? { content, contentType: value as any } : content;
                           setCharacter({ ...character, messageExamples: newExamples });
                         }}
                       >
@@ -1528,7 +1528,7 @@ export default function AgentConfigure() {
                           <SelectValue placeholder="Content Type (optional)" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">No Type</SelectItem>
+                          <SelectItem value="none">No Type</SelectItem>
                           {CONTENT_TYPES.map((type) => (
                             <SelectItem key={type} value={type}>
                               {formatContentType(type)}
