@@ -244,7 +244,14 @@ export async function assemblePrompt(
   if (includeExamples && agent.messageExamples && agent.messageExamples.length > 0) {
     // Add explicit instruction about following examples format
     systemPrompt += "## Message Examples (FOLLOW THIS FORMAT EXACTLY)\n";
-    systemPrompt += "The following are examples of EXACTLY how your posts should be structured. You MUST follow this format precisely - same structure, same sections, same style. Do not add hashtags unless shown in examples:\n\n";
+    systemPrompt += "The following are examples of EXACTLY how your posts should be structured.\n";
+    systemPrompt += "CRITICAL: You MUST replicate the EXACT format, including:\n";
+    systemPrompt += "- All line breaks and paragraph spacing\n";
+    systemPrompt += "- The exact structure and sections\n";
+    systemPrompt += "- Same tone and style\n";
+    systemPrompt += "- Do NOT collapse multiple lines into one paragraph\n";
+    systemPrompt += "- Do NOT remove spacing between sections\n";
+    systemPrompt += "- Do NOT add hashtags unless shown in examples\n\n";
     
     // Add examples to system prompt (support up to 10 for multiple content types)
     // If example has contentType metadata, include it as a label
