@@ -18,15 +18,19 @@ import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
  */
 function stripContentTypeLabels(content: string): string {
   return content
-    // Bracketed labels
-    .replace(/\s*\[(EVENT[-_]BASED|VERSE[-_ ]REFLECTION|DEEP[-_ ]QUESTION|WISDOM[-_ ]BITE|CULTURAL[-_ ]INSIGHT|ENCOURAGEMENT|ETERNITY[-_ ]ANCHOR)\]\s*/gi, " ")
-    // Plain text labels
+    // Bracketed labels - replace with newline to preserve paragraph structure
+    .replace(/\s*\[(EVENT[-_]BASED|VERSE[-_ ]REFLECTION|DEEP[-_ ]QUESTION|WISDOM[-_ ]BITE|CULTURAL[-_ ]INSIGHT|ENCOURAGEMENT|ETERNITY[-_ ]ANCHOR)\]\s*/gi, "\n")
+    // Plain text labels at start of content
     .replace(/^\s*(EVENT[-_\s]?BASED|VERSE[-_\s]?REFLECTION|DEEP[-_\s]?QUESTION|WISDOM[-_\s]?BITE|CULTURAL[-_\s]?INSIGHT|ENCOURAGEMENT|ETERNITY[-_\s]?ANCHOR)\s+/gi, "")
-    .replace(/\s+(EVENT[-_\s]?BASED|VERSE[-_\s]?REFLECTION|DEEP[-_\s]?QUESTION|WISDOM[-_\s]?BITE|CULTURAL[-_\s]?INSIGHT|ENCOURAGEMENT|ETERNITY[-_\s]?ANCHOR)\s+/gi, " ")
+    // Plain text labels mid-content
+    .replace(/\s+(EVENT[-_\s]?BASED|VERSE[-_\s]?REFLECTION|DEEP[-_\s]?QUESTION|WISDOM[-_\s]?BITE|CULTURAL[-_\s]?INSIGHT|ENCOURAGEMENT|ETERNITY[-_\s]?ANCHOR)\s+/gi, "\n")
     // Remove decorative separators (em-dashes, double-dashes used as dividers)
     .replace(/\n\s*[-–—]{2,}\s*\n/g, "\n") // Lines with only dashes
-    .replace(/\s+[-–—]\s+/g, " ") // Em-dashes or dashes as separators (but keep single dash in context like "don't")
-    .replace(/\s+/g, " ") // Normalize multiple spaces
+    .replace(/\s+[-–—]\s+/g, " ") // Em-dashes or dashes as separators
+    // Normalize multiple spaces on same line (preserve newlines!)
+    .replace(/[ \t]+/g, " ") // Only collapse horizontal whitespace, NOT \n
+    // Clean up multiple consecutive newlines to max 2 (one blank line)
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
