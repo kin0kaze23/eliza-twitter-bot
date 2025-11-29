@@ -17,6 +17,8 @@ import {
   type InsertActivityLog,
   type BibleVerseUsage,
   type InsertBibleVerseUsage,
+  type ContentTypeUsage,
+  type InsertContentTypeUsage,
   users,
   agents,
   knowledgeBase,
@@ -25,6 +27,7 @@ import {
   agentActivity,
   activityLogs,
   bibleVerseUsages,
+  contentTypeUsages,
 } from "@shared/schema";
 import { eq, desc, and, sql, inArray } from "drizzle-orm";
 
@@ -88,6 +91,11 @@ export interface IStorage {
   getRecentVerseUsages(agentId: string, limit?: number): Promise<BibleVerseUsage[]>;
   logVerseUsage(agentId: string, verseRef: string, book: string, chapter: number, verseStart: number, verseEnd: number | undefined, tweetId?: string): Promise<BibleVerseUsage>;
   clearVerseHistory(agentId: string): Promise<number>;
+  
+  // Content Type Tracking
+  getRecentContentTypeUsages(agentId: string, limit?: number): Promise<ContentTypeUsage[]>;
+  logContentTypeUsage(agentId: string, contentType: string, tweetId?: string): Promise<ContentTypeUsage>;
+  clearContentTypeHistory(agentId: string): Promise<number>;
 }
 
 export class DbStorage implements IStorage {
@@ -600,6 +608,94 @@ export class DbStorage implements IStorage {
       .where(eq(bibleVerseUsages.agentId, agentId))
       .returning();
     return result.length;
+  }
+
+  // Content Type Tracking
+  async getRecentContentTypeUsages(agentId: string, limit: number = 7): Promise<ContentTypeUsage[]> {
+    return await db
+      .select()
+      .from(contentTypeUsages)
+      .where(eq(contentTypeUsages.agentId, agentId))
+      .orderBy(desc(contentTypeUsages.lastUsedAt))
+      .limit(limit);
+  }
+
+  async logContentTypeUsage(
+    agentId: string,
+    contentType: string,
+    tweetId?: string
+  ): Promise<ContentTypeUsage> {
+    // Check if this content type was already used
+    const existing = await db
+      .select()
+      .from(contentTypeUsages)
+      .where(and(
+        eq(contentTypeUsages.agentId, agentId),
+        eq(contentTypeUsages.contentType, contentType)
+      ));
+    
+    if (existing.length > 0) {
+      // Update existing record
+      const currentTweetIds = (existing[0].tweetIds as string[]) || [];
+      const newTweetIds = tweetId ? [...currentTweetIds, tweetId] : currentTweetIds;
+      
+      const result = await db
+        .update(contentTypeUsages)
+        .set({
+          usageCount: existing[0].usageCount + 1,
+          lastUsedAt: new Date(),
+          tweetIds: newTweetIds,
+        })
+        .where(eq(contentTypeUsages.id, existing[0].id))
+        .returning();
+      return result[0];
+    }
+    
+    // Create new record
+    const result = await db
+      .insert(contentTypeUsages)
+      .values({
+        agentId,
+        contentType,
+        tweetIds: tweetId ? [tweetId] : [],
+      })
+      .returning();
+    return result[0];
+  }
+
+  async clearContentTypeHistory(agentId: string): Promise<number> {
+    const result = await db
+      .delete(contentTypeUsages)
+      .where(eq(contentTypeUsages.agentId, agentId))
+      .returning();
+    return result.length;
+  }
+
+  async getContentTypeFreshnessStats(agentId: string): Promise<{
+    recentTypes: string[];
+    unusedTypes: string[];
+    allUsages: ContentTypeUsage[];
+  }> {
+    const allTypes = [
+      "EVENT_BASED",
+      "VERSE_REFLECTION",
+      "DEEP_QUESTION",
+      "WISDOM_BITE",
+      "CULTURAL_INSIGHT",
+      "ENCOURAGEMENT",
+      "ETERNITY_ANCHOR",
+    ];
+    
+    const usages = await this.getRecentContentTypeUsages(agentId, 50);
+    const recentTypes = usages.slice(0, 7).map(u => u.contentType);
+    const usedTypes = new Set(usages.map(u => u.contentType));
+    const unusedTypes = allTypes.filter(t => !usedTypes.has(t));
+    
+    return {
+      recentTypes,
+      unusedTypes,
+      allUsages: usages,
+    };
   }
 }
 

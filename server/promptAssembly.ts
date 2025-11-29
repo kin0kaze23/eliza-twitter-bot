@@ -1,4 +1,4 @@
-import type { Agent, KnowledgeBase, BibleVerseUsage } from "@shared/schema";
+import type { Agent, KnowledgeBase, BibleVerseUsage, ContentTypeUsage } from "@shared/schema";
 
 export interface PromptAssemblyOptions {
   includeKnowledge?: boolean;
@@ -7,6 +7,7 @@ export interface PromptAssemblyOptions {
   maxKbEntries?: number;
   maxKbTokens?: number;
   recentVerses?: BibleVerseUsage[]; // Recently used Bible verses to avoid
+  recentContentTypes?: ContentTypeUsage[]; // Recently used content types to avoid
 }
 
 export interface AssembledPrompt {
@@ -46,6 +47,7 @@ export async function assemblePrompt(
     maxKbEntries = 20,
     maxKbTokens = 2000,
     recentVerses = [],
+    recentContentTypes = [],
   } = options;
 
   const componentsIncluded: string[] = [];
@@ -172,6 +174,36 @@ export async function assemblePrompt(
     systemPrompt += "Choose different, fresh Scripture passages to provide variety for your audience.\n\n";
     
     componentsIncluded.push("verseAvoidance");
+  }
+
+  // 5b. Content Type Avoidance Instructions (if content type tracking is enabled)
+  const contentTypeTrackingEnabled = (agent as any).contentTypeTrackingEnabled !== false; // Default true
+  const contentTypeReusePolicy = (agent as any).contentTypeReusePolicy || "rotate_all";
+  
+  if (contentTypeTrackingEnabled && contentTypeReusePolicy !== "allow" && recentContentTypes.length > 0) {
+    const allContentTypes = [
+      "EVENT_BASED", "VERSE_REFLECTION", "DEEP_QUESTION", 
+      "WISDOM_BITE", "CULTURAL_INSIGHT", "ENCOURAGEMENT", "ETERNITY_ANCHOR"
+    ];
+    const recentTypeNames = recentContentTypes.slice(0, 3).map(ct => ct.contentType);
+    const unusedTypes = allContentTypes.filter(t => !recentTypeNames.includes(t));
+    
+    systemPrompt += "## Content Type Selection Guidelines\n";
+    
+    if (contentTypeReusePolicy === "rotate_all") {
+      // Strongly encourage unused types
+      if (unusedTypes.length > 0) {
+        systemPrompt += `PRIORITY: Select from these UNUSED content types first: ${unusedTypes.join(", ")}\n\n`;
+      }
+      systemPrompt += `AVOID: These content types were used recently: ${recentTypeNames.join(", ")}\n`;
+      systemPrompt += "Rotate through all 7 content types to maintain variety for your audience.\n\n";
+    } else if (contentTypeReusePolicy === "avoid_last") {
+      const lastType = recentTypeNames[0];
+      systemPrompt += `AVOID: Do not use "${lastType}" as it was just used in the previous post.\n`;
+      systemPrompt += "Select any other content type for variety.\n\n";
+    }
+    
+    componentsIncluded.push("contentTypeAvoidance");
   }
 
   // 6. Message examples (if available and enabled)

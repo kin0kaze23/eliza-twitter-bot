@@ -37,6 +37,79 @@ function cleanupOldPostCounts(): void {
   }
 }
 
+/**
+ * Detect the content type from post content based on labels and patterns
+ */
+function detectContentType(content: string): string | null {
+  const upperContent = content.toUpperCase();
+  const lowerContent = content.toLowerCase();
+  
+  // Check for explicit labels first (most reliable)
+  if (upperContent.includes("[EVENT-BASED]") || upperContent.includes("[EVENT_BASED]")) {
+    return "EVENT_BASED";
+  }
+  if (upperContent.includes("[VERSE REFLECTION]") || upperContent.includes("[VERSE_REFLECTION]")) {
+    return "VERSE_REFLECTION";
+  }
+  if (upperContent.includes("[DEEP QUESTION]") || upperContent.includes("[DEEP_QUESTION]")) {
+    return "DEEP_QUESTION";
+  }
+  if (upperContent.includes("[WISDOM BITE]") || upperContent.includes("[WISDOM_BITE]")) {
+    return "WISDOM_BITE";
+  }
+  if (upperContent.includes("[CULTURAL INSIGHT]") || upperContent.includes("[CULTURAL_INSIGHT]")) {
+    return "CULTURAL_INSIGHT";
+  }
+  if (upperContent.includes("[ENCOURAGEMENT]")) {
+    return "ENCOURAGEMENT";
+  }
+  if (upperContent.includes("[ETERNITY ANCHOR]") || upperContent.includes("[ETERNITY_ANCHOR]")) {
+    return "ETERNITY_ANCHOR";
+  }
+  
+  // Pattern-based detection as fallback
+  const lines = content.split("\n").filter(l => l.trim());
+  const firstLine = lines[0]?.toLowerCase() || "";
+  
+  // Event-based: Often starts with news emoji or mentions specific events/stats
+  if (/^[📉📈🤖💧🔥👀📰🌍]/.test(content) && /\d+%|\$\d|billion|million|today|yesterday|this week/.test(lowerContent)) {
+    return "EVENT_BASED";
+  }
+  
+  // Verse reflection: Starts with a quoted verse
+  if (/^[""]/.test(content) && /—\s*(matthew|mark|luke|john|psalm|proverbs|romans|genesis|isaiah|hebrews|philippians|corinthians|peter|james|revelation)/i.test(content)) {
+    return "VERSE_REFLECTION";
+  }
+  
+  // Deep question: Usually short, ends with ?
+  if (content.includes("?") && lines.length <= 4 && content.length < 300) {
+    return "DEEP_QUESTION";
+  }
+  
+  // Wisdom bite: Short, punchy, no verse, often uses "isn't" or metaphors
+  if (lines.length <= 4 && content.length < 200 && !content.includes("—")) {
+    return "WISDOM_BITE";
+  }
+  
+  // Encouragement: Contains "you" addressed to reader, comfort language
+  if (/to the one|if you|you don't have to|you are|you're not/i.test(lowerContent)) {
+    return "ENCOURAGEMENT";
+  }
+  
+  // Eternity anchor: Contains themes of permanence vs. temporality
+  if (/forever|eternal|throne|kingdom|unshakable|never change|yesterday.*today.*forever/i.test(lowerContent)) {
+    return "ETERNITY_ANCHOR";
+  }
+  
+  // Cultural insight: References modern culture, tech, patterns
+  if (/we optimize|we scroll|algorithm|modern|culture|generation|trend/i.test(lowerContent)) {
+    return "CULTURAL_INSIGHT";
+  }
+  
+  // Default: If we can't detect, return null
+  return null;
+}
+
 function parseTimeToMinutes(timeStr: string): number {
   const match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
   if (!match) return 0;
@@ -115,6 +188,10 @@ async function generateTweetContent(agent: Agent): Promise<{ content: string; kb
     const verseWindow = agent.verseReuseWindow || 10;
     const recentVerses = await storage.getRecentVerseUsages(agent.id, verseWindow);
     
+    // Get recent content type usages for avoidance
+    const contentTypeWindow = (agent as any).contentTypeWindow || 7;
+    const recentContentTypes = await storage.getRecentContentTypeUsages(agent.id, contentTypeWindow);
+    
     const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
       includeKnowledge: true,
       includeExamples: true,
@@ -122,6 +199,7 @@ async function generateTweetContent(agent: Agent): Promise<{ content: string; kb
       maxKbEntries: 20,
       maxKbTokens: 2000,
       recentVerses,
+      recentContentTypes,
     });
     
     // Dynamic prompt that allows content type selection and flexible KB usage
@@ -270,6 +348,15 @@ async function executePost(agent: Agent): Promise<void> {
         }
         if (detectedVerses.length > 0) {
           console.log(`[Scheduler] Logged ${detectedVerses.length} verse(s): ${detectedVerses.map(v => v.verseRef).join(", ")}`);
+        }
+      }
+      
+      // Detect and log content type (if content type tracking enabled)
+      if (result.tweetId && (agent as any).contentTypeTrackingEnabled !== false) {
+        const detectedType = detectContentType(generated.content);
+        if (detectedType) {
+          await storage.logContentTypeUsage(agent.id, detectedType, result.tweetId);
+          console.log(`[Scheduler] Logged content type: ${detectedType}`);
         }
       }
       

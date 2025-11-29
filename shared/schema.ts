@@ -138,10 +138,22 @@ export const agents = pgTable("agents", {
   kbPriorityRule: text("kb_priority_rule"), // Rule text like "if content contains 'breaking' then priority 10"
   kbPriorityRuleLastAppliedAt: timestamp("kb_priority_rule_last_applied_at"),
   
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CONTENT FRESHNESS SETTINGS (Unified Anti-Repetition Config)
+  // ═══════════════════════════════════════════════════════════════════════════
+  
+  // Global freshness cooldown (applies to all tracking)
+  freshnessCooldownHours: integer("freshness_cooldown_hours").default(24), // unified cooldown period
+  
   // Bible Verse Tracking - prevent repetitive verse usage
   verseTrackingEnabled: boolean("verse_tracking_enabled").default(true),
   verseReusePolicy: text("verse_reuse_policy").default("avoid_recent"), // allow, avoid_recent, unique_daily
   verseReuseWindow: integer("verse_reuse_window").default(10), // number of posts to look back (for avoid_recent)
+  
+  // Content Type Tracking - prevent repetitive content types
+  contentTypeTrackingEnabled: boolean("content_type_tracking_enabled").default(true),
+  contentTypeReusePolicy: text("content_type_reuse_policy").default("rotate_all"), // allow, avoid_last, rotate_all
+  contentTypeWindow: integer("content_type_window").default(7), // number of posts to look back
   
   // Metadata
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -417,3 +429,42 @@ export const insertBibleVerseUsageSchema = createInsertSchema(bibleVerseUsages).
 
 export type InsertBibleVerseUsage = z.infer<typeof insertBibleVerseUsageSchema>;
 export type BibleVerseUsage = typeof bibleVerseUsages.$inferSelect;
+
+// Content Type Usage Tracking - prevent repetitive content type selection
+export const contentTypeUsages = pgTable("content_type_usages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  
+  // Content type info
+  contentType: text("content_type").notNull(), // EVENT_BASED, VERSE_REFLECTION, DEEP_QUESTION, WISDOM_BITE, CULTURAL_INSIGHT, ENCOURAGEMENT, ETERNITY_ANCHOR
+  
+  // Usage tracking
+  usageCount: integer("usage_count").default(1).notNull(),
+  tweetIds: jsonb("tweet_ids").$type<string[]>().default(sql`'[]'`), // IDs of tweets that used this type
+  
+  // Timestamps
+  firstUsedAt: timestamp("first_used_at").defaultNow().notNull(),
+  lastUsedAt: timestamp("last_used_at").defaultNow().notNull(),
+});
+
+export const insertContentTypeUsageSchema = createInsertSchema(contentTypeUsages).omit({
+  id: true,
+  firstUsedAt: true,
+  lastUsedAt: true,
+});
+
+export type InsertContentTypeUsage = z.infer<typeof insertContentTypeUsageSchema>;
+export type ContentTypeUsage = typeof contentTypeUsages.$inferSelect;
+
+// Content type constants for reference
+export const CONTENT_TYPES = [
+  "EVENT_BASED",
+  "VERSE_REFLECTION", 
+  "DEEP_QUESTION",
+  "WISDOM_BITE",
+  "CULTURAL_INSIGHT",
+  "ENCOURAGEMENT",
+  "ETERNITY_ANCHOR",
+] as const;
+
+export type ContentType = typeof CONTENT_TYPES[number];

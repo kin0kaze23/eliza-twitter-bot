@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap, Pencil, Star, Info, Sparkles, BookOpen, MessageSquare, Thermometer, Hash, Database } from "lucide-react";
+import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap, Pencil, Star, Info, Sparkles, BookOpen, MessageSquare, Thermometer, Hash, Database, Layers } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Link, useParams } from "wouter";
@@ -332,6 +332,11 @@ export default function AgentConfigure() {
     verseTrackingEnabled: true,
     verseReusePolicy: "avoid_recent",
     verseReuseWindow: "10",
+    
+    // Content Type Tracking
+    contentTypeTrackingEnabled: true,
+    contentTypeReusePolicy: "rotate_all",
+    contentTypeWindow: "7",
   });
 
   // Knowledge Base Settings
@@ -734,6 +739,10 @@ export default function AgentConfigure() {
         verseTrackingEnabled: behavior.verseTrackingEnabled,
         verseReusePolicy: behavior.verseReusePolicy,
         verseReuseWindow: parseInt(behavior.verseReuseWindow) || 10,
+        // Content Type Tracking
+        contentTypeTrackingEnabled: behavior.contentTypeTrackingEnabled,
+        contentTypeReusePolicy: behavior.contentTypeReusePolicy,
+        contentTypeWindow: parseInt(behavior.contentTypeWindow) || 7,
         // Knowledge Base Settings
         kbMaxEntries: parseInt(kbSettings.maxEntries) || 10,
         kbReusePolicy: kbSettings.reusePolicy,
@@ -934,6 +943,10 @@ export default function AgentConfigure() {
       verseTrackingEnabled: agent.verseTrackingEnabled ?? true,
       verseReusePolicy: agent.verseReusePolicy || "avoid_recent",
       verseReuseWindow: (agent.verseReuseWindow || 10).toString(),
+      // Content Type Tracking
+      contentTypeTrackingEnabled: (agent as any).contentTypeTrackingEnabled ?? true,
+      contentTypeReusePolicy: (agent as any).contentTypeReusePolicy || "rotate_all",
+      contentTypeWindow: ((agent as any).contentTypeWindow || 7).toString(),
     });
     
     // Load KB settings
@@ -2196,67 +2209,136 @@ export default function AgentConfigure() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Bible Verse Tracking</CardTitle>
-              <CardDescription>Prevent repetitive Scripture usage by tracking and avoiding recently used verses</CardDescription>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-primary" />
+                Content Freshness System
+              </CardTitle>
+              <CardDescription>
+                Keep your content fresh and varied by tracking Bible verses, content types, and KB usage patterns
+              </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Enable Verse Tracking</Label>
-                  <p className="text-xs text-muted-foreground">Track Bible verses used in tweets to ensure variety</p>
+            <CardContent className="space-y-6">
+              
+              <div className="space-y-4 p-4 rounded-lg bg-muted/30 border">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label className="flex items-center gap-2">
+                      <BookOpen className="h-4 w-4" />
+                      Bible Verse Tracking
+                    </Label>
+                    <p className="text-xs text-muted-foreground">Track verses to ensure variety in Scripture references</p>
+                  </div>
+                  <Switch
+                    checked={behavior.verseTrackingEnabled}
+                    onCheckedChange={(v) => setBehavior({ ...behavior, verseTrackingEnabled: v })}
+                    data-testid="switch-verse-tracking"
+                  />
                 </div>
-                <Switch
-                  checked={behavior.verseTrackingEnabled}
-                  onCheckedChange={(v) => setBehavior({ ...behavior, verseTrackingEnabled: v })}
-                  data-testid="switch-verse-tracking"
-                />
-              </div>
 
-              <div className="space-y-2">
-                <Label>Verse Reuse Policy</Label>
-                <p className="text-xs text-muted-foreground">
-                  How should the AI handle recently used verses?
-                </p>
-                <Select
-                  value={behavior.verseReusePolicy}
-                  onValueChange={(v) => setBehavior({ ...behavior, verseReusePolicy: v })}
-                  disabled={!behavior.verseTrackingEnabled}
-                >
-                  <SelectTrigger data-testid="select-verse-policy">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="allow">Allow - No restrictions on verse reuse</SelectItem>
-                    <SelectItem value="avoid_recent">Avoid Recent - Discourage recently used verses</SelectItem>
-                    <SelectItem value="unique">Unique - Never repeat verses</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                {behavior.verseTrackingEnabled && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-6 pt-2 border-l-2 border-primary/20">
+                    <div className="space-y-2">
+                      <Label>Reuse Policy</Label>
+                      <Select
+                        value={behavior.verseReusePolicy}
+                        onValueChange={(v) => setBehavior({ ...behavior, verseReusePolicy: v })}
+                      >
+                        <SelectTrigger data-testid="select-verse-policy">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="allow">Allow - No restrictions</SelectItem>
+                          <SelectItem value="avoid_recent">Avoid Recent</SelectItem>
+                          <SelectItem value="unique">Never Repeat</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="verse-window">Verse Window</Label>
-                <p className="text-xs text-muted-foreground">
-                  Number of recent posts to check for verse usage
-                </p>
-                <Input
-                  id="verse-window"
-                  type="number"
-                  min="1"
-                  max="100"
-                  value={behavior.verseReuseWindow}
-                  onChange={(e) => setBehavior({ ...behavior, verseReuseWindow: e.target.value })}
-                  disabled={!behavior.verseTrackingEnabled || behavior.verseReusePolicy === "allow"}
-                  data-testid="input-verse-window"
-                />
-                <p className="text-xs text-muted-foreground">
-                  {behavior.verseReusePolicy === "avoid_recent" && 
-                    `AI will be instructed to avoid the last ${behavior.verseReuseWindow} verses used`
-                  }
-                  {behavior.verseReusePolicy === "unique" && 
-                    `Verses from the last ${behavior.verseReuseWindow} posts will never be repeated`
-                  }
-                </p>
+                    <div className="space-y-2">
+                      <Label htmlFor="verse-window">Look-back Window</Label>
+                      <Input
+                        id="verse-window"
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={behavior.verseReuseWindow}
+                        onChange={(e) => setBehavior({ ...behavior, verseReuseWindow: e.target.value })}
+                        disabled={behavior.verseReusePolicy === "allow"}
+                        data-testid="input-verse-window"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Check last {behavior.verseReuseWindow} posts for verse reuse
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
+              
+              <div className="space-y-4 p-4 rounded-lg bg-muted/30 border">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label className="flex items-center gap-2">
+                      <Layers className="h-4 w-4" />
+                      Content Type Rotation
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Rotate through 7 content types: Event, Verse Reflection, Deep Question, Wisdom Bite, Cultural, Encouragement, Eternity Anchor
+                    </p>
+                  </div>
+                  <Switch
+                    checked={behavior.contentTypeTrackingEnabled}
+                    onCheckedChange={(v) => setBehavior({ ...behavior, contentTypeTrackingEnabled: v })}
+                    data-testid="switch-content-type-tracking"
+                  />
+                </div>
+
+                {behavior.contentTypeTrackingEnabled && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-6 pt-2 border-l-2 border-primary/20">
+                    <div className="space-y-2">
+                      <Label>Rotation Policy</Label>
+                      <Select
+                        value={behavior.contentTypeReusePolicy}
+                        onValueChange={(v) => setBehavior({ ...behavior, contentTypeReusePolicy: v })}
+                      >
+                        <SelectTrigger data-testid="select-content-type-policy">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="allow">Allow - No restrictions</SelectItem>
+                          <SelectItem value="avoid_last">Avoid Last - Skip previous type</SelectItem>
+                          <SelectItem value="rotate_all">Rotate All - Cycle through all 7</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="content-type-window">History Depth</Label>
+                      <Input
+                        id="content-type-window"
+                        type="number"
+                        min="1"
+                        max="20"
+                        value={behavior.contentTypeWindow}
+                        onChange={(e) => setBehavior({ ...behavior, contentTypeWindow: e.target.value })}
+                        disabled={behavior.contentTypeReusePolicy === "allow"}
+                        data-testid="input-content-type-window"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Track last {behavior.contentTypeWindow} content types used
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              <Alert className="bg-primary/5 border-primary/20">
+                <Info className="h-4 w-4 text-primary" />
+                <AlertDescription className="text-xs text-muted-foreground">
+                  <strong>How it works:</strong> The AI receives information about recently used verses and content types when generating new posts. 
+                  It prioritizes fresh content while still maintaining your agent's voice and style.
+                </AlertDescription>
+              </Alert>
+              
             </CardContent>
           </Card>
         </TabsContent>
