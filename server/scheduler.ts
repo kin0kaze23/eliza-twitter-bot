@@ -1,6 +1,6 @@
 import { storage, db } from "./storage";
 import { activityLogs } from "@shared/schema";
-import { postTweet, validateTwitterCredentials, replyToTweet, fetchMentions, type TwitterMention } from "./twitter";
+import { postTweet, validateTwitterCredentials, replyToTweet, fetchMentions, fetchRepliesToTweet, type TwitterMention } from "./twitter";
 import { assemblePrompt, buildMessagesArray, selectNextContentType, formatContentType, type ContentType } from "./promptAssembly";
 import { sendPostCreatedWebhook, sendPostFailedWebhook, sendReplyCreatedWebhook, sendReplyFailedWebhook } from "./webhook";
 import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
@@ -15,6 +15,7 @@ interface SchedulerState {
   lastMentionCheck: Map<string, Date>;
   lastMentionId: Map<string, string>; // Track last processed mention ID for pagination
   repliesThisHour: Map<string, { count: number; hourStart: Date }>; // Track replies per hour per agent
+  recentBotTweets: Map<string, { tweetId: string; postedAt: Date }[]>; // Track recent bot tweets for comment detection
   lastCleanupDate: string;
 }
 
@@ -27,8 +28,73 @@ const state: SchedulerState = {
   lastMentionCheck: new Map(),
   lastMentionId: new Map(),
   repliesThisHour: new Map(),
+  recentBotTweets: new Map(),
   lastCleanupDate: new Date().toISOString().split("T")[0],
 };
+
+// Maximum number of recent tweets to track per agent
+const MAX_RECENT_TWEETS = 20;
+// Maximum age of tweets to check for replies (7 days in ms)
+const MAX_TWEET_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+interface TrackedTweet {
+  tweetId: string;
+  postedAt: Date;
+  lastReplyId?: string; // Track last processed reply ID for each tweet
+}
+
+/**
+ * Track a newly posted tweet for comment detection
+ */
+function trackBotTweet(agentId: string, tweetId: string): void {
+  const tweets = state.recentBotTweets.get(agentId) || [];
+  
+  // Check if this tweet is already tracked (don't overwrite existing state)
+  const existing = tweets.find(t => t.tweetId === tweetId);
+  if (existing) {
+    console.log(`[CommentBot] Tweet ${tweetId} already tracked, preserving state`);
+    return;
+  }
+  
+  // Add new tweet at the beginning
+  tweets.unshift({ tweetId, postedAt: new Date() });
+  
+  // Remove old tweets (older than 7 days or beyond limit)
+  const cutoff = Date.now() - MAX_TWEET_AGE_MS;
+  const filtered = tweets
+    .filter(t => t.postedAt.getTime() > cutoff)
+    .slice(0, MAX_RECENT_TWEETS);
+  
+  state.recentBotTweets.set(agentId, filtered);
+  console.log(`[CommentBot] Tracking tweet ${tweetId} for agent. Total tracked: ${filtered.length}`);
+}
+
+/**
+ * Get recent bot tweets for comment detection (with their tracking state)
+ */
+function getRecentBotTweetsWithState(agentId: string): TrackedTweet[] {
+  const tweets = state.recentBotTweets.get(agentId) || [];
+  const cutoff = Date.now() - MAX_TWEET_AGE_MS;
+  return tweets.filter(t => t.postedAt.getTime() > cutoff);
+}
+
+/**
+ * Update the last processed reply ID for a tweet
+ */
+function updateLastReplyId(agentId: string, tweetId: string, lastReplyId: string): void {
+  const tweets = state.recentBotTweets.get(agentId) || [];
+  const tweet = tweets.find(t => t.tweetId === tweetId);
+  if (tweet) {
+    tweet.lastReplyId = lastReplyId;
+  }
+}
+
+/**
+ * Get recent bot tweets for comment detection (just IDs)
+ */
+function getRecentBotTweets(agentId: string): string[] {
+  return getRecentBotTweetsWithState(agentId).map(t => t.tweetId);
+}
 
 /**
  * Check if agent can send more replies this hour
@@ -434,6 +500,11 @@ async function executePost(agent: Agent): Promise<void> {
       state.lastPostTime.set(agent.id, new Date());
       state.postsToday.set(postsKey, (state.postsToday.get(postsKey) || 0) + 1);
       
+      // Track this tweet for comment detection (replies without @mention)
+      if (result.tweetId) {
+        trackBotTweet(agent.id, result.tweetId);
+      }
+      
       // Extract and log Bible verses from the tweet (if verse tracking enabled)
       if (result.tweetId && agent.verseTrackingEnabled !== false) {
         const { extractVerses } = await import("./verseExtractor");
@@ -666,14 +737,16 @@ Reply only with the tweet text, nothing else.`;
 
 /**
  * Process a single mention and post a reply
+ * @param mentionType - 'mention' for direct @mentions, 'reply' for comments on bot's tweets
  */
-async function processMention(agent: Agent, mention: TwitterMention): Promise<void> {
-  console.log(`[MentionBot] Processing mention ${mention.id} from @${mention.authorUsername}`);
+async function processMention(agent: Agent, mention: TwitterMention, mentionType: 'mention' | 'reply' = 'mention'): Promise<void> {
+  const typeLabel = mentionType === 'reply' ? 'CommentBot' : 'MentionBot';
+  console.log(`[${typeLabel}] Processing ${mentionType} ${mention.id} from @${mention.authorUsername}`);
   
   // Check if we've already processed this mention
   const existing = await storage.getProcessedMention(agent.id, mention.id);
   if (existing) {
-    console.log(`[MentionBot] Mention ${mention.id} already processed, skipping`);
+    console.log(`[${typeLabel}] ${mentionType} ${mention.id} already processed, skipping`);
     return;
   }
   
@@ -685,7 +758,7 @@ async function processMention(agent: Agent, mention: TwitterMention): Promise<vo
     authorUsername: mention.authorUsername,
     mentionText: mention.text,
     conversationId: mention.conversationId,
-    mentionType: "mention",
+    mentionType: mentionType,
     mentionedAt: mention.createdAt ? new Date(mention.createdAt) : new Date(),
   });
   
@@ -836,6 +909,80 @@ async function pollMentions(agent: Agent): Promise<void> {
 }
 
 /**
+ * Poll for comments on the bot's recent tweets (replies without @mention)
+ */
+async function pollComments(agent: Agent): Promise<void> {
+  const trackedTweets = getRecentBotTweetsWithState(agent.id);
+  
+  if (trackedTweets.length === 0) {
+    console.log(`[CommentBot] No recent tweets to check for ${agent.name}`);
+    return;
+  }
+  
+  console.log(`[CommentBot] Checking ${trackedTweets.length} recent tweets for comments for ${agent.name}`);
+  
+  const maxReplies = agent.maxRepliesPerHour || 10;
+  
+  // Check each recent tweet for replies (limit to 5 most recent to avoid rate limits)
+  const tweetsToCheck = trackedTweets.slice(0, 5);
+  
+  for (const trackedTweet of tweetsToCheck) {
+    // Check rate limit before processing more tweets
+    if (!canReplyThisHour(agent.id, maxReplies)) {
+      console.log(`[CommentBot] Rate limit reached (${maxReplies}/hour) for ${agent.name}, stopping comment check`);
+      break;
+    }
+    
+    try {
+      // Pass the lastReplyId to only get new replies since last check
+      const result = await fetchRepliesToTweet(agent, trackedTweet.tweetId, trackedTweet.lastReplyId, 10);
+      
+      if (!result.success) {
+        console.error(`[CommentBot] Failed to fetch replies for tweet ${trackedTweet.tweetId}:`, result.error);
+        continue;
+      }
+      
+      const replies = result.mentions || [];
+      if (replies.length > 0) {
+        console.log(`[CommentBot] Found ${replies.length} new comments on tweet ${trackedTweet.tweetId}`);
+      }
+      
+      // Track the newest reply ID we've seen for this tweet
+      let newestReplyId: string | undefined = trackedTweet.lastReplyId;
+      
+      // Process each reply as a mention (same flow)
+      for (const reply of replies) {
+        // Update newest reply ID (replies are typically ordered by time)
+        if (!newestReplyId || reply.id > newestReplyId) {
+          newestReplyId = reply.id;
+        }
+        
+        // Check rate limit for each reply
+        if (!canReplyThisHour(agent.id, maxReplies)) {
+          console.log(`[CommentBot] Rate limit reached while processing comments`);
+          break;
+        }
+        
+        try {
+          // Mark the mention type as 'reply' (comment on bot's post)
+          await processMention(agent, reply, 'reply');
+        } catch (error) {
+          console.error(`[CommentBot] Error processing comment ${reply.id}:`, error);
+        }
+      }
+      
+      // Update the lastReplyId for this tweet to prevent reprocessing
+      if (newestReplyId && newestReplyId !== trackedTweet.lastReplyId) {
+        updateLastReplyId(agent.id, trackedTweet.tweetId, newestReplyId);
+        console.log(`[CommentBot] Updated lastReplyId for tweet ${trackedTweet.tweetId} to ${newestReplyId}`);
+      }
+    } catch (error) {
+      console.error(`[CommentBot] Error checking replies for tweet ${trackedTweet.tweetId}:`, error);
+    }
+  }
+}
+
+/**
  * Start mention polling for an agent
  */
 export function startMentionPolling(agent: Agent): void {
@@ -860,17 +1007,26 @@ export function startMentionPolling(agent: Agent): void {
   
   console.log(`[MentionBot] Starting mention polling for ${agent.name} (interval: ${intervalMs / 1000}s)`);
   
-  // Do an initial poll
+  // Do an initial poll for mentions
   pollMentions(agent).catch(err => 
     console.error(`[MentionBot] Initial poll failed for ${agent.name}:`, err)
   );
   
-  // Schedule regular polling
+  // Also do an initial poll for comments on recent tweets
+  pollComments(agent).catch(err => 
+    console.error(`[CommentBot] Initial comment poll failed for ${agent.name}:`, err)
+  );
+  
+  // Schedule regular polling (both mentions and comments)
   const timer = setInterval(async () => {
     try {
       const currentAgent = await storage.getAgent(agent.id);
       if (currentAgent && currentAgent.status === "active" && currentAgent.replyEnabled) {
+        // Poll for direct @mentions
         await pollMentions(currentAgent);
+        
+        // Also poll for comments on bot's recent tweets (replies without @mention)
+        await pollComments(currentAgent);
       } else {
         stopMentionPolling(agent.id);
       }
