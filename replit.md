@@ -26,12 +26,23 @@ The frontend is built with React, TypeScript, Vite, Radix UI primitives, and sha
 
 ### System Design Choices
 **Database**: PostgreSQL via Neon serverless, using Drizzle ORM with a schema-first approach (`shared/schema.ts`).
-- **Agents Table**: Stores comprehensive agent configurations including metadata, Twitter API credentials (OAuth 1.0a and 2.0), character prompts, AI model configurations (11 providers), model parameters, posting/reply behaviors, content modules, and triggers. Most fields are optional to support draft mode.
+- **Agents Table**: Stores comprehensive agent configurations including metadata, Twitter API credentials (OAuth 1.0a and 2.0), character prompts, AI model configurations (11 providers), model parameters, posting/reply behaviors, content modules, triggers, and mention polling state (lastMentionId, lastMentionCheckAt). Most fields are optional to support draft mode.
 - **Knowledge Base Table**: Agent-specific knowledge entries with categories, tags, priority, active status, and refresh strategies, supporting a pending/approved/archived workflow. Includes Smart Priority Learning with `originalPriority` and `priorityCorrectedAt` fields to track user corrections and improve future auto-prioritization.
+- **Processed Mentions Table**: Tracks Twitter mentions received and responses sent, with unique constraint on (agentId, mentionTweetId) to prevent duplicate processing.
 - **Custom APIs Table**: External data source configurations.
 - **API Keys Table**: Encrypted credential storage.
 - **Agent Activity Table**: Monitoring data.
 - **Type Safety**: Zod schemas generated from Drizzle for runtime validation and TypeScript types for compile-time safety.
+
+### Mention Detection & Auto-Reply System
+The bot automatically detects and responds to Twitter mentions:
+- **Polling**: Every 3 minutes, fetches new mentions using Twitter API v2 `/users/:id/mentions` endpoint
+- **Duplicate Prevention**: Two-layer protection via database lookup + unique constraint on (agentId, mentionTweetId)
+- **Rate Limiting**: Respects `maxRepliesPerHour` configuration and `replyRate` percentage
+- **Reply Delays**: Configurable delays (replyDelayMin/replyDelayMax) before responding to appear more human-like
+- **AI Generation**: Uses conversation model (or falls back to post model) with agent personality and KB context
+- **Persistence**: lastMentionId stored in agents table to survive server restarts
+- **Monitoring**: API routes `/api/agents/:agentId/mentions` and `/api/agents/:agentId/mentions/stats` for viewing activity
 
 **Authentication & Security**: Currently, no authentication is implemented. API keys are stored in the database.
 

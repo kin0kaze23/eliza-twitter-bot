@@ -592,6 +592,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ============= MENTIONS ============= //
+
+  // Get recent mentions for an agent
+  app.get("/api/agents/:agentId/mentions", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 20;
+      const mentions = await storage.getRecentMentions(req.params.agentId, limit);
+      res.json(mentions);
+    } catch (error) {
+      console.error("Error fetching mentions:", error);
+      res.status(500).json({ error: "Failed to fetch mentions" });
+    }
+  });
+
+  // Get unresponded mentions for an agent
+  app.get("/api/agents/:agentId/mentions/unresponded", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 10;
+      const mentions = await storage.getUnrespondedMentions(req.params.agentId, limit);
+      res.json(mentions);
+    } catch (error) {
+      console.error("Error fetching unresponded mentions:", error);
+      res.status(500).json({ error: "Failed to fetch unresponded mentions" });
+    }
+  });
+
+  // Get mention statistics for an agent
+  app.get("/api/agents/:agentId/mentions/stats", async (req, res) => {
+    try {
+      const mentions = await storage.getRecentMentions(req.params.agentId, 100);
+      const now = new Date();
+      const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+      const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      
+      const stats = {
+        total: mentions.length,
+        responded: mentions.filter(m => m.responded).length,
+        unresponded: mentions.filter(m => !m.responded).length,
+        failed: mentions.filter(m => !m.responded && m.errorMessage).length,
+        repliesLastHour: mentions.filter(m => 
+          m.responded && m.processedAt && new Date(m.processedAt) > hourAgo
+        ).length,
+        repliesLast24h: mentions.filter(m => 
+          m.responded && m.processedAt && new Date(m.processedAt) > dayAgo
+        ).length,
+        avgRetryCount: mentions.filter(m => m.retryCount > 0).length > 0
+          ? mentions.reduce((sum, m) => sum + m.retryCount, 0) / mentions.filter(m => m.retryCount > 0).length
+          : 0,
+      };
+      
+      res.json(stats);
+    } catch (error) {
+      console.error("Error fetching mention stats:", error);
+      res.status(500).json({ error: "Failed to fetch mention stats" });
+    }
+  });
+
   // ============= CUSTOM APIs ============= //
 
   // Get all custom APIs

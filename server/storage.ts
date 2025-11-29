@@ -19,6 +19,8 @@ import {
   type InsertBibleVerseUsage,
   type ContentTypeUsage,
   type InsertContentTypeUsage,
+  type ProcessedMention,
+  type InsertProcessedMention,
   users,
   agents,
   knowledgeBase,
@@ -28,8 +30,9 @@ import {
   activityLogs,
   bibleVerseUsages,
   contentTypeUsages,
+  processedMentions,
 } from "@shared/schema";
-import { eq, desc, and, sql, inArray } from "drizzle-orm";
+import { eq, desc, and, sql, inArray, isNull } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -96,6 +99,14 @@ export interface IStorage {
   getRecentContentTypeUsages(agentId: string, limit?: number): Promise<ContentTypeUsage[]>;
   logContentTypeUsage(agentId: string, contentType: string, tweetId?: string): Promise<ContentTypeUsage>;
   clearContentTypeHistory(agentId: string): Promise<number>;
+  
+  // Processed Mentions Tracking
+  getProcessedMention(agentId: string, mentionTweetId: string): Promise<ProcessedMention | undefined>;
+  getUnrespondedMentions(agentId: string, limit?: number): Promise<ProcessedMention[]>;
+  createProcessedMention(mention: InsertProcessedMention): Promise<ProcessedMention>;
+  markMentionResponded(id: string, responseTweetId: string, responseText: string): Promise<ProcessedMention | undefined>;
+  markMentionFailed(id: string, errorMessage: string): Promise<ProcessedMention | undefined>;
+  getRecentMentions(agentId: string, limit?: number): Promise<ProcessedMention[]>;
 }
 
 export class DbStorage implements IStorage {
@@ -696,6 +707,74 @@ export class DbStorage implements IStorage {
       unusedTypes,
       allUsages: usages,
     };
+  }
+
+  // Processed Mentions Tracking
+  async getProcessedMention(agentId: string, mentionTweetId: string): Promise<ProcessedMention | undefined> {
+    const result = await db
+      .select()
+      .from(processedMentions)
+      .where(and(
+        eq(processedMentions.agentId, agentId),
+        eq(processedMentions.mentionTweetId, mentionTweetId)
+      ));
+    return result[0];
+  }
+
+  async getUnrespondedMentions(agentId: string, limit: number = 10): Promise<ProcessedMention[]> {
+    return await db
+      .select()
+      .from(processedMentions)
+      .where(and(
+        eq(processedMentions.agentId, agentId),
+        eq(processedMentions.responded, false)
+      ))
+      .orderBy(processedMentions.mentionedAt)
+      .limit(limit);
+  }
+
+  async createProcessedMention(mention: InsertProcessedMention): Promise<ProcessedMention> {
+    const result = await db
+      .insert(processedMentions)
+      .values(mention)
+      .returning();
+    return result[0];
+  }
+
+  async markMentionResponded(id: string, responseTweetId: string, responseText: string): Promise<ProcessedMention | undefined> {
+    const result = await db
+      .update(processedMentions)
+      .set({
+        responded: true,
+        responseTweetId,
+        responseText,
+        processedAt: new Date(),
+      })
+      .where(eq(processedMentions.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async markMentionFailed(id: string, errorMessage: string): Promise<ProcessedMention | undefined> {
+    const result = await db
+      .update(processedMentions)
+      .set({
+        errorMessage,
+        retryCount: sql`${processedMentions.retryCount} + 1`,
+        processedAt: new Date(),
+      })
+      .where(eq(processedMentions.id, id))
+      .returning();
+    return result[0];
+  }
+
+  async getRecentMentions(agentId: string, limit: number = 20): Promise<ProcessedMention[]> {
+    return await db
+      .select()
+      .from(processedMentions)
+      .where(eq(processedMentions.agentId, agentId))
+      .orderBy(desc(processedMentions.mentionedAt))
+      .limit(limit);
   }
 }
 

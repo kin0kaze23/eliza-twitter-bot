@@ -1,24 +1,30 @@
 import { storage, db } from "./storage";
 import { activityLogs } from "@shared/schema";
-import { postTweet, validateTwitterCredentials } from "./twitter";
+import { postTweet, validateTwitterCredentials, replyToTweet, fetchMentions, type TwitterMention } from "./twitter";
 import { assemblePrompt, buildMessagesArray, selectNextContentType, formatContentType, type ContentType } from "./promptAssembly";
-import { sendPostCreatedWebhook, sendPostFailedWebhook } from "./webhook";
+import { sendPostCreatedWebhook, sendPostFailedWebhook, sendReplyCreatedWebhook, sendReplyFailedWebhook } from "./webhook";
 import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
 import type { Agent } from "@shared/schema";
 
 interface SchedulerState {
   isRunning: boolean;
   activeAgents: Map<string, NodeJS.Timeout>;
+  mentionPollers: Map<string, NodeJS.Timeout>; // Separate timers for mention polling
   lastPostTime: Map<string, Date>;
   postsToday: Map<string, number>;
+  lastMentionCheck: Map<string, Date>;
+  lastMentionId: Map<string, string>; // Track last processed mention ID for pagination
   lastCleanupDate: string;
 }
 
 const state: SchedulerState = {
   isRunning: false,
   activeAgents: new Map(),
+  mentionPollers: new Map(),
   lastPostTime: new Map(),
   postsToday: new Map(),
+  lastMentionCheck: new Map(),
+  lastMentionId: new Map(),
   lastCleanupDate: new Date().toISOString().split("T")[0],
 };
 
@@ -504,11 +510,15 @@ function scheduleAgent(agent: Agent): void {
 export function startAgent(agent: Agent): void {
   if (!agent.postingEnabled) {
     console.log(`[Scheduler] Agent ${agent.name} has posting disabled`);
-    return;
+  } else {
+    console.log(`[Scheduler] Starting agent: ${agent.name}`);
+    scheduleAgent(agent);
   }
   
-  console.log(`[Scheduler] Starting agent: ${agent.name}`);
-  scheduleAgent(agent);
+  // Also start mention polling if replies are enabled
+  if (agent.replyEnabled) {
+    startMentionPolling(agent);
+  }
 }
 
 export function stopAgent(agentId: string): void {
@@ -517,6 +527,320 @@ export function stopAgent(agentId: string): void {
     clearInterval(timer);
     state.activeAgents.delete(agentId);
     console.log(`[Scheduler] Stopped agent: ${agentId}`);
+  }
+  // Also stop mention polling
+  stopMentionPolling(agentId);
+}
+
+// ============= MENTION POLLING SYSTEM ============= //
+
+/**
+ * Generate a reply to a mention using the AI model
+ */
+async function generateReply(agent: Agent, mention: TwitterMention): Promise<string> {
+  console.log(`[MentionBot] Generating reply for mention from @${mention.authorUsername}: "${mention.text.substring(0, 50)}..."`);
+  
+  // Get knowledge base entries for context
+  const knowledgeEntries = await storage.getActiveKnowledgeBase(agent.id);
+  
+  // Assemble prompt for conversation/reply mode
+  const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
+    includeKnowledge: true,
+    includeExamples: true,
+    includePersonality: true,
+    maxKbEntries: 10,
+    maxKbTokens: 1000,
+  });
+  
+  // Build conversation-style prompt for the reply
+  const replyPrompt = `Someone (@${mention.authorUsername}) mentioned you on Twitter with this message:
+
+"${mention.text}"
+
+Generate a thoughtful, engaging reply that:
+1. Directly addresses their message
+2. Stays true to your character and voice
+3. Is under 280 characters
+4. Does NOT include hashtags
+5. Is warm and conversational
+
+Reply only with the tweet text, nothing else.`;
+
+  const messages = buildMessagesArray(
+    assembledPrompt,
+    [],
+    replyPrompt
+  );
+  
+  // Use conversation model if available, otherwise use post model
+  const modelProvider = agent.conversationModelProvider || agent.postModelProvider || agent.modelProvider || "openai";
+  const modelName = agent.conversationModelName || agent.postModelName || agent.modelName || "gpt-4-turbo-preview";
+  const temperature = agent.conversationTemperature ?? agent.postTemperature ?? agent.temperature ?? 0.7;
+  const maxTokens = 300;
+  
+  console.log(`[MentionBot] Using model: ${modelProvider}/${modelName} (temp: ${temperature})`);
+  
+  let reply = "";
+  
+  if (modelProvider === "openai") {
+    const OpenAI = (await import("openai")).default;
+    const openai = new OpenAI({ 
+      apiKey: process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.OPENAI_API_KEY ? undefined : process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+    });
+    
+    const params = buildOpenAIParams(modelName, {
+      model: modelName,
+      messages: messages as any,
+      temperature,
+      max_tokens: maxTokens,
+    });
+    
+    const response = await safeOpenAICall(() => openai.chat.completions.create(params));
+    reply = response.choices[0]?.message?.content || "";
+  } else if (modelProvider === "anthropic") {
+    const Anthropic = (await import("@anthropic-ai/sdk")).default;
+    const anthropic = new Anthropic();
+    
+    const systemMessage = messages.find((m: any) => m.role === "system")?.content || "";
+    const userMessages = messages.filter((m: any) => m.role !== "system");
+    
+    const response = await anthropic.messages.create({
+      model: modelName,
+      max_tokens: maxTokens,
+      system: systemMessage,
+      messages: userMessages as any,
+    });
+    
+    reply = (response.content[0] as any)?.text || "";
+  }
+  
+  // Clean up the reply
+  reply = cleanSpecialCharacters(reply.trim());
+  
+  // Ensure it's under 280 characters
+  if (reply.length > 280) {
+    reply = reply.substring(0, 277) + "...";
+  }
+  
+  console.log(`[MentionBot] Generated reply (${reply.length} chars): "${reply.substring(0, 50)}..."`);
+  
+  return reply;
+}
+
+/**
+ * Process a single mention and post a reply
+ */
+async function processMention(agent: Agent, mention: TwitterMention): Promise<void> {
+  console.log(`[MentionBot] Processing mention ${mention.id} from @${mention.authorUsername}`);
+  
+  // Check if we've already processed this mention
+  const existing = await storage.getProcessedMention(agent.id, mention.id);
+  if (existing) {
+    console.log(`[MentionBot] Mention ${mention.id} already processed, skipping`);
+    return;
+  }
+  
+  // Create a record for this mention
+  const mentionRecord = await storage.createProcessedMention({
+    agentId: agent.id,
+    mentionTweetId: mention.id,
+    authorId: mention.authorId,
+    authorUsername: mention.authorUsername,
+    mentionText: mention.text,
+    conversationId: mention.conversationId,
+    mentionType: "mention",
+    mentionedAt: mention.createdAt ? new Date(mention.createdAt) : new Date(),
+  });
+  
+  try {
+    // Check reply rate limit
+    const maxRepliesPerHour = agent.maxRepliesPerHour || 10;
+    const recentMentions = await storage.getRecentMentions(agent.id, maxRepliesPerHour);
+    const repliesInLastHour = recentMentions.filter(m => {
+      if (!m.processedAt) return false;
+      const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      return m.responded && new Date(m.processedAt) > hourAgo;
+    }).length;
+    
+    if (repliesInLastHour >= maxRepliesPerHour) {
+      console.log(`[MentionBot] Rate limit reached (${repliesInLastHour}/${maxRepliesPerHour} replies/hour), skipping`);
+      await storage.markMentionFailed(mentionRecord.id, "Rate limit reached");
+      return;
+    }
+    
+    // Check if reply is enabled
+    if (!agent.replyEnabled) {
+      console.log(`[MentionBot] Replies disabled for agent, skipping`);
+      await storage.markMentionFailed(mentionRecord.id, "Replies disabled");
+      return;
+    }
+    
+    // Check reply rate (percentage of mentions to respond to)
+    const replyRate = agent.replyRate || 100;
+    if (Math.random() * 100 > replyRate) {
+      console.log(`[MentionBot] Skipping mention due to reply rate (${replyRate}%)`);
+      await storage.markMentionFailed(mentionRecord.id, `Skipped by reply rate (${replyRate}%)`);
+      return;
+    }
+    
+    // Add delay before replying (if configured)
+    const minDelay = agent.replyDelayMin || 30; // Default 30 seconds
+    const maxDelay = agent.replyDelayMax || 120; // Default 2 minutes
+    const delayMs = (Math.random() * (maxDelay - minDelay) + minDelay) * 1000;
+    
+    console.log(`[MentionBot] Waiting ${Math.round(delayMs / 1000)}s before replying...`);
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+    
+    // Generate the reply
+    const replyText = await generateReply(agent, mention);
+    
+    // Post the reply
+    const result = await replyToTweet(agent, replyText, mention.id);
+    
+    if (result.success && result.tweetId) {
+      console.log(`[MentionBot] Successfully replied to mention ${mention.id} with tweet ${result.tweetId}`);
+      await storage.markMentionResponded(mentionRecord.id, result.tweetId, replyText);
+      
+      // Send webhook
+      await sendReplyCreatedWebhook(agent, replyText, result.tweetId, mention.id);
+      
+      // Log activity
+      await logActivity(agent, {
+        action: "reply_sent",
+        status: "success",
+        tweetId: result.tweetId,
+        inReplyToTweetId: mention.id,
+        content: replyText,
+      });
+    } else {
+      console.error(`[MentionBot] Failed to reply to mention ${mention.id}:`, result.error);
+      await storage.markMentionFailed(mentionRecord.id, result.error || "Unknown error");
+      
+      // Send webhook
+      await sendReplyFailedWebhook(agent, result.error || "Unknown error", mention.id, replyText);
+      
+      // Log activity
+      await logActivity(agent, {
+        action: "reply_failed",
+        status: "failed",
+        inReplyToTweetId: mention.id,
+        errorMessage: result.error,
+      });
+    }
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : "Unknown error";
+    console.error(`[MentionBot] Error processing mention ${mention.id}:`, error);
+    await storage.markMentionFailed(mentionRecord.id, errorMsg);
+  }
+}
+
+/**
+ * Poll for new mentions and process them
+ */
+async function pollMentions(agent: Agent): Promise<void> {
+  console.log(`[MentionBot] Polling mentions for agent: ${agent.name}`);
+  
+  // Get the last processed mention ID - prefer in-memory, fallback to DB
+  const sinceId = state.lastMentionId.get(agent.id) || agent.lastMentionId || undefined;
+  
+  try {
+    // Fetch new mentions
+    const result = await fetchMentions(agent, sinceId, 10);
+    
+    if (!result.success) {
+      console.error(`[MentionBot] Failed to fetch mentions for ${agent.name}:`, result.error);
+      return;
+    }
+    
+    const mentions = result.mentions || [];
+    console.log(`[MentionBot] Found ${mentions.length} new mentions for ${agent.name}`);
+    
+    // Update the last mention ID for pagination - both in-memory and DB
+    if (result.newestId) {
+      state.lastMentionId.set(agent.id, result.newestId);
+      // Persist to database for restart recovery
+      try {
+        await storage.updateAgent(agent.id, {
+          lastMentionId: result.newestId,
+          lastMentionCheckAt: new Date(),
+        });
+      } catch (e) {
+        console.error(`[MentionBot] Failed to persist lastMentionId:`, e);
+      }
+    }
+    
+    // Process each mention
+    for (const mention of mentions) {
+      try {
+        await processMention(agent, mention);
+      } catch (error) {
+        console.error(`[MentionBot] Error processing mention ${mention.id}:`, error);
+      }
+    }
+    
+    state.lastMentionCheck.set(agent.id, new Date());
+  } catch (error) {
+    console.error(`[MentionBot] Error polling mentions for ${agent.name}:`, error);
+  }
+}
+
+/**
+ * Start mention polling for an agent
+ */
+export function startMentionPolling(agent: Agent): void {
+  // Check if replies are enabled
+  if (!agent.replyEnabled) {
+    console.log(`[MentionBot] Replies disabled for agent ${agent.name}, not starting mention polling`);
+    return;
+  }
+  
+  // Check Twitter credentials
+  const validation = validateTwitterCredentials(agent);
+  if (!validation.valid) {
+    console.log(`[MentionBot] Twitter credentials not valid for ${agent.name}, not starting mention polling`);
+    return;
+  }
+  
+  // Stop existing poller if running
+  stopMentionPolling(agent.id);
+  
+  // Poll interval: check every 2-5 minutes (configurable)
+  const intervalMs = 3 * 60 * 1000; // 3 minutes default
+  
+  console.log(`[MentionBot] Starting mention polling for ${agent.name} (interval: ${intervalMs / 1000}s)`);
+  
+  // Do an initial poll
+  pollMentions(agent).catch(err => 
+    console.error(`[MentionBot] Initial poll failed for ${agent.name}:`, err)
+  );
+  
+  // Schedule regular polling
+  const timer = setInterval(async () => {
+    try {
+      const currentAgent = await storage.getAgent(agent.id);
+      if (currentAgent && currentAgent.status === "active" && currentAgent.replyEnabled) {
+        await pollMentions(currentAgent);
+      } else {
+        stopMentionPolling(agent.id);
+      }
+    } catch (error) {
+      console.error(`[MentionBot] Error in scheduled mention poll for ${agent.id}:`, error);
+    }
+  }, intervalMs);
+  
+  state.mentionPollers.set(agent.id, timer);
+}
+
+/**
+ * Stop mention polling for an agent
+ */
+export function stopMentionPolling(agentId: string): void {
+  const timer = state.mentionPollers.get(agentId);
+  if (timer) {
+    clearInterval(timer);
+    state.mentionPollers.delete(agentId);
+    console.log(`[MentionBot] Stopped mention polling for agent: ${agentId}`);
   }
 }
 

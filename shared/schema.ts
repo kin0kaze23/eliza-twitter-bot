@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, jsonb, boolean, integer, timestamp, real } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, jsonb, boolean, integer, timestamp, real, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -154,6 +154,10 @@ export const agents = pgTable("agents", {
   contentTypeTrackingEnabled: boolean("content_type_tracking_enabled").default(true),
   contentTypeReusePolicy: text("content_type_reuse_policy").default("rotate_all"), // allow, avoid_last, rotate_all
   contentTypeWindow: integer("content_type_window").default(7), // number of posts to look back
+  
+  // Mention Polling Tracking - persist state across restarts
+  lastMentionId: text("last_mention_id"), // Last processed mention tweet ID for pagination
+  lastMentionCheckAt: timestamp("last_mention_check_at"), // When we last checked for mentions
   
   // Metadata
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -477,3 +481,51 @@ export interface MessageExample {
 
 // Type for message examples array (supports both legacy string[] and new object[])
 export type MessageExamples = (string | MessageExample)[];
+
+// Processed Mentions Tracking - track which Twitter mentions have been responded to
+export const processedMentions = pgTable("processed_mentions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  
+  // Mention info
+  mentionTweetId: text("mention_tweet_id").notNull(), // The tweet ID of the mention
+  authorId: text("author_id").notNull(), // Twitter user ID who mentioned the bot
+  authorUsername: text("author_username"), // Twitter username
+  mentionText: text("mention_text").notNull(), // The original mention text
+  conversationId: text("conversation_id"), // For threading
+  
+  // Response tracking
+  responded: boolean("responded").default(false).notNull(),
+  responseTweetId: text("response_tweet_id"), // The tweet ID of our reply
+  responseText: text("response_text"), // What we replied with
+  
+  // Error tracking
+  errorMessage: text("error_message"),
+  retryCount: integer("retry_count").default(0).notNull(),
+  
+  // Type: 'mention' (direct @mention) or 'reply' (comment on our tweet)
+  mentionType: text("mention_type").default("mention").notNull(),
+  
+  // Timestamps
+  mentionedAt: timestamp("mentioned_at").defaultNow().notNull(), // When the mention was created
+  processedAt: timestamp("processed_at"), // When we processed it
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  // Unique constraint to prevent duplicate mention processing
+  uniqueMention: unique("unique_agent_mention").on(table.agentId, table.mentionTweetId),
+}));
+
+export const insertProcessedMentionSchema = createInsertSchema(processedMentions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertProcessedMention = z.infer<typeof insertProcessedMentionSchema>;
+export type ProcessedMention = typeof processedMentions.$inferSelect;
+
+// Agent mention tracking metadata (stored on agent)
+export interface MentionTrackingState {
+  lastMentionId?: string; // Last processed mention ID for pagination
+  lastCheckTime?: string; // ISO timestamp of last check
+  recentTweetIds?: string[]; // IDs of recent bot tweets to check for replies
+}
