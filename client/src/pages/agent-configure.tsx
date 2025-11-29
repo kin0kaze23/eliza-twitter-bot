@@ -30,7 +30,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Link, useParams } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Agent, KnowledgeBase } from "@shared/schema";
+import type { Agent, KnowledgeBase, MessageExample, MessageExamples } from "@shared/schema";
+import { CONTENT_TYPES } from "@shared/schema";
 import { Skeleton } from "@/components/ui/skeleton";
 
 type KBEntry = {
@@ -228,7 +229,17 @@ export default function AgentConfigure() {
   });
   
   // Character & Prompts (Combined)
-  const [character, setCharacter] = useState({
+  const [character, setCharacter] = useState<{
+    name: string;
+    username: string;
+    bio: string;
+    systemPrompt: string;
+    personalityPrompt: string;
+    messageExamples: MessageExamples;
+    postStyle: string;
+    topics: string;
+    adjectives: string;
+  }>({
     name: "CryptoAnalyst",
     username: "@cryptoanalyst_ai",
     bio: "Cryptocurrency analyst powered by AI. Providing data-driven insights on Bitcoin, Ethereum, and DeFi. Not financial advice. DYOR.",
@@ -242,6 +253,19 @@ export default function AgentConfigure() {
     topics: "Cryptocurrency, DeFi, NFTs, Blockchain Technology, Market Analysis, Trading",
     adjectives: "analytical, insightful, timely, professional, innovative",
   });
+  
+  // Helper functions for message examples (support both string and object formats)
+  const getExampleContent = (example: string | MessageExample): string => {
+    return typeof example === "string" ? example : example.content;
+  };
+  
+  const getExampleContentType = (example: string | MessageExample): string | undefined => {
+    return typeof example === "object" ? example.contentType : undefined;
+  };
+  
+  const formatContentType = (type: string): string => {
+    return type.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+  };
   
   // Custom Prompts (Additional specialized instructions)
   const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>([
@@ -1487,9 +1511,37 @@ export default function AgentConfigure() {
                 </AlertDescription>
               </Alert>
               {character.messageExamples.map((example, idx) => (
-                <div key={idx} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label>Example {idx + 1}</Label>
+                <div key={idx} className="space-y-2 p-3 border rounded-lg">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-1">
+                      <Label className="whitespace-nowrap">Example {idx + 1}</Label>
+                      <Select
+                        value={getExampleContentType(example) || ""}
+                        onValueChange={(value) => {
+                          const newExamples = [...character.messageExamples];
+                          const content = getExampleContent(example);
+                          newExamples[idx] = value ? { content, contentType: value as any } : content;
+                          setCharacter({ ...character, messageExamples: newExamples });
+                        }}
+                      >
+                        <SelectTrigger className="w-[180px]" data-testid={`select-content-type-${idx}`}>
+                          <SelectValue placeholder="Content Type (optional)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">No Type</SelectItem>
+                          {CONTENT_TYPES.map((type) => (
+                            <SelectItem key={type} value={type}>
+                              {formatContentType(type)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {getExampleContentType(example) && (
+                        <Badge variant="outline" className="text-xs">
+                          {formatContentType(getExampleContentType(example)!)}
+                        </Badge>
+                      )}
+                    </div>
                     {idx > 0 && (
                       <Button
                         variant="ghost"
@@ -1504,27 +1556,35 @@ export default function AgentConfigure() {
                     )}
                   </div>
                   <Textarea
-                    value={example}
+                    value={getExampleContent(example)}
                     onChange={(e) => {
                       const newExamples = [...character.messageExamples];
-                      newExamples[idx] = e.target.value;
+                      const contentType = getExampleContentType(example);
+                      newExamples[idx] = contentType 
+                        ? { content: e.target.value, contentType: contentType as any }
+                        : e.target.value;
                       setCharacter({ ...character, messageExamples: newExamples });
                     }}
                     className="min-h-[120px] font-mono text-sm"
+                    data-testid={`textarea-example-${idx}`}
                   />
-                  <p className="text-xs text-muted-foreground">{example.length} characters</p>
+                  <p className="text-xs text-muted-foreground">{getExampleContent(example).length} characters</p>
                 </div>
               ))}
               <Button
                 variant="outline"
                 onClick={() => setCharacter({ ...character, messageExamples: [...character.messageExamples, ""] })}
+                data-testid="button-add-example"
               >
                 <Plus className="mr-2 h-4 w-4" />
                 Add Example
               </Button>
-              <p className="text-xs text-muted-foreground">
-                Tip: Include 3-5 examples that demonstrate different types of content (crypto news, tech news, cultural events, etc.) while maintaining consistent structure.
-              </p>
+              <Alert className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/50">
+                <Info className="h-4 w-4 text-blue-600" />
+                <AlertDescription className="text-sm">
+                  <strong>Content Type Tagging:</strong> Optionally tag each example with its content type. This helps the AI understand when to use each format without needing [LABELS] in your examples. The AI will rotate through content types automatically.
+                </AlertDescription>
+              </Alert>
             </CardContent>
           </Card>
 

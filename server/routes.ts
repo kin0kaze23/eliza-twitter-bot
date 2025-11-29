@@ -12,6 +12,36 @@ import { assemblePrompt, buildMessagesArray } from "./promptAssembly";
 import { sendPostCreatedWebhook, sendPostFailedWebhook } from "./webhook";
 import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
 
+/**
+ * Strip content type labels from generated content (e.g., [EVENT-BASED], [ENCOURAGEMENT])
+ * Labels are used for detection but should not appear in final output
+ * Handles labels anywhere in the content (start, middle, multi-line threads)
+ */
+function stripContentTypeLabels(content: string): string {
+  return content
+    .replace(/\s*\[(EVENT[-_]BASED|VERSE[-_ ]REFLECTION|DEEP[-_ ]QUESTION|WISDOM[-_ ]BITE|CULTURAL[-_ ]INSIGHT|ENCOURAGEMENT|ETERNITY[-_ ]ANCHOR)\]\s*/gi, " ")
+    .replace(/\s+/g, " ") // Normalize multiple spaces to single space
+    .trim();
+}
+
+/**
+ * Detect content type from generated content based on labels and patterns
+ */
+function detectContentType(content: string): string | null {
+  const upperContent = content.toUpperCase();
+  
+  // Check for explicit labels (most reliable)
+  if (upperContent.includes("[EVENT-BASED]") || upperContent.includes("[EVENT_BASED]")) return "EVENT_BASED";
+  if (upperContent.includes("[VERSE REFLECTION]") || upperContent.includes("[VERSE_REFLECTION]")) return "VERSE_REFLECTION";
+  if (upperContent.includes("[DEEP QUESTION]") || upperContent.includes("[DEEP_QUESTION]")) return "DEEP_QUESTION";
+  if (upperContent.includes("[WISDOM BITE]") || upperContent.includes("[WISDOM_BITE]")) return "WISDOM_BITE";
+  if (upperContent.includes("[CULTURAL INSIGHT]") || upperContent.includes("[CULTURAL_INSIGHT]")) return "CULTURAL_INSIGHT";
+  if (upperContent.includes("[ENCOURAGEMENT]")) return "ENCOURAGEMENT";
+  if (upperContent.includes("[ETERNITY ANCHOR]") || upperContent.includes("[ETERNITY_ANCHOR]")) return "ETERNITY_ANCHOR";
+  
+  return null;
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // ============= AGENTS ============= //
   
@@ -1703,11 +1733,13 @@ Respond in JSON format:
         recentVerses,
       });
       
-      // Dynamic prompt that allows content type selection and flexible KB usage
-      const defaultPrompt = `Generate a post by following these steps:
-1. RANDOMLY select ONE content type from those defined in your system prompt (e.g., Event-based, Verse-based, Wisdom bite, etc.)
-2. Follow the exact format shown in the message example for that content type
-3. Use Knowledge Base content ONLY if relevant to the selected content type (Event-based posts should use KB; Encouragement/Wisdom posts may not need KB)`;
+      // Dynamic prompt that respects content type rotation rules from system prompt
+      const defaultPrompt = `Generate a single post following these rules:
+1. SELECT a content type based on the Content Type Selection Guidelines in your system prompt (prioritize unused types if rotation is enabled)
+2. MATCH the exact format and structure shown in the message examples for that content type
+3. USE Knowledge Base content for Event-based or Cultural posts; for other types (Verse Reflection, Wisdom Bite, Encouragement, Deep Question, Eternity Anchor), write from Scripture and wisdom without requiring KB
+4. AVOID recently used Bible verses as specified in the verse guidelines
+5. Keep the post under 280 characters unless creating a thread`;
       const tweetPrompt = prompt || defaultPrompt;
       
       // Build messages for AI model
@@ -1767,6 +1799,12 @@ Respond in JSON format:
         return res.status(400).json({ error: `Unsupported model provider: ${agent.modelProvider}` });
       }
 
+      // Detect content type BEFORE stripping labels (for accurate tracking)
+      const detectedContentType = detectContentType(tweet);
+      
+      // Strip content type labels from generated content (labels are for detection, not output)
+      tweet = stripContentTypeLabels(tweet);
+
       // Get active KB entries for logging using the IDs from prompt assembly
       const kbUsedIds = assembledPrompt.metadata.kbEntriesUsedIds || [];
       const kbSources = knowledgeEntries
@@ -1809,6 +1847,7 @@ Respond in JSON format:
       res.json({
         success: true,
         tweet,
+        contentType: detectedContentType,
         mode: prompt ? "prompted" : "auto-generated",
         kbEntriesCount: assembledPrompt.metadata.kbEntriesUsed,
         kbSources,
@@ -1918,10 +1957,12 @@ Respond in JSON format:
         recentVerses,
       });
       
-      const tweetPrompt = `Generate a post by following these steps:
-1. RANDOMLY select ONE content type from those defined in your system prompt (e.g., Event-based, Verse-based, Wisdom bite, etc.)
-2. Follow the exact format shown in the message example for that content type
-3. Use Knowledge Base content ONLY if relevant to the selected content type (Event-based posts should use KB; Encouragement/Wisdom posts may not need KB)`;
+      const tweetPrompt = `Generate a single post following these rules:
+1. SELECT a content type based on the Content Type Selection Guidelines in your system prompt (prioritize unused types if rotation is enabled)
+2. MATCH the exact format and structure shown in the message examples for that content type
+3. USE Knowledge Base content for Event-based or Cultural posts; for other types (Verse Reflection, Wisdom Bite, Encouragement, Deep Question, Eternity Anchor), write from Scripture and wisdom without requiring KB
+4. AVOID recently used Bible verses as specified in the verse guidelines
+5. Keep the post under 280 characters unless creating a thread`;
       const messages = buildMessagesArray(assembledPrompt, [], tweetPrompt);
       
       const postModelProvider = agent.postModelProvider || agent.modelProvider || "openai";
@@ -1975,7 +2016,13 @@ Respond in JSON format:
         return res.status(500).json({ error: "Failed to generate tweet content" });
       }
       
-      tweetContent = tweetContent.trim();
+      // Detect content type BEFORE stripping labels (for accurate tracking)
+      const detectedContentType = (agent as any).contentTypeTrackingEnabled !== false 
+        ? detectContentType(tweetContent) 
+        : null;
+      
+      // Strip content type labels from generated content (labels are for detection, not output)
+      tweetContent = stripContentTypeLabels(tweetContent);
       
       // Post to Twitter
       const result = await postTweet(agent, tweetContent);
@@ -2001,6 +2048,11 @@ Respond in JSON format:
             result.tweetId
           );
         }
+      }
+      
+      // Log detected content type
+      if (result.success && result.tweetId && detectedContentType) {
+        await storage.logContentTypeUsage(id, detectedContentType, result.tweetId);
       }
       
       // Log activity
@@ -2029,6 +2081,7 @@ Respond in JSON format:
         res.json({
           success: true,
           tweet: tweetContent,
+          contentType: detectedContentType,
           tweetId: result.tweetId,
           tweetUrl: `https://twitter.com/i/status/${result.tweetId}`,
           kbEntriesUsed: kbUsedIds.length,

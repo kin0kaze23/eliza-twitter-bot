@@ -46,7 +46,7 @@ export const agents = pgTable("agents", {
   postStyle: text("post_style"),
   topics: text("topics"),
   adjectives: text("adjectives"),
-  messageExamples: jsonb("message_examples").$type<string[]>().default(sql`'[]'`),
+  messageExamples: jsonb("message_examples").$type<MessageExamples>().default(sql`'[]'`),
   
   // Custom prompts (layered on top of ElizaOS)
   customPrompts: jsonb("custom_prompts").$type<Record<string, string>>().default(sql`'{}'`),
@@ -468,3 +468,12 @@ export const CONTENT_TYPES = [
 ] as const;
 
 export type ContentType = typeof CONTENT_TYPES[number];
+
+// Message example with optional content type metadata
+export interface MessageExample {
+  content: string;
+  contentType?: ContentType;
+}
+
+// Type for message examples array (supports both legacy string[] and new object[])
+export type MessageExamples = (string | MessageExample)[];

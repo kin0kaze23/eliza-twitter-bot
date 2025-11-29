@@ -110,6 +110,20 @@ function detectContentType(content: string): string | null {
   return null;
 }
 
+/**
+ * Strip content type labels from generated content (e.g., [EVENT-BASED], [ENCOURAGEMENT])
+ * Labels are used for detection but should not appear in final posted content
+ * Handles labels anywhere in the content (start, middle, multi-line threads)
+ */
+function stripContentTypeLabels(content: string): string {
+  // Remove bracketed labels anywhere in the content with optional surrounding whitespace
+  // Global flag ensures all occurrences are removed (multi-part threads, etc.)
+  return content
+    .replace(/\s*\[(EVENT[-_]BASED|VERSE[-_ ]REFLECTION|DEEP[-_ ]QUESTION|WISDOM[-_ ]BITE|CULTURAL[-_ ]INSIGHT|ENCOURAGEMENT|ETERNITY[-_ ]ANCHOR)\]\s*/gi, " ")
+    .replace(/\s+/g, " ") // Normalize multiple spaces to single space
+    .trim();
+}
+
 function parseTimeToMinutes(timeStr: string): number {
   const match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
   if (!match) return 0;
@@ -322,9 +336,17 @@ async function executePost(agent: Agent): Promise<void> {
       return;
     }
     
+    // Detect content type BEFORE stripping labels (for accurate detection)
+    const detectedContentType = (agent as any).contentTypeTrackingEnabled !== false 
+      ? detectContentType(generated.content) 
+      : null;
+    
+    // Strip content type labels from content before posting
+    const cleanedContent = stripContentTypeLabels(generated.content);
+    
     console.log(`[Scheduler] Posting to Twitter for agent: ${agent.name}`);
     
-    const result = await postTweet(agent, generated.content);
+    const result = await postTweet(agent, cleanedContent);
     
     const today = new Date().toISOString().split("T")[0];
     const postsKey = `${agent.id}_${today}`;
@@ -336,7 +358,7 @@ async function executePost(agent: Agent): Promise<void> {
       // Extract and log Bible verses from the tweet (if verse tracking enabled)
       if (result.tweetId && agent.verseTrackingEnabled !== false) {
         const { extractVerses } = await import("./verseExtractor");
-        const detectedVerses = extractVerses(generated.content);
+        const detectedVerses = extractVerses(cleanedContent);
         for (const verse of detectedVerses) {
           await storage.logVerseUsage(
             agent.id,
@@ -353,13 +375,10 @@ async function executePost(agent: Agent): Promise<void> {
         }
       }
       
-      // Detect and log content type (if content type tracking enabled)
-      if (result.tweetId && (agent as any).contentTypeTrackingEnabled !== false) {
-        const detectedType = detectContentType(generated.content);
-        if (detectedType) {
-          await storage.logContentTypeUsage(agent.id, detectedType, result.tweetId);
-          console.log(`[Scheduler] Logged content type: ${detectedType}`);
-        }
+      // Log pre-detected content type
+      if (result.tweetId && detectedContentType) {
+        await storage.logContentTypeUsage(agent.id, detectedContentType, result.tweetId);
+        console.log(`[Scheduler] Logged content type: ${detectedContentType}`);
       }
       
       await logActivity({
@@ -367,8 +386,8 @@ async function executePost(agent: Agent): Promise<void> {
         eventType: "post",
         status: "success",
         tweetId: result.tweetId,
-        content: generated.content,
-        characterCount: generated.content.length,
+        content: cleanedContent,
+        characterCount: cleanedContent.length,
         modelProvider: agent.postModelProvider || agent.modelProvider,
         modelName: agent.postModelName || agent.modelName,
         kbEntriesUsed: generated.kbIds,
@@ -378,7 +397,7 @@ async function executePost(agent: Agent): Promise<void> {
       console.log(`[Scheduler] Posted successfully: ${result.tweetId}`);
       
       if (agent.webhookEnabled && agent.webhookUrl) {
-        sendPostCreatedWebhook(agent, generated.content, result.tweetId).catch((err) =>
+        sendPostCreatedWebhook(agent, cleanedContent, result.tweetId).catch((err) =>
           console.error("Webhook error:", err)
         );
       }
@@ -387,8 +406,8 @@ async function executePost(agent: Agent): Promise<void> {
         agentId: agent.id,
         eventType: "post",
         status: result.rateLimited ? "rate_limited" : "failed",
-        content: generated.content,
-        characterCount: generated.content.length,
+        content: cleanedContent,
+        characterCount: cleanedContent.length,
         modelProvider: agent.postModelProvider || agent.modelProvider,
         modelName: agent.postModelName || agent.modelName,
         kbEntriesUsed: generated.kbIds,
@@ -399,7 +418,7 @@ async function executePost(agent: Agent): Promise<void> {
       console.error(`[Scheduler] Failed to post: ${result.error}`);
       
       if (agent.webhookEnabled && agent.webhookUrl) {
-        sendPostFailedWebhook(agent, result.error || "Unknown error", generated.content).catch((err) =>
+        sendPostFailedWebhook(agent, result.error || "Unknown error", cleanedContent).catch((err) =>
           console.error("Webhook error:", err)
         );
       }

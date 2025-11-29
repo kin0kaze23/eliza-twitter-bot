@@ -239,22 +239,40 @@ export async function assemblePrompt(
 
   // 6. Message examples (if available and enabled)
   let examplesUsed = 0;
+  const examplesWithTypes: { content: string; contentType?: string }[] = [];
+  
   if (includeExamples && agent.messageExamples && agent.messageExamples.length > 0) {
     // Add explicit instruction about following examples format
     systemPrompt += "## Message Examples (FOLLOW THIS FORMAT EXACTLY)\n";
     systemPrompt += "The following are examples of EXACTLY how your posts should be structured. You MUST follow this format precisely - same structure, same sections, same style. Do not add hashtags unless shown in examples:\n\n";
     
-    // Add examples to system prompt for clarity (support up to 10 for multiple content types)
+    // Add examples to system prompt (support up to 10 for multiple content types)
+    // If example has contentType metadata, include it as a label
     for (const example of agent.messageExamples.slice(0, 10)) {
-      const content = typeof example === "string" 
-        ? example 
-        : (example && typeof example === "object" && "content" in example) 
-          ? String((example as any).content) 
-          : null;
+      let content: string | null = null;
+      let contentType: string | undefined = undefined;
+      
+      if (typeof example === "string") {
+        content = example;
+      } else if (example && typeof example === "object" && "content" in example) {
+        content = String((example as any).content);
+        contentType = (example as any).contentType;
+      }
       
       if (content) {
-        systemPrompt += `---\n${content}\n---\n\n`;
+        // Format content type label if metadata exists (human-readable)
+        const typeLabel = contentType 
+          ? contentType.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
+          : null;
+        
+        if (typeLabel) {
+          systemPrompt += `### ${typeLabel} Example:\n---\n${content}\n---\n\n`;
+        } else {
+          systemPrompt += `---\n${content}\n---\n\n`;
+        }
+        
         examplesUsed++;
+        examplesWithTypes.push({ content, contentType });
       }
     }
 
