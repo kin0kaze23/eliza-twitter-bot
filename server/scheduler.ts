@@ -6,6 +6,17 @@ import { sendPostCreatedWebhook, sendPostFailedWebhook, sendReplyCreatedWebhook,
 import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
 import type { Agent } from "@shared/schema";
 
+// Maximum number of recent tweets to track per agent
+const MAX_RECENT_TWEETS = 20;
+// Maximum age of tweets to check for replies (7 days in ms)
+const MAX_TWEET_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+interface TrackedTweet {
+  tweetId: string;
+  postedAt: Date;
+  lastReplyId?: string; // Track last processed reply ID for each tweet
+}
+
 interface SchedulerState {
   isRunning: boolean;
   activeAgents: Map<string, NodeJS.Timeout>;
@@ -15,7 +26,7 @@ interface SchedulerState {
   lastMentionCheck: Map<string, Date>;
   lastMentionId: Map<string, string>; // Track last processed mention ID for pagination
   repliesThisHour: Map<string, { count: number; hourStart: Date }>; // Track replies per hour per agent
-  recentBotTweets: Map<string, { tweetId: string; postedAt: Date }[]>; // Track recent bot tweets for comment detection
+  recentBotTweets: Map<string, TrackedTweet[]>; // Track recent bot tweets for comment detection
   lastCleanupDate: string;
 }
 
@@ -31,17 +42,6 @@ const state: SchedulerState = {
   recentBotTweets: new Map(),
   lastCleanupDate: new Date().toISOString().split("T")[0],
 };
-
-// Maximum number of recent tweets to track per agent
-const MAX_RECENT_TWEETS = 20;
-// Maximum age of tweets to check for replies (7 days in ms)
-const MAX_TWEET_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-
-interface TrackedTweet {
-  tweetId: string;
-  postedAt: Date;
-  lastReplyId?: string; // Track last processed reply ID for each tweet
-}
 
 /**
  * Track a newly posted tweet for comment detection
@@ -94,6 +94,50 @@ function updateLastReplyId(agentId: string, tweetId: string, lastReplyId: string
  */
 function getRecentBotTweets(agentId: string): string[] {
   return getRecentBotTweetsWithState(agentId).map(t => t.tweetId);
+}
+
+/**
+ * Backfill recentBotTweets from activity log on startup
+ * This ensures comment detection works even after server restarts
+ */
+async function backfillRecentTweets(agentId: string): Promise<void> {
+  try {
+    // Check if we already have tweets tracked for this agent
+    const existing = state.recentBotTweets.get(agentId) || [];
+    if (existing.length > 0) {
+      console.log(`[CommentBot] Agent ${agentId} already has ${existing.length} tracked tweets, skipping backfill`);
+      return;
+    }
+    
+    // Get recent successful posts from activity log
+    const logs = await storage.getActivityLogs(agentId, 50);
+    const cutoff = Date.now() - MAX_TWEET_AGE_MS;
+    
+    const recentPosts = logs
+      .filter(log => 
+        log.eventType === 'post' && 
+        log.status === 'success' && 
+        log.tweetId && 
+        log.postedAt && 
+        new Date(log.postedAt).getTime() > cutoff
+      )
+      .slice(0, MAX_RECENT_TWEETS);
+    
+    if (recentPosts.length > 0) {
+      const tweets: TrackedTweet[] = recentPosts.map(log => ({
+        tweetId: log.tweetId!,
+        postedAt: new Date(log.postedAt!),
+        lastReplyId: undefined, // Will be set when we process replies
+      }));
+      
+      state.recentBotTweets.set(agentId, tweets);
+      console.log(`[CommentBot] Backfilled ${tweets.length} recent tweets for agent ${agentId} from activity log`);
+    } else {
+      console.log(`[CommentBot] No recent tweets found in activity log for agent ${agentId}`);
+    }
+  } catch (error) {
+    console.error(`[CommentBot] Error backfilling recent tweets for agent ${agentId}:`, error);
+  }
 }
 
 /**
@@ -978,7 +1022,7 @@ async function pollComments(agent: Agent): Promise<void> {
 /**
  * Start mention polling for an agent
  */
-export function startMentionPolling(agent: Agent): void {
+export async function startMentionPolling(agent: Agent): Promise<void> {
   // Check if replies are enabled
   if (!agent.replyEnabled) {
     console.log(`[MentionBot] Replies disabled for agent ${agent.name}, not starting mention polling`);
@@ -994,6 +1038,10 @@ export function startMentionPolling(agent: Agent): void {
   
   // Stop existing poller if running
   stopMentionPolling(agent.id);
+  
+  // CRITICAL: Backfill recentBotTweets from activity log before polling
+  // This ensures comment detection works even after server restarts
+  await backfillRecentTweets(agent.id);
   
   // Poll interval: check every 2-5 minutes (configurable)
   const intervalMs = 3 * 60 * 1000; // 3 minutes default
