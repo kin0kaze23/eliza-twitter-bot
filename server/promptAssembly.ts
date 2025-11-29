@@ -266,9 +266,9 @@ export async function assemblePrompt(
           : null;
         
         if (typeLabel) {
-          systemPrompt += `### ${typeLabel} Example:\n---\n${content}\n---\n\n`;
+          systemPrompt += `### ${typeLabel} Example:\n${content}\n\n`;
         } else {
-          systemPrompt += `---\n${content}\n---\n\n`;
+          systemPrompt += `${content}\n\n`;
         }
         
         examplesUsed++;
