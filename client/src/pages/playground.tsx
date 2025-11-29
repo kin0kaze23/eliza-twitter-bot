@@ -23,6 +23,9 @@ type TestResult = {
   errors: string[];
   warnings: string[];
   timestamp: Date;
+  audit?: any; // Comprehensive audit logs
+  contentType?: string;
+  generationTimeMs?: number;
 };
 
 type ConversationMessage = {
@@ -278,12 +281,16 @@ export default function Playground() {
         errors: [],
         warnings: [],
         timestamp: new Date(),
+        audit: data.audit,
+        contentType: data.contentType,
+        generationTimeMs: data.generationTimeMs,
       };
       
       // Store KB sources for display
       (result as any).kbSources = data.kbSources || [];
       (result as any).kbEntriesCount = data.kbEntriesCount || 0;
       (result as any).mode = data.mode;
+      (result as any).config = data.config;
       
       setTestResult(result);
       
@@ -675,6 +682,22 @@ export default function Playground() {
                   </div>
                 )}
 
+                {/* Content Type & Model Config */}
+                <div className="grid grid-cols-2 gap-4">
+                  {testResult.contentType && (
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">Content Type</Label>
+                      <Badge>{testResult.contentType}</Badge>
+                    </div>
+                  )}
+                  {testResult.generationTimeMs && (
+                    <div className="space-y-2">
+                      <Label className="text-xs text-muted-foreground">Generation Time</Label>
+                      <p className="text-sm">{testResult.generationTimeMs}ms</p>
+                    </div>
+                  )}
+                </div>
+
                 {/* KB Sources Used */}
                 {(testResult as any).kbSources && (testResult as any).kbSources.length > 0 && (
                   <div className="space-y-2">
@@ -707,6 +730,59 @@ export default function Playground() {
                         This tweet was auto-generated using the above knowledge sources
                       </p>
                     )}
+                  </div>
+                )}
+
+                {/* Audit Logs */}
+                {testResult.audit && (
+                  <div className="space-y-2 border-t pt-4">
+                    <details className="cursor-pointer group">
+                      <summary className="font-medium text-sm flex items-center gap-2 hover:text-primary">
+                        <span>📋 Debug Audit Logs</span>
+                      </summary>
+                      <div className="mt-3 space-y-3">
+                        {testResult.audit.kbEntriesSelected && (
+                          <div className="bg-muted p-3 rounded text-xs space-y-1">
+                            <p className="font-medium text-foreground">KB Entries Selected: {testResult.audit.kbEntriesSelected.count}</p>
+                            {testResult.audit.kbEntriesSelected.details && testResult.audit.kbEntriesSelected.details.length > 0 && (
+                              <div className="ml-2 space-y-1">
+                                {testResult.audit.kbEntriesSelected.details.map((kb: any, idx: number) => (
+                                  <div key={idx} className="text-muted-foreground">
+                                    • {kb.title} (Priority: {kb.priority})
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {testResult.audit.promptComponents && (
+                          <div className="bg-muted p-3 rounded text-xs">
+                            <p className="font-medium text-foreground">Prompt Components:</p>
+                            <p className="text-muted-foreground">{testResult.audit.promptComponents.join(", ")}</p>
+                          </div>
+                        )}
+                        {testResult.audit.recentVersesAvoidance && (
+                          <div className="bg-muted p-3 rounded text-xs">
+                            <p className="font-medium text-foreground">Bible Verses Avoidance:</p>
+                            <p className="text-muted-foreground">{testResult.audit.recentVersesAvoidance.versesInWindow} verses in window to avoid</p>
+                          </div>
+                        )}
+                        {testResult.audit.modelConfig && (
+                          <div className="bg-muted p-3 rounded text-xs">
+                            <p className="font-medium text-foreground">Model Config:</p>
+                            <p className="text-muted-foreground">
+                              {testResult.audit.modelConfig.provider}/{testResult.audit.modelConfig.model} (temp: {testResult.audit.modelConfig.temperature})
+                            </p>
+                          </div>
+                        )}
+                        {testResult.audit.systemPrompt && (
+                          <div className="bg-muted p-3 rounded text-xs max-h-40 overflow-y-auto">
+                            <p className="font-medium text-foreground mb-2">System Prompt:</p>
+                            <pre className="whitespace-pre-wrap text-muted-foreground text-xs">{testResult.audit.systemPrompt.substring(0, 500)}...</pre>
+                          </div>
+                        )}
+                      </div>
+                    </details>
                   </div>
                 )}
 
