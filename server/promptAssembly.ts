@@ -158,6 +158,14 @@ export async function assemblePrompt(
       }
 
       componentsIncluded.push("knowledgeBase");
+    } else {
+      // Fallback when no KB entries available
+      systemPrompt += "## Knowledge Base Status\n";
+      systemPrompt += "No current Knowledge Base entries are available. For this post:\n";
+      systemPrompt += "- AVOID Event-based or Cultural/Tech content types (they require current news/data)\n";
+      systemPrompt += "- PREFER: Verse Reflection, Wisdom Bite, Encouragement, Deep Question, or Eternity Anchor\n";
+      systemPrompt += "- Draw from timeless Scripture and spiritual wisdom instead of current events\n\n";
+      componentsIncluded.push("kbFallback");
     }
   }
 
@@ -165,45 +173,68 @@ export async function assemblePrompt(
   const verseTrackingEnabled = (agent as any).verseTrackingEnabled !== false; // Default true
   const verseReusePolicy = (agent as any).verseReusePolicy || "avoid_recent";
   
+  systemPrompt += "## Bible Verse Usage Guidelines\n";
+  
   if (verseTrackingEnabled && verseReusePolicy !== "allow" && recentVerses.length > 0) {
     const verseList = recentVerses.map(v => v.verseRef).join(", ");
     
-    systemPrompt += "## Bible Verse Usage Guidelines\n";
-    systemPrompt += "IMPORTANT: When including Scripture references, please AVOID using the following verses that have been used recently:\n";
+    systemPrompt += "When including Scripture references, please AVOID these recently used verses:\n";
     systemPrompt += `${verseList}\n\n`;
-    systemPrompt += "Choose different, fresh Scripture passages to provide variety for your audience.\n\n";
+    
+    if (recentVerses.length >= 20) {
+      // Many verses used - provide flexibility guidance
+      systemPrompt += "NOTE: Many verses have been used recently. If you cannot find an unused verse that fits your content:\n";
+      systemPrompt += "- You MAY use a less common translation or paraphrase of a verse\n";
+      systemPrompt += "- You MAY reference a verse thematically without direct quotation\n";
+      systemPrompt += "- Prioritize content quality over strict avoidance if needed\n\n";
+    } else {
+      systemPrompt += "Choose different, fresh Scripture passages to provide variety for your audience.\n\n";
+    }
     
     componentsIncluded.push("verseAvoidance");
+  } else {
+    systemPrompt += "Feel free to use any Scripture that fits your content. Include book, chapter, and verse references.\n\n";
   }
 
-  // 5b. Content Type Avoidance Instructions (if content type tracking is enabled)
+  // 5b. Content Type Selection Instructions (if content type tracking is enabled)
   const contentTypeTrackingEnabled = (agent as any).contentTypeTrackingEnabled !== false; // Default true
   const contentTypeReusePolicy = (agent as any).contentTypeReusePolicy || "rotate_all";
   
+  const allContentTypes = [
+    "EVENT_BASED", "VERSE_REFLECTION", "DEEP_QUESTION", 
+    "WISDOM_BITE", "CULTURAL_INSIGHT", "ENCOURAGEMENT", "ETERNITY_ANCHOR"
+  ];
+  
+  systemPrompt += "## Content Type Selection Guidelines\n";
+  systemPrompt += "Available content types: Event-based, Verse Reflection, Deep Question, Wisdom Bite, Cultural Insight, Encouragement, Eternity Anchor\n\n";
+  
   if (contentTypeTrackingEnabled && contentTypeReusePolicy !== "allow" && recentContentTypes.length > 0) {
-    const allContentTypes = [
-      "EVENT_BASED", "VERSE_REFLECTION", "DEEP_QUESTION", 
-      "WISDOM_BITE", "CULTURAL_INSIGHT", "ENCOURAGEMENT", "ETERNITY_ANCHOR"
-    ];
     const recentTypeNames = recentContentTypes.slice(0, 3).map(ct => ct.contentType);
     const unusedTypes = allContentTypes.filter(t => !recentTypeNames.includes(t));
     
-    systemPrompt += "## Content Type Selection Guidelines\n";
-    
     if (contentTypeReusePolicy === "rotate_all") {
-      // Strongly encourage unused types
       if (unusedTypes.length > 0) {
-        systemPrompt += `PRIORITY: Select from these UNUSED content types first: ${unusedTypes.join(", ")}\n\n`;
+        // Format unused types for readability
+        const formattedUnused = unusedTypes.map(t => t.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase())).join(", ");
+        systemPrompt += `SELECT FROM: ${formattedUnused}\n`;
+        systemPrompt += `These content types have NOT been used recently - pick one of these.\n\n`;
+      } else {
+        // All types recently used - reset cycle
+        systemPrompt += `All 7 content types have been used in the rotation cycle.\n`;
+        systemPrompt += `You may now select ANY content type - the cycle will reset.\n\n`;
       }
-      systemPrompt += `AVOID: These content types were used recently: ${recentTypeNames.join(", ")}\n`;
-      systemPrompt += "Rotate through all 7 content types to maintain variety for your audience.\n\n";
+      
+      const formattedRecent = recentTypeNames.map(t => t.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase())).join(", ");
+      systemPrompt += `RECENTLY USED (lower priority): ${formattedRecent}\n\n`;
     } else if (contentTypeReusePolicy === "avoid_last") {
-      const lastType = recentTypeNames[0];
-      systemPrompt += `AVOID: Do not use "${lastType}" as it was just used in the previous post.\n`;
-      systemPrompt += "Select any other content type for variety.\n\n";
+      const lastType = recentTypeNames[0]?.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+      systemPrompt += `SKIP: "${lastType}" was just used.\n`;
+      systemPrompt += `Select any OTHER content type for this post.\n\n`;
     }
     
-    componentsIncluded.push("contentTypeAvoidance");
+    componentsIncluded.push("contentTypeGuidance");
+  } else {
+    systemPrompt += "Choose any content type that fits your inspiration for this post.\n\n";
   }
 
   // 6. Message examples (if available and enabled)

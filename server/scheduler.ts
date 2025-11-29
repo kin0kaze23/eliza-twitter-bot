@@ -202,11 +202,13 @@ async function generateTweetContent(agent: Agent): Promise<{ content: string; kb
       recentContentTypes,
     });
     
-    // Dynamic prompt that allows content type selection and flexible KB usage
-    const tweetPrompt = `Generate a post by following these steps:
-1. RANDOMLY select ONE content type from those defined in your system prompt (e.g., Event-based, Verse-based, Wisdom bite, etc.)
-2. Follow the exact format shown in the message example for that content type
-3. Use Knowledge Base content ONLY if relevant to the selected content type (Event-based posts should use KB; Encouragement/Wisdom posts may not need KB)`;
+    // Dynamic prompt that respects content type rotation rules from system prompt
+    const tweetPrompt = `Generate a single post following these rules:
+1. SELECT a content type based on the Content Type Selection Guidelines in your system prompt (prioritize unused types if rotation is enabled)
+2. MATCH the exact format and structure shown in the message examples for that content type
+3. USE Knowledge Base content for Event-based or Cultural posts; for other types (Verse Reflection, Wisdom Bite, Encouragement, Deep Question, Eternity Anchor), write from Scripture and wisdom without requiring KB
+4. AVOID recently used Bible verses as specified in the verse guidelines
+5. Keep the post under 280 characters unless creating a thread`;
     
     const messages = buildMessagesArray(assembledPrompt, [], tweetPrompt);
     
