@@ -246,12 +246,14 @@ export async function assemblePrompt(
     systemPrompt += "## Message Examples (FOLLOW THIS FORMAT EXACTLY)\n";
     systemPrompt += "The following are examples of EXACTLY how your posts should be structured.\n";
     systemPrompt += "CRITICAL: You MUST replicate the EXACT format, including:\n";
-    systemPrompt += "- All line breaks and paragraph spacing\n";
+    systemPrompt += "- All line breaks and paragraph spacing MUST be preserved exactly\n";
     systemPrompt += "- The exact structure and sections\n";
     systemPrompt += "- Same tone and style\n";
     systemPrompt += "- Do NOT collapse multiple lines into one paragraph\n";
     systemPrompt += "- Do NOT remove spacing between sections\n";
-    systemPrompt += "- Do NOT add hashtags unless shown in examples\n\n";
+    systemPrompt += "- Do NOT add decorative elements (dashes, separators, etc.) unless shown in examples\n";
+    systemPrompt += "- Do NOT add hashtags unless shown in examples\n";
+    systemPrompt += "- Do NOT use em-dashes (—) or double-dashes (--) as decorators\n\n";
     
     // Add examples to system prompt (support up to 10 for multiple content types)
     // If example has contentType metadata, include it as a label

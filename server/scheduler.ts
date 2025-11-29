@@ -111,20 +111,20 @@ function detectContentType(content: string): string | null {
 }
 
 /**
- * Strip content type labels from generated content (e.g., [EVENT-BASED], CULTURAL INSIGHT, etc.)
- * Labels are used for detection but should not appear in final posted content
- * Handles both bracketed [LABEL] and plain text LABEL formats, anywhere in content
+ * Strip content type labels and decorative elements from generated content
+ * Removes: [EVENT-BASED], EVENT-BASED, em-dashes, double-dashes used as separators
  */
 function stripContentTypeLabels(content: string): string {
-  // Remove both bracketed labels [LABEL] and plain text labels (plain text at start or with word boundaries)
-  // Patterns cover: [EVENT-BASED], EVENT-BASED, EVENT_BASED, Event-Based, etc.
   return content
-    // Bracketed labels with brackets
+    // Bracketed labels
     .replace(/\s*\[(EVENT[-_]BASED|VERSE[-_ ]REFLECTION|DEEP[-_ ]QUESTION|WISDOM[-_ ]BITE|CULTURAL[-_ ]INSIGHT|ENCOURAGEMENT|ETERNITY[-_ ]ANCHOR)\]\s*/gi, " ")
-    // Plain text labels (at start or as standalone words) - handles all caps, spaces, underscores
+    // Plain text labels
     .replace(/^\s*(EVENT[-_\s]?BASED|VERSE[-_\s]?REFLECTION|DEEP[-_\s]?QUESTION|WISDOM[-_\s]?BITE|CULTURAL[-_\s]?INSIGHT|ENCOURAGEMENT|ETERNITY[-_\s]?ANCHOR)\s+/gi, "")
     .replace(/\s+(EVENT[-_\s]?BASED|VERSE[-_\s]?REFLECTION|DEEP[-_\s]?QUESTION|WISDOM[-_\s]?BITE|CULTURAL[-_\s]?INSIGHT|ENCOURAGEMENT|ETERNITY[-_\s]?ANCHOR)\s+/gi, " ")
-    .replace(/\s+/g, " ") // Normalize multiple spaces to single space
+    // Remove decorative separators (em-dashes, double-dashes used as dividers)
+    .replace(/\n\s*[-–—]{2,}\s*\n/g, "\n") // Lines with only dashes
+    .replace(/\s+[-–—]\s+/g, " ") // Em-dashes or dashes as separators (but keep single dash in context like "don't")
+    .replace(/\s+/g, " ") // Normalize multiple spaces
     .trim();
 }
 
