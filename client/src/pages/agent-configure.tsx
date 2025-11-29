@@ -27,7 +27,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap, Pencil, Star, Info, Sparkles, BookOpen, MessageSquare, Thermometer, Hash, Database, Layers } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { Link, useParams } from "wouter";
+import { Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Agent, KnowledgeBase, MessageExample, MessageExamples } from "@shared/schema";
@@ -53,14 +53,17 @@ type CustomPrompt = {
 
 export default function AgentConfigure() {
   const { toast } = useToast();
-  const { id } = useParams<{ id: string }>();
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
 
-  // Fetch agent data from backend
-  const { data: agent, isLoading, error } = useQuery<Agent>({
-    queryKey: ["/api/agents", id],
-    enabled: !!id,
+  // Fetch all agents and use the first one
+  const { data: agents, isLoading: agentsLoading } = useQuery<Agent[]>({
+    queryKey: ["/api/agents"],
   });
+  
+  const agent = agents?.[0];
+  const id = agent?.id;
+  const isLoading = agentsLoading;
+  const noAgentExists = !agent && !agentsLoading;
 
   // Fetch knowledge base
   const { data: kbData } = useQuery<KnowledgeBase[]>({
@@ -1037,14 +1040,30 @@ export default function AgentConfigure() {
     );
   }
 
-  if (error || !agent) {
+  if (noAgentExists || !agent) {
     return (
       <div className="space-y-8">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2 text-destructive">
-              <AlertCircle className="h-5 w-5" />
-              <p>Failed to load agent configuration. Please try again.</p>
+        <div>
+          <h1 className="text-2xl font-semibold" data-testid="text-page-title">Configure</h1>
+          <p className="text-sm text-muted-foreground">Create your agent first to configure it</p>
+        </div>
+        <Card className="max-w-lg">
+          <CardContent className="pt-12 pb-12">
+            <div className="text-center space-y-4">
+              <div className="mx-auto w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+                <Settings className="h-8 w-8 text-muted-foreground" />
+              </div>
+              <div>
+                <h3 className="text-lg font-medium">No Agent to Configure</h3>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Create your Twitter AI agent from the Dashboard first
+                </p>
+              </div>
+              <Link href="/">
+                <Button data-testid="button-go-to-dashboard">
+                  Go to Dashboard
+                </Button>
+              </Link>
             </div>
           </CardContent>
         </Card>
@@ -1056,12 +1075,7 @@ export default function AgentConfigure() {
     <div className="space-y-8">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <div className="flex items-center gap-3">
-            <Link href="/agents">
-              <Button variant="ghost" size="sm">← Back to Agents</Button>
-            </Link>
-          </div>
-          <h1 className="text-2xl font-semibold mt-2" data-testid="text-page-title">
+          <h1 className="text-2xl font-semibold" data-testid="text-page-title">
             Configure: {character.name}
           </h1>
           <p className="text-sm text-muted-foreground">

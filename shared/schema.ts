@@ -352,43 +352,68 @@ export const insertAgentActivitySchema = createInsertSchema(agentActivity).omit(
 export type InsertAgentActivity = z.infer<typeof insertAgentActivitySchema>;
 export type AgentActivity = typeof agentActivity.$inferSelect;
 
-// Activity Logs - Individual post/reply events with detailed tracking
+// Activity Logs - Individual post/reply events with comprehensive tracking
 export const activityLogs = pgTable("activity_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
   
-  // Event type: post, reply, mention_reply, quote, retweet, error
+  // Event type: post, reply, mention_received, mention_reply, quote, retweet, error, scheduler_start, scheduler_stop
   eventType: text("event_type").notNull(),
   
-  // Status: pending, success, failed, rate_limited
+  // Status: pending, success, failed, rate_limited, skipped
   status: text("status").notNull().default("pending"),
   
   // Twitter data
   tweetId: text("tweet_id"), // The posted tweet ID from Twitter
   inReplyToTweetId: text("in_reply_to_tweet_id"), // For replies
   inReplyToUserId: text("in_reply_to_user_id"), // For replies
+  inReplyToUsername: text("in_reply_to_username"), // Username for display
+  conversationId: text("conversation_id"), // Thread tracking
   
   // Content
   content: text("content").notNull(),
   characterCount: integer("character_count"),
   
-  // AI generation info
+  // Content type tracking (for 7 content variations)
+  contentType: text("content_type"), // EVENT_BASED, VERSE_REFLECTION, DEEP_QUESTION, etc.
+  bibleVerse: text("bible_verse"), // Verse reference if applicable
+  
+  // AI generation info - comprehensive model metrics
   modelProvider: text("model_provider"),
   modelName: text("model_name"),
   tokensUsed: integer("tokens_used"),
+  promptTokens: integer("prompt_tokens"),
+  completionTokens: integer("completion_tokens"),
+  generationTimeMs: integer("generation_time_ms"), // How long AI took to generate
+  temperature: real("temperature"),
   
   // Knowledge base entries used
   kbEntriesUsed: jsonb("kb_entries_used").$type<string[]>().default(sql`'[]'`),
+  kbCategoriesUsed: jsonb("kb_categories_used").$type<string[]>().default(sql`'[]'`),
   
   // Error info
   errorMessage: text("error_message"),
   errorCode: text("error_code"),
+  retryCount: integer("retry_count").default(0),
   
-  // Engagement metrics (updated later)
+  // Engagement metrics (updated later via polling or webhooks)
   likes: integer("likes").default(0),
   retweets: integer("retweets").default(0),
   replies: integer("replies").default(0),
   impressions: integer("impressions").default(0),
+  engagementRate: real("engagement_rate"), // (likes + retweets + replies) / impressions
+  lastEngagementUpdate: timestamp("last_engagement_update"),
+  
+  // Mention/Reply specific tracking
+  mentionId: text("mention_id"), // Reference to processed_mentions.id if applicable
+  replyDelayMs: integer("reply_delay_ms"), // How long we waited before replying
+  
+  // Trigger info (what caused this action)
+  triggerType: text("trigger_type"), // scheduled, manual, mention, webhook, force_generate
+  triggerData: jsonb("trigger_data").$type<Record<string, unknown>>().default(sql`'{}'`), // Extra trigger context
+  
+  // Dry run tracking
+  isDryRun: boolean("is_dry_run").default(false),
   
   // Timestamps
   scheduledAt: timestamp("scheduled_at"), // When it was supposed to post

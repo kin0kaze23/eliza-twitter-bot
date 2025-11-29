@@ -1,14 +1,10 @@
 import {
   LayoutDashboard,
-  Key,
-  Plug,
-  Activity,
   Bot,
   FlaskConical,
-  Blocks,
-  BarChart3,
-  Database,
-  ExternalLink,
+  Activity,
+  Settings,
+  Sliders,
 } from "lucide-react";
 import {
   Sidebar,
@@ -20,8 +16,12 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarHeader,
+  SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Link, useLocation } from "wouter";
+import { useAuth } from "@/lib/auth";
+import { Button } from "@/components/ui/button";
+import { LogOut, User } from "lucide-react";
 
 const menuItems = [
   {
@@ -29,46 +29,45 @@ const menuItems = [
     url: "/",
     icon: LayoutDashboard,
     testId: "link-dashboard",
-    group: "overview",
+    group: "main",
   },
   {
-    title: "Agents",
-    url: "/agents",
-    icon: Bot,
-    testId: "link-agents",
-    group: "overview",
+    title: "Configure",
+    url: "/configure",
+    icon: Sliders,
+    testId: "link-configure",
+    group: "main",
   },
   {
-    title: "Monitoring",
-    url: "/monitoring",
-    icon: BarChart3,
-    testId: "link-monitoring",
-    group: "overview",
-  },
-  {
-    title: "Knowledge Sources",
-    url: "/api-management",
-    icon: Database,
-    testId: "link-knowledge-sources",
-    group: "data",
+    title: "Activity",
+    url: "/activity",
+    icon: Activity,
+    testId: "link-activity",
+    group: "main",
   },
   {
     title: "Playground",
     url: "/playground",
     icon: FlaskConical,
     testId: "link-playground",
-    group: "testing",
+    group: "tools",
+  },
+  {
+    title: "Settings",
+    url: "/settings",
+    icon: Settings,
+    testId: "link-settings",
+    group: "system",
   },
 ];
 
 export function AppSidebar() {
   const [location] = useLocation();
+  const { username, logout } = useAuth();
 
-  const groupedItems = {
-    overview: menuItems.filter(item => item.group === "overview"),
-    data: menuItems.filter(item => item.group === "data"),
-    testing: menuItems.filter(item => item.group === "testing"),
-  };
+  const mainItems = menuItems.filter(item => item.group === "main");
+  const toolItems = menuItems.filter(item => item.group === "tools");
+  const systemItems = menuItems.filter(item => item.group === "system");
 
   return (
     <Sidebar>
@@ -85,10 +84,10 @@ export function AppSidebar() {
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Overview</SidebarGroupLabel>
+          <SidebarGroupLabel>Agent</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {groupedItems.overview.map((item) => (
+              {mainItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild
@@ -107,10 +106,10 @@ export function AppSidebar() {
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel>Data Sources</SidebarGroupLabel>
+          <SidebarGroupLabel>Tools</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {groupedItems.data.map((item) => (
+              {toolItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild
@@ -129,10 +128,10 @@ export function AppSidebar() {
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel>Testing</SidebarGroupLabel>
+          <SidebarGroupLabel>System</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {groupedItems.testing.map((item) => (
+              {systemItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild
@@ -150,6 +149,25 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter className="p-4 border-t">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+              <User className="h-4 w-4" />
+            </div>
+            <span className="text-sm font-medium truncate">{username}</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={logout}
+            className="flex-shrink-0"
+            data-testid="button-sidebar-logout"
+          >
+            <LogOut className="h-4 w-4" />
+          </Button>
+        </div>
+      </SidebarFooter>
     </Sidebar>
   );
 }

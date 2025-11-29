@@ -11,6 +11,7 @@ import crypto from "crypto";
 import { assemblePrompt, buildMessagesArray, selectNextContentType, formatContentType, type ContentType } from "./promptAssembly";
 import { sendPostCreatedWebhook, sendPostFailedWebhook } from "./webhook";
 import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
+import { requireAuth, verifyPassword, hashPassword } from "./auth";
 
 /**
  * Strip content type labels and decorative elements from generated content
@@ -68,6 +69,105 @@ function detectContentType(content: string): string | null {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // ============= AUTHENTICATION ============= //
+  
+  // Check auth status
+  app.get("/api/auth/status", (req, res) => {
+    if (req.session && req.session.userId) {
+      res.json({ authenticated: true, username: req.session.username });
+    } else {
+      res.json({ authenticated: false });
+    }
+  });
+  
+  // Login
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ error: "Username and password are required" });
+      }
+      
+      const user = await storage.getUserByUsername(username);
+      if (!user) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+      
+      const isValid = await verifyPassword(password, user.password);
+      if (!isValid) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+      
+      req.session.userId = user.id;
+      req.session.username = user.username;
+      res.json({ success: true, username: user.username });
+    } catch (error) {
+      console.error("Login error:", error);
+      res.status(500).json({ error: "Login failed" });
+    }
+  });
+  
+  // Logout
+  app.post("/api/auth/logout", (req, res) => {
+    req.session.destroy((err) => {
+      if (err) {
+        return res.status(500).json({ error: "Logout failed" });
+      }
+      res.json({ success: true });
+    });
+  });
+  
+  // Check auth status (returns minimal info, safe for unauthenticated calls)
+  // Note: This route is intentionally public to allow the frontend to check auth state
+  
+  // Update credentials (protected)
+  app.patch("/api/auth/credentials", requireAuth, async (req, res) => {
+    try {
+      const { currentPassword, newPassword, newUsername } = req.body;
+      
+      if (!req.session.userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      
+      const user = await storage.getUser(req.session.userId);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      // Verify current password
+      const isValid = await verifyPassword(currentPassword, user.password);
+      if (!isValid) {
+        return res.status(401).json({ error: "Current password is incorrect" });
+      }
+      
+      const updates: { username?: string; password?: string } = {};
+      
+      if (newUsername && newUsername !== user.username) {
+        const existingUser = await storage.getUserByUsername(newUsername);
+        if (existingUser) {
+          return res.status(400).json({ error: "Username already taken" });
+        }
+        updates.username = newUsername;
+      }
+      
+      if (newPassword) {
+        updates.password = await hashPassword(newPassword);
+      }
+      
+      if (Object.keys(updates).length > 0) {
+        await storage.updateUser(user.id, updates);
+        if (updates.username) {
+          req.session.username = updates.username;
+        }
+      }
+      
+      res.json({ success: true, message: "Credentials updated successfully" });
+    } catch (error) {
+      console.error("Update credentials error:", error);
+      res.status(500).json({ error: "Failed to update credentials" });
+    }
+  });
+  
   // ============= AGENTS ============= //
   
   // Get all agents
