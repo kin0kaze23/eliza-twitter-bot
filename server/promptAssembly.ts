@@ -190,7 +190,9 @@ export async function assemblePrompt(
       systemPrompt += `- Use the same tone and style\n`;
       systemPrompt += `- Do NOT add extra decorations (---, ###, etc.)\n`;
       systemPrompt += `- Do NOT add hashtags unless shown in example\n`;
-      systemPrompt += `- Keep same paragraph structure\n\n`;
+      systemPrompt += `- Keep same paragraph structure\n`;
+      systemPrompt += `- Use ONLY standard characters: regular dashes (-), straight quotes ("), apostrophes (')\n`;
+      systemPrompt += `- NEVER use em dashes (—), en dashes (–), or curly/smart quotes (" " ' ')\n\n`;
       
       componentsIncluded.push("messageExamples");
       componentsIncluded.push(`contentType:${selectedContentType}`);

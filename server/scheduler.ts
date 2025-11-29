@@ -128,6 +128,21 @@ function stripContentTypeLabels(content: string): string {
     .trim();
 }
 
+/**
+ * Clean special characters from generated content
+ * Replaces: em dashes (—), en dashes (–), curly/smart quotes (" " ' ')
+ * With: regular dashes (-), straight quotes ("), apostrophes (')
+ */
+function cleanSpecialCharacters(content: string): string {
+  return content
+    // Replace em dashes and en dashes with regular dashes
+    .replace(/[—–]/g, "-")
+    // Replace curly/smart double quotes with straight quotes
+    .replace(/[""]/g, '"')
+    // Replace curly/smart single quotes with straight apostrophe
+    .replace(/['']/g, "'");
+}
+
 function parseTimeToMinutes(timeStr: string): number {
   const match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
   if (!match) return 0;
@@ -362,7 +377,9 @@ async function executePost(agent: Agent): Promise<void> {
     const contentTypeToLog = generated.contentType;
     
     // Strip content type labels from content before posting
-    const cleanedContent = stripContentTypeLabels(generated.content);
+    let cleanedContent = stripContentTypeLabels(generated.content);
+    // Clean special characters (em dashes, smart quotes)
+    cleanedContent = cleanSpecialCharacters(cleanedContent);
     
     console.log(`[Scheduler] Posting to Twitter for agent: ${agent.name}`);
     

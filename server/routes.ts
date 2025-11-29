@@ -31,6 +31,21 @@ function stripContentTypeLabels(content: string): string {
 }
 
 /**
+ * Clean special characters from generated content
+ * Replaces: em dashes (—), en dashes (–), curly/smart quotes (" " ' ')
+ * With: regular dashes (-), straight quotes ("), apostrophes (')
+ */
+function cleanSpecialCharacters(content: string): string {
+  return content
+    // Replace em dashes and en dashes with regular dashes
+    .replace(/[—–]/g, "-")
+    // Replace curly/smart double quotes with straight quotes
+    .replace(/[""]/g, '"')
+    // Replace curly/smart single quotes with straight apostrophe
+    .replace(/['']/g, "'");
+}
+
+/**
  * Detect content type from generated content based on labels and patterns
  */
 function detectContentType(content: string): string | null {
@@ -1897,6 +1912,8 @@ OUTPUT: Write ONLY the tweet content, nothing else.`;
       
       // Strip content type labels from generated content (labels are for detection, not output)
       tweet = stripContentTypeLabels(tweet);
+      // Clean special characters (em dashes, smart quotes)
+      tweet = cleanSpecialCharacters(tweet);
       auditLog.finalTweetLength = tweet.length;
       auditLog.generationTimeMs = generationTime;
       console.log(`[TWEET TEST] Final tweet (${tweet.length} chars): ${tweet}`);
@@ -2140,6 +2157,8 @@ OUTPUT: Write ONLY the tweet content, nothing else.`;
       
       // Strip content type labels from generated content (labels are for detection, not output)
       tweetContent = stripContentTypeLabels(tweetContent);
+      // Clean special characters (em dashes, smart quotes)
+      tweetContent = cleanSpecialCharacters(tweetContent);
       
       // Post to Twitter
       const result = await postTweet(agent, tweetContent);
