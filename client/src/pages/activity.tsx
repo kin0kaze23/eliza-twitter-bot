@@ -1,4 +1,4 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
   RefreshCw, 
   ExternalLink, 
@@ -38,14 +39,25 @@ import {
   Zap,
   Heart,
   Repeat2,
-  Reply
+  Reply,
+  AtSign
 } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { ActivityLog, Agent } from "@shared/schema";
+import type { ActivityLog, Agent, ProcessedMention } from "@shared/schema";
 import { Skeleton } from "@/components/ui/skeleton";
 
+type MentionStats = {
+  total: number;
+  responded: number;
+  pending: number;
+  failed: number;
+  lastHour: number;
+  last24h: number;
+};
+
 export default function Activity() {
+  const [activeTab, setActiveTab] = useState("activity");
   const [eventTypeFilter, setEventTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -67,6 +79,18 @@ export default function Activity() {
     },
     enabled: !!agent,
     refetchInterval: 15000,
+  });
+
+  const { data: mentions, isLoading: mentionsLoading, refetch: refetchMentions } = useQuery<ProcessedMention[]>({
+    queryKey: ["/api/agents", agent?.id, "mentions"],
+    enabled: !!agent,
+    refetchInterval: 30000,
+  });
+
+  const { data: mentionStats } = useQuery<MentionStats>({
+    queryKey: ["/api/agents", agent?.id, "mentions/stats"],
+    enabled: !!agent,
+    refetchInterval: 30000,
   });
 
   const filteredLogs = activityLogs?.filter(log => {
@@ -139,22 +163,94 @@ export default function Activity() {
     );
   }
 
+  const getMentionStatusBadge = (mention: ProcessedMention) => {
+    if (mention.responded && mention.responseTweetId) {
+      return <Badge className="gap-1 bg-green-500/10 text-green-600 border-green-500/20"><CheckCircle2 className="h-3 w-3" />Replied</Badge>;
+    }
+    if (mention.errorMessage) {
+      return <Badge variant="destructive" className="gap-1"><XCircle className="h-3 w-3" />Failed</Badge>;
+    }
+    return <Badge variant="outline" className="gap-1"><Clock className="h-3 w-3" />Pending</Badge>;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold" data-testid="text-page-title">Activity Log</h1>
+          <h1 className="text-2xl font-semibold" data-testid="text-page-title">Activity & Mentions</h1>
           <p className="text-sm text-muted-foreground">
             Comprehensive monitoring for {agent.name}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()} data-testid="button-refresh">
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={() => { refetch(); refetchMentions(); }} 
+          data-testid="button-refresh"
+        >
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </Button>
       </div>
 
-      <Card>
+      {mentionStats && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-2">
+                <AtSign className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Total Mentions</span>
+              </div>
+              <p className="text-2xl font-semibold mt-1" data-testid="text-total-mentions">{mentionStats.total}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                <span className="text-sm text-muted-foreground">Replied</span>
+              </div>
+              <p className="text-2xl font-semibold mt-1" data-testid="text-responded-mentions">{mentionStats.responded}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-yellow-500" />
+                <span className="text-sm text-muted-foreground">Pending</span>
+              </div>
+              <p className="text-2xl font-semibold mt-1" data-testid="text-pending-mentions">{mentionStats.pending}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-2">
+                <Zap className="h-4 w-4 text-blue-500" />
+                <span className="text-sm text-muted-foreground">Last 24h</span>
+              </div>
+              <p className="text-2xl font-semibold mt-1" data-testid="text-24h-mentions">{mentionStats.last24h}</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="activity" className="gap-2">
+            <MessageSquare className="h-4 w-4" />
+            Activity Log
+          </TabsTrigger>
+          <TabsTrigger value="mentions" className="gap-2">
+            <AtSign className="h-4 w-4" />
+            Mentions
+            {mentionStats && mentionStats.pending > 0 && (
+              <Badge variant="secondary" className="ml-1">{mentionStats.pending}</Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="activity" className="mt-4">
+          <Card>
         <CardHeader className="pb-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <CardTitle className="text-base">Filter & Search</CardTitle>
@@ -315,6 +411,88 @@ export default function Activity() {
           )}
         </CardContent>
       </Card>
+        </TabsContent>
+
+        <TabsContent value="mentions" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Recent Mentions</CardTitle>
+              <CardDescription>
+                Twitter mentions detected for this agent
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {mentionsLoading ? (
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-16 w-full" />
+                  ))}
+                </div>
+              ) : !mentions || mentions.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <AtSign className="h-12 w-12 mx-auto mb-4 opacity-20" />
+                  <p>No mentions detected yet</p>
+                  <p className="text-sm mt-1">Mentions will appear here when users tag your agent</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {mentions.map((mention) => (
+                    <div 
+                      key={mention.id} 
+                      className="p-4 rounded-lg border space-y-2"
+                      data-testid={`mention-${mention.id}`}
+                    >
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">@{mention.authorUsername}</span>
+                          {getMentionStatusBadge(mention)}
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDate(mention.mentionedAt)}
+                        </span>
+                      </div>
+                      <p className="text-sm">{mention.mentionText}</p>
+                      {mention.responded && mention.responseText && (
+                        <div className="mt-2 p-3 rounded-md bg-muted">
+                          <p className="text-xs text-muted-foreground mb-1">Reply:</p>
+                          <p className="text-sm">{mention.responseText}</p>
+                        </div>
+                      )}
+                      {mention.errorMessage && (
+                        <p className="text-xs text-red-500">{mention.errorMessage}</p>
+                      )}
+                      <div className="flex items-center gap-2 pt-2">
+                        {mention.mentionTweetId && (
+                          <a
+                            href={`https://twitter.com/i/status/${mention.mentionTweetId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-primary hover:underline flex items-center gap-1"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            View mention
+                          </a>
+                        )}
+                        {mention.responseTweetId && (
+                          <a
+                            href={`https://twitter.com/i/status/${mention.responseTweetId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-primary hover:underline flex items-center gap-1"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            View reply
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={!!selectedLog} onOpenChange={() => setSelectedLog(null)}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">

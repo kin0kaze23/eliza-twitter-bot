@@ -14,6 +14,7 @@ interface SchedulerState {
   postsToday: Map<string, number>;
   lastMentionCheck: Map<string, Date>;
   lastMentionId: Map<string, string>; // Track last processed mention ID for pagination
+  repliesThisHour: Map<string, { count: number; hourStart: Date }>; // Track replies per hour per agent
   lastCleanupDate: string;
 }
 
@@ -25,8 +26,43 @@ const state: SchedulerState = {
   postsToday: new Map(),
   lastMentionCheck: new Map(),
   lastMentionId: new Map(),
+  repliesThisHour: new Map(),
   lastCleanupDate: new Date().toISOString().split("T")[0],
 };
+
+/**
+ * Check if agent can send more replies this hour
+ */
+function canReplyThisHour(agentId: string, maxRepliesPerHour: number): boolean {
+  const now = new Date();
+  const hourStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours());
+  
+  const replyData = state.repliesThisHour.get(agentId);
+  
+  // If no data or hour has changed, reset counter
+  if (!replyData || replyData.hourStart.getTime() !== hourStart.getTime()) {
+    state.repliesThisHour.set(agentId, { count: 0, hourStart });
+    return true;
+  }
+  
+  return replyData.count < maxRepliesPerHour;
+}
+
+/**
+ * Increment reply count for this hour
+ */
+function incrementReplyCount(agentId: string): void {
+  const now = new Date();
+  const hourStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours());
+  
+  const replyData = state.repliesThisHour.get(agentId);
+  
+  if (!replyData || replyData.hourStart.getTime() !== hourStart.getTime()) {
+    state.repliesThisHour.set(agentId, { count: 1, hourStart });
+  } else {
+    replyData.count++;
+  }
+}
 
 function cleanupOldPostCounts(): void {
   const today = new Date().toISOString().split("T")[0];
@@ -596,7 +632,7 @@ Reply only with the tweet text, nothing else.`;
       max_tokens: maxTokens,
     });
     
-    const response = await safeOpenAICall(() => openai.chat.completions.create(params));
+    const response = await safeOpenAICall(openai, params);
     reply = response.choices[0]?.message?.content || "";
   } else if (modelProvider === "anthropic") {
     const Anthropic = (await import("@anthropic-ai/sdk")).default;
@@ -685,8 +721,10 @@ async function processMention(agent: Agent, mention: TwitterMention): Promise<vo
     }
     
     // Add delay before replying (if configured)
-    const minDelay = agent.replyDelayMin || 30; // Default 30 seconds
-    const maxDelay = agent.replyDelayMax || 120; // Default 2 minutes
+    // Use replyDelay as base, add some randomness
+    const baseDelay = agent.replyDelay || 30; // Default 30 seconds
+    const minDelay = baseDelay;
+    const maxDelay = baseDelay * 2; // Double the base delay for max
     const delayMs = (Math.random() * (maxDelay - minDelay) + minDelay) * 1000;
     
     console.log(`[MentionBot] Waiting ${Math.round(delayMs / 1000)}s before replying...`);
@@ -702,16 +740,21 @@ async function processMention(agent: Agent, mention: TwitterMention): Promise<vo
       console.log(`[MentionBot] Successfully replied to mention ${mention.id} with tweet ${result.tweetId}`);
       await storage.markMentionResponded(mentionRecord.id, result.tweetId, replyText);
       
+      // Increment reply count for rate limiting
+      incrementReplyCount(agent.id);
+      
       // Send webhook
       await sendReplyCreatedWebhook(agent, replyText, result.tweetId, mention.id);
       
       // Log activity
-      await logActivity(agent, {
-        action: "reply_sent",
+      await logActivity({
+        agentId: agent.id,
+        eventType: "reply",
         status: "success",
         tweetId: result.tweetId,
-        inReplyToTweetId: mention.id,
         content: replyText,
+        modelProvider: agent.conversationModelProvider || agent.modelProvider,
+        modelName: agent.conversationModelName || agent.modelName,
       });
     } else {
       console.error(`[MentionBot] Failed to reply to mention ${mention.id}:`, result.error);
@@ -721,10 +764,10 @@ async function processMention(agent: Agent, mention: TwitterMention): Promise<vo
       await sendReplyFailedWebhook(agent, result.error || "Unknown error", mention.id, replyText);
       
       // Log activity
-      await logActivity(agent, {
-        action: "reply_failed",
+      await logActivity({
+        agentId: agent.id,
+        eventType: "reply",
         status: "failed",
-        inReplyToTweetId: mention.id,
         errorMessage: result.error,
       });
     }
@@ -770,8 +813,15 @@ async function pollMentions(agent: Agent): Promise<void> {
       }
     }
     
-    // Process each mention
+    // Process each mention (with rate limiting)
+    const maxReplies = agent.maxRepliesPerHour || 10;
     for (const mention of mentions) {
+      // Check max replies per hour limit
+      if (!canReplyThisHour(agent.id, maxReplies)) {
+        console.log(`[MentionBot] Rate limit reached (${maxReplies}/hour) for ${agent.name}, stopping processing`);
+        break;
+      }
+      
       try {
         await processMention(agent, mention);
       } catch (error) {
@@ -898,12 +948,22 @@ export async function initializeScheduler(): Promise<void> {
 export function shutdownScheduler(): void {
   console.log("[Scheduler] Shutting down...");
   
+  // Stop all posting timers
   const entries = Array.from(state.activeAgents.entries());
   for (const [agentId, timer] of entries) {
     clearInterval(timer);
-    console.log(`[Scheduler] Stopped agent: ${agentId}`);
+    console.log(`[Scheduler] Stopped agent posting: ${agentId}`);
+  }
+  
+  // Stop all mention pollers
+  const mentionEntries = Array.from(state.mentionPollers.entries());
+  for (const [agentId, timer] of mentionEntries) {
+    clearInterval(timer);
+    console.log(`[Scheduler] Stopped mention polling: ${agentId}`);
   }
   
   state.activeAgents.clear();
+  state.mentionPollers.clear();
+  state.repliesThisHour.clear();
   state.isRunning = false;
 }

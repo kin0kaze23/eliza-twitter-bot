@@ -2231,6 +2231,40 @@ export default function AgentConfigure() {
                 />
               </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="max-replies-per-hour">Max Replies Per Hour</Label>
+                  <Input
+                    id="max-replies-per-hour"
+                    type="number"
+                    min="1"
+                    max="60"
+                    value={behavior.maxRepliesPerHour}
+                    onChange={(e) => setBehavior({ ...behavior, maxRepliesPerHour: e.target.value })}
+                    disabled={!behavior.replyEnabled}
+                    data-testid="input-max-replies-per-hour"
+                  />
+                  <p className="text-xs text-muted-foreground">Rate limit for auto-replies</p>
+                </div>
+                
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Reply Delay</Label>
+                    <span className="text-sm text-muted-foreground">{behavior.replyDelay[0]}s</span>
+                  </div>
+                  <Slider
+                    value={behavior.replyDelay}
+                    onValueChange={(v) => setBehavior({ ...behavior, replyDelay: v })}
+                    min={10}
+                    max={300}
+                    step={10}
+                    disabled={!behavior.replyEnabled}
+                    data-testid="slider-reply-delay"
+                  />
+                  <p className="text-xs text-muted-foreground">Seconds to wait before replying (appears more natural)</p>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="reply-keywords">Reply to Keywords (comma-separated)</Label>
                 <Textarea
