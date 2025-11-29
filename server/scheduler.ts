@@ -111,15 +111,19 @@ function detectContentType(content: string): string | null {
 }
 
 /**
- * Strip content type labels from generated content (e.g., [EVENT-BASED], [ENCOURAGEMENT])
+ * Strip content type labels from generated content (e.g., [EVENT-BASED], CULTURAL INSIGHT, etc.)
  * Labels are used for detection but should not appear in final posted content
- * Handles labels anywhere in the content (start, middle, multi-line threads)
+ * Handles both bracketed [LABEL] and plain text LABEL formats, anywhere in content
  */
 function stripContentTypeLabels(content: string): string {
-  // Remove bracketed labels anywhere in the content with optional surrounding whitespace
-  // Global flag ensures all occurrences are removed (multi-part threads, etc.)
+  // Remove both bracketed labels [LABEL] and plain text labels (plain text at start or with word boundaries)
+  // Patterns cover: [EVENT-BASED], EVENT-BASED, EVENT_BASED, Event-Based, etc.
   return content
+    // Bracketed labels with brackets
     .replace(/\s*\[(EVENT[-_]BASED|VERSE[-_ ]REFLECTION|DEEP[-_ ]QUESTION|WISDOM[-_ ]BITE|CULTURAL[-_ ]INSIGHT|ENCOURAGEMENT|ETERNITY[-_ ]ANCHOR)\]\s*/gi, " ")
+    // Plain text labels (at start or as standalone words) - handles all caps, spaces, underscores
+    .replace(/^\s*(EVENT[-_\s]?BASED|VERSE[-_\s]?REFLECTION|DEEP[-_\s]?QUESTION|WISDOM[-_\s]?BITE|CULTURAL[-_\s]?INSIGHT|ENCOURAGEMENT|ETERNITY[-_\s]?ANCHOR)\s+/gi, "")
+    .replace(/\s+(EVENT[-_\s]?BASED|VERSE[-_\s]?REFLECTION|DEEP[-_\s]?QUESTION|WISDOM[-_\s]?BITE|CULTURAL[-_\s]?INSIGHT|ENCOURAGEMENT|ETERNITY[-_\s]?ANCHOR)\s+/gi, " ")
     .replace(/\s+/g, " ") // Normalize multiple spaces to single space
     .trim();
 }
