@@ -137,8 +137,8 @@ export async function assemblePrompt(
     }).slice(0, maxKbEntries);
 
     if (activeKb.length > 0) {
-      systemPrompt += "## Knowledge Base\n";
-      systemPrompt += "Use the following information when relevant:\n\n";
+      systemPrompt += "## Knowledge Base (USE WHEN RELEVANT)\n";
+      systemPrompt += "The following is current, real-world information. Use it for Event-based or Cultural/Tech posts. For Verse Reflections, Encouragement, Wisdom Bites, or Eternity Anchors, you may write from your own knowledge without referencing these entries:\n\n";
 
       let tokenCount = 0;
       for (const kb of activeKb) {
@@ -181,8 +181,8 @@ export async function assemblePrompt(
     systemPrompt += "## Message Examples (FOLLOW THIS FORMAT EXACTLY)\n";
     systemPrompt += "The following are examples of EXACTLY how your posts should be structured. You MUST follow this format precisely - same structure, same sections, same style. Do not add hashtags unless shown in examples:\n\n";
     
-    // Add examples to system prompt for clarity
-    for (const example of agent.messageExamples.slice(0, 3)) {
+    // Add examples to system prompt for clarity (support up to 10 for multiple content types)
+    for (const example of agent.messageExamples.slice(0, 10)) {
       const content = typeof example === "string" 
         ? example 
         : (example && typeof example === "object" && "content" in example) 

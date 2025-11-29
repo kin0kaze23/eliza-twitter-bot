@@ -1703,8 +1703,12 @@ Respond in JSON format:
         recentVerses,
       });
       
-      // Use the SAME prompt as force-post for consistency
-      const tweetPrompt = prompt || "Generate a post following the exact structure and format demonstrated in your message examples. Use current knowledge base content as source material.";
+      // Dynamic prompt that allows content type selection and flexible KB usage
+      const defaultPrompt = `Generate a post by following these steps:
+1. RANDOMLY select ONE content type from those defined in your system prompt (e.g., Event-based, Verse-based, Wisdom bite, etc.)
+2. Follow the exact format shown in the message example for that content type
+3. Use Knowledge Base content ONLY if relevant to the selected content type (Event-based posts should use KB; Encouragement/Wisdom posts may not need KB)`;
+      const tweetPrompt = prompt || defaultPrompt;
       
       // Build messages for AI model
       const messages = buildMessagesArray(
@@ -1914,7 +1918,10 @@ Respond in JSON format:
         recentVerses,
       });
       
-      const tweetPrompt = "Generate a post following the exact structure and format demonstrated in your message examples. Use current knowledge base content as source material.";
+      const tweetPrompt = `Generate a post by following these steps:
+1. RANDOMLY select ONE content type from those defined in your system prompt (e.g., Event-based, Verse-based, Wisdom bite, etc.)
+2. Follow the exact format shown in the message example for that content type
+3. Use Knowledge Base content ONLY if relevant to the selected content type (Event-based posts should use KB; Encouragement/Wisdom posts may not need KB)`;
       const messages = buildMessagesArray(assembledPrompt, [], tweetPrompt);
       
       const postModelProvider = agent.postModelProvider || agent.modelProvider || "openai";
