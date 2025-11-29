@@ -145,6 +145,78 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get prompt analysis for debugging/inspection
+  app.get("/api/agents/:id/prompt-analysis", async (req, res) => {
+    try {
+      const agent = await storage.getAgent(req.params.id);
+      if (!agent) {
+        return res.status(404).json({ error: "Agent not found" });
+      }
+
+      // Get knowledge base for context
+      const knowledgeEntries = await storage.getActiveKnowledgeBase(req.params.id);
+      
+      // Get recent verses and content types for full context
+      const verseWindow = agent.verseReuseWindow || 10;
+      const recentVerses = await storage.getRecentVerseUsages(req.params.id, verseWindow);
+      const recentContentTypes = await storage.getRecentContentTypeUsages(req.params.id, 7);
+      
+      // Assemble the full system prompt
+      const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
+        includeKnowledge: true,
+        includeExamples: true,
+        includePersonality: true,
+        maxKbEntries: 20,
+        maxKbTokens: 2000,
+        recentVerses,
+        recentContentTypes,
+      });
+      
+      // Extract sections from the system prompt for labeling
+      const sections: { name: string; content: string; category: string }[] = [];
+      const systemPrompt = assembledPrompt.systemPrompt;
+      
+      // Identify key sections by looking for patterns
+      if (systemPrompt.includes("CHARACTER PERSONALITY")) {
+        sections.push({ name: "Personality", content: "", category: "voice" });
+      }
+      if (systemPrompt.includes("KNOWLEDGE BASE")) {
+        sections.push({ name: "Knowledge Base", content: "", category: "data" });
+      }
+      if (systemPrompt.includes("BIBLE VERSE USAGE")) {
+        sections.push({ name: "Bible Verse Guidelines", content: "", category: "rules" });
+      }
+      if (systemPrompt.includes("CONTENT TYPE")) {
+        sections.push({ name: "Content Type Selection", content: "", category: "rules" });
+      }
+      if (systemPrompt.includes("FORMAT CHECKLIST") || systemPrompt.includes("FORMATTING")) {
+        sections.push({ name: "Format Rules", content: "", category: "rules" });
+      }
+      if (systemPrompt.includes("FORBIDDEN") || systemPrompt.includes("DO NOT")) {
+        sections.push({ name: "Restrictions", content: "", category: "safety" });
+      }
+      if (systemPrompt.includes("EXAMPLE")) {
+        sections.push({ name: "Examples", content: "", category: "examples" });
+      }
+      if (systemPrompt.includes("HISTORICAL CONTEXT")) {
+        sections.push({ name: "Historical Context", content: "", category: "rules" });
+      }
+      
+      res.json({
+        systemPrompt: assembledPrompt.systemPrompt,
+        userPrompt: agent.personalityPrompt || "",
+        sections,
+        metadata: assembledPrompt.metadata,
+        kbEntriesCount: knowledgeEntries.length,
+        recentVersesCount: recentVerses.length,
+        recentContentTypesCount: recentContentTypes.length,
+      });
+    } catch (error) {
+      console.error("Error analyzing prompts:", error);
+      res.status(500).json({ error: "Failed to analyze prompts" });
+    }
+  });
+
   // Update agent status (deploy/pause/test)
   app.patch("/api/agents/:id/status", async (req, res) => {
     try {

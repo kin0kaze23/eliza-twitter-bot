@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Play, RefreshCw, AlertCircle, CheckCircle2, XCircle, Send, ExternalLink, Zap } from "lucide-react";
+import { Play, RefreshCw, AlertCircle, CheckCircle2, XCircle, Send, ExternalLink, Zap, FileSearch, Copy, Eye, AlertTriangle } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
@@ -56,6 +56,26 @@ export default function Playground() {
   const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([]);
   const [conversationInput, setConversationInput] = useState("");
   
+  // Prompt Inspector state
+  const [promptInspector, setPromptInspector] = useState<{
+    systemPrompt: string;
+    userPrompt: string;
+    sections: { name: string; content: string; category: string }[];
+    conflicts: { type: string; message: string; severity: 'warning' | 'error' | 'info' }[];
+    isLoading: boolean;
+    hasFetched: boolean;
+  }>({
+    systemPrompt: "",
+    userPrompt: "",
+    sections: [],
+    conflicts: [],
+    isLoading: false,
+    hasFetched: false,
+  });
+  
+  // Active tab state for triggering prompt fetch
+  const [activeTab, setActiveTab] = useState("generate");
+  
   // Set first agent as selected when agents load
   useEffect(() => {
     if (agents && agents.length > 0 && !selectedAgent) {
@@ -80,6 +100,13 @@ export default function Playground() {
       validateConfig(currentAgent);
     }
   }, [currentAgent]);
+
+  // Auto-fetch prompt analysis when prompts tab is activated (always fetch fresh data)
+  useEffect(() => {
+    if (activeTab === "prompts" && selectedAgent) {
+      fetchPromptAnalysis();
+    }
+  }, [activeTab, selectedAgent]);
 
   const handleForceGenerateAndPost = async () => {
     if (!selectedAgent) {
@@ -431,6 +458,114 @@ export default function Playground() {
     }
   };
 
+  // Fetch and analyze prompts for the inspector
+  const fetchPromptAnalysis = async () => {
+    if (!selectedAgent) return;
+    
+    setPromptInspector(prev => ({ ...prev, isLoading: true }));
+    
+    try {
+      const response = await fetch(`/api/agents/${selectedAgent}/prompt-analysis`);
+      const data = await response.json();
+      
+      if (response.ok) {
+        // Analyze for conflicts using backend sections metadata
+        const conflicts: { type: string; message: string; severity: 'warning' | 'error' | 'info' }[] = [];
+        
+        const systemPrompt = data.systemPrompt || "";
+        const userPrompt = data.userPrompt || "";
+        const sections = data.sections || [];
+        const sectionNames = sections.map((s: any) => s.name.toLowerCase());
+        
+        // Only check if user has a personality prompt
+        if (userPrompt && userPrompt.length > 0) {
+          const userLower = userPrompt.toLowerCase();
+          
+          // Check if user prompt duplicates sections already in system prompt
+          if (sectionNames.includes("format rules") && 
+              (userLower.match(/\b(spacing|line break|paragraph|format)\b/i))) {
+            conflicts.push({
+              type: "Redundancy",
+              message: "System prompt already includes Format Rules. Your personality prompt may have redundant spacing/format instructions.",
+              severity: "info"
+            });
+          }
+          
+          if (sectionNames.includes("bible verse guidelines") && 
+              userLower.match(/\b(bible|scripture|verse|psalm|proverb)\b/i)) {
+            conflicts.push({
+              type: "Redundancy", 
+              message: "System prompt already includes Bible Verse Guidelines. Consider removing Bible-specific rules from your personality prompt.",
+              severity: "info"
+            });
+          }
+          
+          if (sectionNames.includes("restrictions") && 
+              userLower.match(/\b(don't|do not|never|avoid|forbidden)\b/i)) {
+            conflicts.push({
+              type: "Overlap",
+              message: "System prompt already includes Restrictions. Negative instructions in personality may conflict.",
+              severity: "warning"
+            });
+          }
+          
+          // Character restriction conflicts
+          if (userLower.match(/\b(em[\s-]?dash|smart[\s-]?quote|curly[\s-]?quote)\b/i)) {
+            conflicts.push({
+              type: "Unnecessary",
+              message: "Character restrictions (em dashes, smart quotes) are auto-cleaned by the system. No need to mention them.",
+              severity: "info"
+            });
+          }
+          
+          // Emoji conflicts
+          if (userLower.match(/\bemoji\b/i)) {
+            if (systemPrompt.toLowerCase().includes("no emoji") || 
+                systemPrompt.toLowerCase().includes("without emoji")) {
+              conflicts.push({
+                type: "Conflict",
+                message: "System prompt prohibits emojis but your personality prompt mentions them.",
+                severity: "warning"
+              });
+            }
+          }
+        }
+        
+        // If no conflicts, show a success message
+        if (conflicts.length === 0 && userPrompt && userPrompt.length > 0) {
+          conflicts.push({
+            type: "OK",
+            message: "No obvious conflicts detected between your personality prompt and the system prompt.",
+            severity: "info"
+          });
+        }
+        
+        setPromptInspector({
+          systemPrompt: data.systemPrompt || "",
+          userPrompt: userPrompt,
+          sections: data.sections || [],
+          conflicts,
+          isLoading: false,
+          hasFetched: true,
+        });
+      } else {
+        setPromptInspector(prev => ({ ...prev, isLoading: false, hasFetched: true }));
+      }
+    } catch (error) {
+      console.error("Failed to fetch prompt analysis:", error);
+      setPromptInspector(prev => ({ ...prev, isLoading: false, hasFetched: true }));
+    }
+  };
+
+  // Copy text to clipboard
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    toast({
+      title: "Copied!",
+      description: `${label} copied to clipboard`,
+    });
+  };
+
   return (
     <div className="space-y-8">
       <div>
@@ -469,10 +604,11 @@ export default function Playground() {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="generate" className="space-y-6">
-        <TabsList>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <TabsList className="flex-wrap">
           <TabsTrigger value="generate">Tweet Generation</TabsTrigger>
           <TabsTrigger value="conversation">Conversation Test</TabsTrigger>
+          <TabsTrigger value="prompts">Prompt Inspector</TabsTrigger>
           <TabsTrigger value="validation">Config Validation</TabsTrigger>
           <TabsTrigger value="debug">Debug Info</TabsTrigger>
         </TabsList>
@@ -997,6 +1133,153 @@ export default function Playground() {
               </CardContent>
             </Card>
           )}
+        </TabsContent>
+
+        <TabsContent value="prompts" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileSearch className="h-5 w-5" />
+                    Prompt Inspector
+                  </CardTitle>
+                  <CardDescription>
+                    View, analyze, and debug your prompt configuration. Identify conflicts and overlaps.
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={fetchPromptAnalysis}
+                  disabled={promptInspector.isLoading || !selectedAgent}
+                  data-testid="button-refresh-prompts"
+                >
+                  {promptInspector.isLoading ? (
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
+                  Refresh
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {!selectedAgent ? (
+                <p className="text-sm text-muted-foreground">Select an agent to inspect prompts</p>
+              ) : promptInspector.isLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <>
+                  {/* Conflict Alerts */}
+                  {promptInspector.conflicts.length > 0 && (
+                    <div className="space-y-2">
+                      <h3 className="font-medium flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                        Potential Issues Detected
+                      </h3>
+                      <div className="space-y-2">
+                        {promptInspector.conflicts.map((conflict, idx) => (
+                          <div
+                            key={idx}
+                            className={`p-3 rounded border text-sm ${
+                              conflict.severity === 'error' ? 'bg-destructive/10 border-destructive/30' :
+                              conflict.severity === 'warning' ? 'bg-yellow-500/10 border-yellow-500/30' :
+                              'bg-blue-500/10 border-blue-500/30'
+                            }`}
+                          >
+                            <Badge variant="outline" className="mb-1">
+                              {conflict.type}
+                            </Badge>
+                            <p className="text-muted-foreground">{conflict.message}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Section Labels */}
+                  {promptInspector.sections.length > 0 && (
+                    <div className="space-y-2">
+                      <h3 className="font-medium">System Prompt Sections</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {promptInspector.sections.map((section, idx) => (
+                          <Badge key={idx} variant="secondary">
+                            {section.name}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Side-by-Side Prompt View */}
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {/* System Prompt */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-medium text-sm">Full System Prompt (Backend)</h3>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => copyToClipboard(promptInspector.systemPrompt, "System prompt")}
+                          data-testid="button-copy-system-prompt"
+                        >
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </div>
+                      <div className="bg-muted rounded border max-h-[500px] overflow-auto">
+                        <pre className="p-4 text-xs whitespace-pre-wrap font-mono">
+                          {promptInspector.systemPrompt || "Click 'Refresh' to load the system prompt"}
+                        </pre>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {promptInspector.systemPrompt.length} characters
+                      </p>
+                    </div>
+
+                    {/* User Prompt / Personality */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-medium text-sm">Your Custom Prompt (Personality)</h3>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => copyToClipboard(promptInspector.userPrompt, "User prompt")}
+                          data-testid="button-copy-user-prompt"
+                        >
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </div>
+                      <div className="bg-muted rounded border max-h-[500px] overflow-auto">
+                        <pre className="p-4 text-xs whitespace-pre-wrap font-mono">
+                          {promptInspector.userPrompt || "No personality prompt configured"}
+                        </pre>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {promptInspector.userPrompt.length} characters
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Quick Tips */}
+                  <div className="bg-muted/50 p-4 rounded border space-y-2">
+                    <h3 className="font-medium text-sm flex items-center gap-2">
+                      <Eye className="h-4 w-4" />
+                      Quick Tips for Prompt Optimization
+                    </h3>
+                    <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+                      <li><strong>Avoid redundancy:</strong> If the system prompt already has formatting rules, don't repeat them in your personality prompt</li>
+                      <li><strong>Character restrictions:</strong> Em dashes, smart quotes, and emojis are automatically cleaned - no need to mention in your prompt</li>
+                      <li><strong>Bible verse context:</strong> Historical context is enforced by the system - focus on tone and style in your prompt</li>
+                      <li><strong>Spacing:</strong> Line breaks between paragraphs are preserved automatically - add structure guidance, not spacing rules</li>
+                      <li><strong>Content types:</strong> The 7 content types rotate automatically - customize the voice, not the format</li>
+                    </ul>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="validation" className="space-y-6">
