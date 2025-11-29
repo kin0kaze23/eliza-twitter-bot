@@ -1815,14 +1815,23 @@ Respond in JSON format:
       
       const defaultPrompt = `Generate a "${selectedTypeLabel}" post.
 
-CRITICAL INSTRUCTIONS:
-1. Follow the EXACT format shown in the example above - copy its structure precisely
-2. Match all line breaks, spacing, and paragraph structure exactly
-3. ${needsKB ? "Use the Knowledge Base content provided" : "Write from Scripture and spiritual wisdom"}
-4. Avoid recently used Bible verses (see guidelines above)
-5. Keep under 280 characters unless the example shows multi-paragraph format
+CRITICAL FORMAT REQUIREMENTS:
+1. Use BLANK LINES between paragraphs for easy reading
+2. Match the EXACT structure from the example above
+3. Keep paragraphs SHORT (2-3 sentences max)
+4. ${needsKB ? "Reference the Knowledge Base content provided" : "Draw from Scripture and spiritual wisdom"}
 
-OUTPUT: Write ONLY the tweet content, nothing else.`;
+BIBLE VERSE REQUIREMENT:
+- When quoting Scripture, include brief HISTORICAL CONTEXT
+- Example: "Paul wrote to the Corinthians during a time when..."
+- Explain who wrote it, to whom, and why it matters
+
+DO NOT:
+- Write one long cramped paragraph
+- Use em dashes or smart quotes
+- Add hashtags or decorations
+
+OUTPUT: Write ONLY the tweet content with proper spacing.`;
       const tweetPrompt = prompt || defaultPrompt;
       auditLog.prompt = tweetPrompt;
       console.log(`[TWEET TEST] Using ${prompt ? "custom" : "default"} prompt`);
@@ -2089,12 +2098,23 @@ OUTPUT: Write ONLY the tweet content, nothing else.`;
         recentVerses,
       });
       
-      const tweetPrompt = `Generate a single post following these rules:
-1. SELECT a content type based on the Content Type Selection Guidelines in your system prompt (prioritize unused types if rotation is enabled)
-2. MATCH the exact format and structure shown in the message examples for that content type
-3. USE Knowledge Base content for Event-based or Cultural posts; for other types (Verse Reflection, Wisdom Bite, Encouragement, Deep Question, Eternity Anchor), write from Scripture and wisdom without requiring KB
-4. AVOID recently used Bible verses as specified in the verse guidelines
-5. Keep the post under 280 characters unless creating a thread`;
+      const tweetPrompt = `Generate a single post following these critical rules:
+
+FORMAT REQUIREMENTS:
+1. Use BLANK LINES between paragraphs for easy reading
+2. Match the EXACT structure from the message examples
+3. Keep paragraphs SHORT (2-3 sentences max)
+
+CONTENT REQUIREMENTS:
+1. For Event-based or Cultural posts: USE Knowledge Base content
+2. For other types: Draw from Scripture and spiritual wisdom
+3. AVOID recently used Bible verses (see guidelines)
+
+BIBLE VERSE REQUIREMENT:
+- Include brief HISTORICAL CONTEXT when quoting Scripture
+- Explain who wrote it, to whom, and why
+
+DO NOT write one long paragraph - use proper spacing!`;
       const messages = buildMessagesArray(assembledPrompt, [], tweetPrompt);
       
       const postModelProvider = agent.postModelProvider || agent.modelProvider || "openai";

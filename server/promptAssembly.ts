@@ -184,15 +184,21 @@ export async function assemblePrompt(
         examplesWithTypes.push(ex);
       }
       
-      systemPrompt += `### FORMAT CHECKLIST FOR ${typeLabel.toUpperCase()}:\n`;
-      systemPrompt += `- Copy the EXACT structure shown above\n`;
-      systemPrompt += `- Match all line breaks and spacing EXACTLY\n`;
-      systemPrompt += `- Use the same tone and style\n`;
-      systemPrompt += `- Do NOT add extra decorations (---, ###, etc.)\n`;
-      systemPrompt += `- Do NOT add hashtags unless shown in example\n`;
-      systemPrompt += `- Keep same paragraph structure\n`;
-      systemPrompt += `- Use ONLY standard characters: regular dashes (-), straight quotes ("), apostrophes (')\n`;
-      systemPrompt += `- NEVER use em dashes (—), en dashes (–), or curly/smart quotes (" " ' ')\n\n`;
+      systemPrompt += `### CRITICAL FORMAT RULES FOR ${typeLabel.toUpperCase()}:\n\n`;
+      systemPrompt += `**SPACING & READABILITY (MOST IMPORTANT):**\n`;
+      systemPrompt += `- Use BLANK LINES between paragraphs for readability\n`;
+      systemPrompt += `- Match the EXACT line breaks shown in the example\n`;
+      systemPrompt += `- Keep paragraphs short (2-3 sentences max)\n`;
+      systemPrompt += `- Use visual breathing room - don't cram text together\n\n`;
+      systemPrompt += `**STRUCTURE:**\n`;
+      systemPrompt += `- Copy the EXACT structure from the example above\n`;
+      systemPrompt += `- Same number of paragraphs as the example\n`;
+      systemPrompt += `- Same flow: opening hook, body, closing\n\n`;
+      systemPrompt += `**DO NOT:**\n`;
+      systemPrompt += `- Add decorations (---, ###, ***, etc.)\n`;
+      systemPrompt += `- Add hashtags unless shown in example\n`;
+      systemPrompt += `- Use em dashes (—), en dashes (–), or smart quotes (" " ' ')\n`;
+      systemPrompt += `- Write one long paragraph - ALWAYS use line breaks\n\n`;
       
       componentsIncluded.push("messageExamples");
       componentsIncluded.push(`contentType:${selectedContentType}`);
@@ -331,31 +337,42 @@ export async function assemblePrompt(
     }
   }
 
-  // 5. Bible Verse Avoidance Instructions (if verse tracking is enabled)
+  // 5. Bible Verse Guidelines with Historical Context Requirement
   const verseTrackingEnabled = (agent as any).verseTrackingEnabled !== false; // Default true
   const verseReusePolicy = (agent as any).verseReusePolicy || "avoid_recent";
   
-  systemPrompt += "## Bible Verse Usage Guidelines\n";
+  systemPrompt += "## Bible Verse Guidelines\n\n";
+  
+  // CRITICAL: Historical context requirement
+  systemPrompt += "### REQUIRED: Historical Context for Bible Verses\n";
+  systemPrompt += "When sharing ANY Bible verse, you MUST include brief historical or cultural context:\n";
+  systemPrompt += "- Who wrote it and to whom (audience, setting)\n";
+  systemPrompt += "- What was happening at the time (historical situation)\n";
+  systemPrompt += "- Why it matters for the original audience\n";
+  systemPrompt += "- How it connects to readers today\n\n";
+  systemPrompt += "Example: 'Paul wrote this to believers in Rome who faced persecution...'\n";
+  systemPrompt += "Example: 'Jesus spoke these words during the Sermon on the Mount to crowds...'\n\n";
+  componentsIncluded.push("historicalContext");
   
   if (verseTrackingEnabled && verseReusePolicy !== "allow" && recentVerses.length > 0) {
     const verseList = recentVerses.map(v => v.verseRef).join(", ");
     
-    systemPrompt += "When including Scripture references, please AVOID these recently used verses:\n";
+    systemPrompt += "### Verse Avoidance (for variety)\n";
+    systemPrompt += "AVOID these recently used verses:\n";
     systemPrompt += `${verseList}\n\n`;
     
     if (recentVerses.length >= 20) {
-      // Many verses used - provide flexibility guidance
-      systemPrompt += "NOTE: Many verses have been used recently. If you cannot find an unused verse that fits your content:\n";
-      systemPrompt += "- You MAY use a less common translation or paraphrase of a verse\n";
-      systemPrompt += "- You MAY reference a verse thematically without direct quotation\n";
-      systemPrompt += "- Prioritize content quality over strict avoidance if needed\n\n";
+      systemPrompt += "NOTE: Many verses used recently. If needed:\n";
+      systemPrompt += "- Use a less common translation or paraphrase\n";
+      systemPrompt += "- Reference thematically without direct quotation\n";
+      systemPrompt += "- Prioritize content quality over strict avoidance\n\n";
     } else {
-      systemPrompt += "Choose different, fresh Scripture passages to provide variety for your audience.\n\n";
+      systemPrompt += "Choose different, fresh Scripture passages for variety.\n\n";
     }
     
     componentsIncluded.push("verseAvoidance");
   } else {
-    systemPrompt += "Feel free to use any Scripture that fits your content. Include book, chapter, and verse references.\n\n";
+    systemPrompt += "Include book, chapter, and verse references when citing Scripture.\n\n";
   }
 
   // 5b. Content Type - Now handled server-side, only add if NOT using server selection

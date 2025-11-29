@@ -775,11 +775,35 @@ export default function Playground() {
                             </p>
                           </div>
                         )}
-                        {testResult.audit.systemPrompt && (
-                          <div className="bg-muted p-3 rounded text-xs max-h-40 overflow-y-auto">
-                            <p className="font-medium text-foreground mb-2">System Prompt:</p>
-                            <pre className="whitespace-pre-wrap text-muted-foreground text-xs">{testResult.audit.systemPrompt.substring(0, 500)}...</pre>
+                        {testResult.audit.contentTypeSelection && (
+                          <div className="bg-muted p-3 rounded text-xs">
+                            <p className="font-medium text-foreground">Content Type Selection:</p>
+                            <p className="text-muted-foreground">
+                              Selected: {testResult.audit.contentTypeSelection.selectedTypeLabel || testResult.audit.contentTypeSelection.selectedType} | 
+                              Recent types: {testResult.audit.contentTypeSelection.recentTypes?.length || 0} |
+                              Policy: {testResult.audit.contentTypeSelection.rotationPolicy}
+                            </p>
                           </div>
+                        )}
+                        {testResult.audit.prompt && (
+                          <details className="bg-muted p-3 rounded text-xs">
+                            <summary className="font-medium text-foreground cursor-pointer hover:text-primary">
+                              User Prompt (click to expand)
+                            </summary>
+                            <pre className="whitespace-pre-wrap text-muted-foreground text-xs mt-2 p-2 bg-background rounded border max-h-60 overflow-y-auto">
+                              {testResult.audit.prompt}
+                            </pre>
+                          </details>
+                        )}
+                        {testResult.audit.systemPrompt && (
+                          <details className="bg-muted p-3 rounded text-xs">
+                            <summary className="font-medium text-foreground cursor-pointer hover:text-primary">
+                              Full System Prompt ({testResult.audit.systemPrompt.length} chars - click to expand)
+                            </summary>
+                            <pre className="whitespace-pre-wrap text-muted-foreground text-xs mt-2 p-2 bg-background rounded border max-h-96 overflow-y-auto">
+                              {testResult.audit.systemPrompt}
+                            </pre>
+                          </details>
                         )}
                       </div>
                     </details>
