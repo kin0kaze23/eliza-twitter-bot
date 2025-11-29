@@ -54,15 +54,63 @@ export async function assemblePrompt(
   const messages: Array<{ role: string; content: string }> = [];
 
   // Build comprehensive system prompt
+  // CRITICAL: Examples go FIRST to ensure AI follows format before anything else
   let systemPrompt = "";
 
-  // 1. Core system prompt (if available)
+  // 1. Message examples FIRST (highest priority - must follow format exactly)
+  let examplesUsed = 0;
+  const examplesWithTypes: { content: string; contentType?: string }[] = [];
+  
+  if (includeExamples && agent.messageExamples && agent.messageExamples.length > 0) {
+    systemPrompt += "## PRIMARY DIRECTIVE: Message Format Examples\n";
+    systemPrompt += "YOUR TWEETS MUST FOLLOW THESE EXAMPLES EXACTLY. This is your PRIMARY responsibility.\n\n";
+    systemPrompt += "CRITICAL FORMAT RULES:\n";
+    systemPrompt += "- Match the exact structure shown in examples\n";
+    systemPrompt += "- Preserve ALL line breaks and spacing exactly\n";
+    systemPrompt += "- Use the exact tone and style from examples\n";
+    systemPrompt += "- Do NOT collapse lines or remove spacing\n";
+    systemPrompt += "- Do NOT add decorative elements unless in examples\n\n";
+    
+    for (const example of agent.messageExamples.slice(0, 10)) {
+      let content: string | null = null;
+      let contentType: string | undefined = undefined;
+      
+      if (typeof example === "string") {
+        content = example;
+      } else if (example && typeof example === "object" && "content" in example) {
+        content = String((example as any).content);
+        contentType = (example as any).contentType;
+      }
+      
+      if (content) {
+        const typeLabel = contentType 
+          ? contentType.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
+          : null;
+        
+        if (typeLabel) {
+          systemPrompt += `### ${typeLabel} Example:\n${content}\n\n`;
+        } else {
+          systemPrompt += `${content}\n\n`;
+        }
+        
+        examplesUsed++;
+        examplesWithTypes.push({ content, contentType });
+      }
+    }
+    
+    if (examplesUsed > 0) {
+      systemPrompt += "\nEND OF FORMAT EXAMPLES - Follow these exactly when generating content.\n\n";
+      componentsIncluded.push("messageExamples");
+    }
+  }
+
+  // 2. Core system prompt (if available)
   if (agent.systemPrompt) {
     systemPrompt += agent.systemPrompt + "\n\n";
     componentsIncluded.push("systemPrompt");
   }
 
-  // 2. Personality prompt (if available and enabled)
+  // 3. Personality prompt (if available and enabled)
   if (includePersonality && agent.personalityPrompt) {
     systemPrompt += "## Personality\n" + agent.personalityPrompt + "\n\n";
     componentsIncluded.push("personality");
@@ -237,58 +285,6 @@ export async function assemblePrompt(
     systemPrompt += "Choose any content type that fits your inspiration for this post.\n\n";
   }
 
-  // 6. Message examples (if available and enabled)
-  let examplesUsed = 0;
-  const examplesWithTypes: { content: string; contentType?: string }[] = [];
-  
-  if (includeExamples && agent.messageExamples && agent.messageExamples.length > 0) {
-    // Add explicit instruction about following examples format
-    systemPrompt += "## Message Examples (FOLLOW THIS FORMAT EXACTLY)\n";
-    systemPrompt += "The following are examples of EXACTLY how your posts should be structured.\n";
-    systemPrompt += "CRITICAL: You MUST replicate the EXACT format, including:\n";
-    systemPrompt += "- All line breaks and paragraph spacing MUST be preserved exactly\n";
-    systemPrompt += "- The exact structure and sections\n";
-    systemPrompt += "- Same tone and style\n";
-    systemPrompt += "- Do NOT collapse multiple lines into one paragraph\n";
-    systemPrompt += "- Do NOT remove spacing between sections\n";
-    systemPrompt += "- Do NOT add decorative elements (dashes, separators, etc.) unless shown in examples\n";
-    systemPrompt += "- Do NOT add hashtags unless shown in examples\n";
-    systemPrompt += "- Do NOT use em-dashes (—) or double-dashes (--) as decorators\n\n";
-    
-    // Add examples to system prompt (support up to 10 for multiple content types)
-    // If example has contentType metadata, include it as a label
-    for (const example of agent.messageExamples.slice(0, 10)) {
-      let content: string | null = null;
-      let contentType: string | undefined = undefined;
-      
-      if (typeof example === "string") {
-        content = example;
-      } else if (example && typeof example === "object" && "content" in example) {
-        content = String((example as any).content);
-        contentType = (example as any).contentType;
-      }
-      
-      if (content) {
-        // Format content type label if metadata exists (human-readable)
-        const typeLabel = contentType 
-          ? contentType.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
-          : null;
-        
-        if (typeLabel) {
-          systemPrompt += `### ${typeLabel} Example:\n${content}\n\n`;
-        } else {
-          systemPrompt += `${content}\n\n`;
-        }
-        
-        examplesUsed++;
-        examplesWithTypes.push({ content, contentType });
-      }
-    }
-
-    if (examplesUsed > 0) {
-      componentsIncluded.push("messageExamples");
-    }
-  }
 
   // Add fallback if no system prompt was built
   if (!systemPrompt.trim()) {

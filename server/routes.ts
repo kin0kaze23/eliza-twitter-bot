@@ -1802,7 +1802,8 @@ Respond in JSON format:
       // Use post-specific model if configured, otherwise use default
       const postModelProvider = agent.postModelProvider || agent.modelProvider || "openai";
       const postModelName = agent.postModelName || agent.modelName || "gpt-4-turbo-preview";
-      const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.7;
+      // Lower temperature (0.3) for deterministic output that closely follows message examples
+      const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.3;
       const postMaxTokens = agent.postMaxTokens || 500;
       
       auditLog.modelConfig = {
@@ -2039,7 +2040,8 @@ Respond in JSON format:
       
       const postModelProvider = agent.postModelProvider || agent.modelProvider || "openai";
       const postModelName = agent.postModelName || agent.modelName || "gpt-4-turbo-preview";
-      const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.7;
+      // Lower temperature (0.3) for deterministic output that closely follows message examples
+      const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.3;
       const postMaxTokens = agent.postMaxTokens || 500;
       
       let tweetContent = "";
