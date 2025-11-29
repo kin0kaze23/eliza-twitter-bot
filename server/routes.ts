@@ -1712,6 +1712,12 @@ Respond in JSON format:
     try {
       const { agentId, prompt } = req.body;
       const conversationHistory: any[] = []; // Empty for tweet generation
+      const startTime = Date.now();
+      const auditLog: any = {
+        timestamp: new Date().toISOString(),
+        agentId,
+        promptMode: prompt ? "custom" : "auto-generated",
+      };
       
       if (!agentId) {
         return res.status(400).json({ error: "Agent ID required" });
@@ -1721,13 +1727,25 @@ Respond in JSON format:
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
+      
+      auditLog.agentName = agent.name;
+      console.log(`[TWEET TEST] Starting for agent: ${agent.name} (${agentId})`);
 
       // Get active knowledge entries
       const knowledgeEntries = await storage.getActiveKnowledgeBase(agentId);
+      auditLog.totalAvailableKBEntries = knowledgeEntries.length;
+      console.log(`[TWEET TEST] Found ${knowledgeEntries.length} available KB entries`);
       
       // Get recent verse usages for avoidance (based on agent's verse window setting)
       const verseWindow = agent.verseReuseWindow || 10;
       const recentVerses = await storage.getRecentVerseUsages(agentId, verseWindow);
+      auditLog.recentVersesAvoidance = {
+        window: verseWindow,
+        versesInWindow: recentVerses.length,
+        verses: recentVerses.map(v => v.verseRef),
+        reusePolicy: agent.verseReusePolicy || "avoid_recent",
+      };
+      console.log(`[TWEET TEST] Bible verse avoidance: ${recentVerses.length} recent verses to avoid`);
       
       // Assemble prompt with KB entries and verse avoidance
       const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
@@ -1739,6 +1757,24 @@ Respond in JSON format:
         recentVerses,
       });
       
+      const kbUsedIds = assembledPrompt.metadata.kbEntriesUsedIds || [];
+      auditLog.kbEntriesSelected = {
+        count: assembledPrompt.metadata.kbEntriesUsed,
+        ids: kbUsedIds,
+        details: knowledgeEntries
+          .filter(kb => kbUsedIds.includes(kb.id))
+          .map(kb => ({
+            id: kb.id,
+            title: kb.title,
+            category: kb.category,
+            priority: kb.priority,
+            source: kb.source,
+          })),
+      };
+      auditLog.promptComponents = assembledPrompt.metadata.componentsIncluded;
+      console.log(`[TWEET TEST] KB entries selected: ${assembledPrompt.metadata.kbEntriesUsed}`);
+      console.log(`[TWEET TEST] Prompt components: ${assembledPrompt.metadata.componentsIncluded.join(", ")}`);
+      
       // Dynamic prompt that respects content type rotation rules from system prompt
       const defaultPrompt = `Generate a single post following these rules:
 1. SELECT a content type based on the Content Type Selection Guidelines in your system prompt (prioritize unused types if rotation is enabled)
@@ -1747,6 +1783,8 @@ Respond in JSON format:
 4. AVOID recently used Bible verses as specified in the verse guidelines
 5. Keep the post under 280 characters unless creating a thread`;
       const tweetPrompt = prompt || defaultPrompt;
+      auditLog.prompt = tweetPrompt;
+      console.log(`[TWEET TEST] Using ${prompt ? "custom" : "default"} prompt`);
       
       // Build messages for AI model
       const messages = buildMessagesArray(
@@ -1754,6 +1792,10 @@ Respond in JSON format:
         conversationHistory || [],
         tweetPrompt
       );
+      
+      auditLog.systemPrompt = assembledPrompt.systemPrompt;
+      auditLog.messagesCount = messages.length;
+      console.log(`[TWEET TEST] System prompt assembled with ${messages.length} total messages`);
 
       let tweet = "";
       
@@ -1762,6 +1804,14 @@ Respond in JSON format:
       const postModelName = agent.postModelName || agent.modelName || "gpt-4-turbo-preview";
       const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.7;
       const postMaxTokens = agent.postMaxTokens || 500;
+      
+      auditLog.modelConfig = {
+        provider: postModelProvider,
+        model: postModelName,
+        temperature: postTemperature,
+        maxTokens: postMaxTokens,
+      };
+      console.log(`[TWEET TEST] Model config: ${postModelProvider}/${postModelName} (temp: ${postTemperature}, max: ${postMaxTokens})`);
       
       // Call appropriate AI model
       if (postModelProvider === "openai") {
@@ -1805,14 +1855,22 @@ Respond in JSON format:
         return res.status(400).json({ error: `Unsupported model provider: ${agent.modelProvider}` });
       }
 
+      const generationTime = Date.now() - startTime;
+      console.log(`[TWEET TEST] Generation took ${generationTime}ms`);
+      console.log(`[TWEET TEST] Raw output (before cleanup): ${tweet.substring(0, 100)}...`);
+      
       // Detect content type BEFORE stripping labels (for accurate tracking)
       const detectedContentType = detectContentType(tweet);
+      auditLog.contentTypeDetected = detectedContentType;
+      console.log(`[TWEET TEST] Content type detected: ${detectedContentType}`);
       
       // Strip content type labels from generated content (labels are for detection, not output)
       tweet = stripContentTypeLabels(tweet);
+      auditLog.finalTweetLength = tweet.length;
+      auditLog.generationTimeMs = generationTime;
+      console.log(`[TWEET TEST] Final tweet (${tweet.length} chars): ${tweet}`);
 
       // Get active KB entries for logging using the IDs from prompt assembly
-      const kbUsedIds = assembledPrompt.metadata.kbEntriesUsedIds || [];
       const kbSources = knowledgeEntries
         .filter(kb => kbUsedIds.includes(kb.id))
         .map(entry => ({
@@ -1839,6 +1897,7 @@ Respond in JSON format:
             console.error(`Failed to mark KB entry ${kbId} as used:`, err);
           }
         }
+        console.log(`[TWEET TEST] Marked ${kbUsedIds.length} KB entries as used for reuse tracking`);
       }
 
       // Send webhook notification for successful tweet generation
@@ -1850,6 +1909,9 @@ Respond in JSON format:
         }).catch(err => console.error("Webhook error:", err));
       }
 
+      console.log(`[TWEET TEST] COMPLETE - Success`);
+      console.log(`[TWEET TEST] Full audit log:`, JSON.stringify(auditLog, null, 2));
+
       res.json({
         success: true,
         tweet,
@@ -1858,11 +1920,15 @@ Respond in JSON format:
         kbEntriesCount: assembledPrompt.metadata.kbEntriesUsed,
         kbSources,
         kbMarkedAsUsed: kbUsedIds.length,
+        generationTimeMs: generationTime,
         config: {
-          provider: agent.modelProvider,
-          model: agent.modelName,
-          temperature: agent.temperature,
+          provider: postModelProvider,
+          model: postModelName,
+          temperature: postTemperature,
+          maxTokens: postMaxTokens,
         },
+        // Comprehensive audit log for debugging
+        audit: auditLog,
       });
     } catch (error: any) {
       console.error("Error testing tweet generation:", error);
