@@ -24,7 +24,8 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap, Pencil, Star, Info, Sparkles, BookOpen, MessageSquare, Thermometer, Hash, Database, Layers } from "lucide-react";
+import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap, Pencil, Star, Info, Sparkles, BookOpen, MessageSquare, Thermometer, Hash, Database, Layers, Twitter } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
@@ -107,6 +108,11 @@ export default function AgentConfigure() {
     appId: "",
     oauthClientId: "",
     oauthClientSecret: "",
+    // Scraper credentials (cookie-based auth, bypasses API limitations)
+    username: "",
+    password: "",
+    email: "",
+    twoFactorSecret: "",
   });
   
   const [twitterTestResult, setTwitterTestResult] = useState<{ success: boolean; message?: string; error?: string; hint?: string; user?: any } | null>(null);
@@ -705,6 +711,11 @@ export default function AgentConfigure() {
         // Twitter API (OAuth 2.0)
         twitterOAuthClientId: twitterConfig.oauthClientId,
         twitterOAuthClientSecret: twitterConfig.oauthClientSecret,
+        // Twitter Scraper Credentials (cookie-based auth for mention detection)
+        twitterUsername: twitterConfig.username,
+        twitterPassword: twitterConfig.password,
+        twitterEmail: twitterConfig.email,
+        twitter2faSecret: twitterConfig.twoFactorSecret,
         // Character
         name: character.name,
         username: character.username,
@@ -885,6 +896,11 @@ export default function AgentConfigure() {
       appId: agent.twitterAppId || "",
       oauthClientId: agent.twitterOAuthClientId || "",
       oauthClientSecret: agent.twitterOAuthClientSecret || "",
+      // Scraper credentials
+      username: agent.twitterUsername || "",
+      password: agent.twitterPassword || "",
+      email: agent.twitterEmail || "",
+      twoFactorSecret: agent.twitter2faSecret || "",
     });
     
     // Load character
@@ -1285,6 +1301,90 @@ export default function AgentConfigure() {
                     {showSecrets.oauthClientSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
+              </div>
+
+              <Separator className="my-6" />
+
+              <Alert className="bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800">
+                <Twitter className="h-4 w-4 text-blue-500" />
+                <AlertDescription className="text-sm">
+                  <strong>Scraper Authentication</strong> (recommended for Free tier) - Uses cookie-based login to bypass API limitations for reading mentions and comments. This is the same approach used by ElizaOS.
+                </AlertDescription>
+              </Alert>
+
+              <div className="space-y-2">
+                <Label htmlFor="twitter-username">Twitter Username</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="twitter-username"
+                    type="text"
+                    value={twitterConfig.username}
+                    onChange={(e) => setTwitterConfig({ ...twitterConfig, username: e.target.value })}
+                    placeholder="Your Twitter username (without @)..."
+                    className="font-mono text-sm"
+                    data-testid="input-twitter-username"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Used for cookie-based authentication to read mentions and comments without API access.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="twitter-password">Twitter Password</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="twitter-password"
+                    type={showSecrets.twitterPassword ? "text" : "password"}
+                    value={showSecrets.twitterPassword ? twitterConfig.password : maskSecret(twitterConfig.password)}
+                    onChange={(e) => setTwitterConfig({ ...twitterConfig, password: e.target.value })}
+                    placeholder="Your Twitter password..."
+                    className="font-mono text-sm"
+                    data-testid="input-twitter-password"
+                  />
+                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("twitterPassword")}>
+                    {showSecrets.twitterPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="twitter-email">Twitter Account Email (optional)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="twitter-email"
+                    type="email"
+                    value={twitterConfig.email}
+                    onChange={(e) => setTwitterConfig({ ...twitterConfig, email: e.target.value })}
+                    placeholder="Email associated with your Twitter account..."
+                    className="font-mono text-sm"
+                    data-testid="input-twitter-email"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Sometimes required for login verification. Provide if login fails.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="twitter-2fa">2FA Secret (optional)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="twitter-2fa"
+                    type={showSecrets.twitter2FA ? "text" : "password"}
+                    value={showSecrets.twitter2FA ? twitterConfig.twoFactorSecret : maskSecret(twitterConfig.twoFactorSecret)}
+                    onChange={(e) => setTwitterConfig({ ...twitterConfig, twoFactorSecret: e.target.value })}
+                    placeholder="TOTP secret for 2FA..."
+                    className="font-mono text-sm"
+                    data-testid="input-twitter-2fa"
+                  />
+                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("twitter2FA")}>
+                    {showSecrets.twitter2FA ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  If you have 2FA enabled, provide the TOTP secret (from your authenticator app setup).
+                </p>
               </div>
             </CardContent>
             <CardFooter className="flex flex-col gap-4">
