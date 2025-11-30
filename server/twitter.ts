@@ -345,6 +345,7 @@ export async function fetchMentions(
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
+      const rawError = JSON.stringify(errorData);
       
       if (response.status === 429) {
         return {
@@ -352,16 +353,27 @@ export async function fetchMentions(
           error: "Rate limit exceeded",
         };
       }
+      
+      // Check for Twitter API access level issues (code 89 = invalid token, often means plan-gated endpoint)
+      if (response.status === 401) {
+        const errorCode = errorData.errors?.[0]?.code;
+        if (errorCode === 89) {
+          return {
+            success: false,
+            error: "TWITTER_READ_ACCESS_REQUIRED: The mentions endpoint requires Twitter API Basic tier ($100/month) or higher. Your current plan only allows posting tweets. Upgrade to Basic tier and regenerate API tokens with read permissions.",
+          };
+        }
+      }
 
       return {
         success: false,
-        error: errorData.detail || errorData.title || `HTTP ${response.status}`,
+        error: `HTTP ${response.status}: ${rawError}`,
       };
     }
 
     const data = await response.json();
     
-    // Parse the response
+    // Parse the response - mentions endpoint
     const mentions: TwitterMention[] = [];
     const usersMap = new Map<string, { username: string; name: string }>();
     
@@ -475,6 +487,7 @@ export async function fetchRepliesToTweet(
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
+      const rawError = JSON.stringify(errorData);
       
       if (response.status === 429) {
         return {
@@ -482,16 +495,27 @@ export async function fetchRepliesToTweet(
           error: "Rate limit exceeded",
         };
       }
+      
+      // Check for Twitter API access level issues (code 89 = invalid token, often means plan-gated endpoint)
+      if (response.status === 401) {
+        const errorCode = errorData.errors?.[0]?.code;
+        if (errorCode === 89) {
+          return {
+            success: false,
+            error: "TWITTER_READ_ACCESS_REQUIRED: The search/replies endpoint requires Twitter API Basic tier ($100/month) or higher. Your current plan only allows posting tweets. Upgrade to Basic tier and regenerate API tokens with read permissions.",
+          };
+        }
+      }
 
       return {
         success: false,
-        error: errorData.detail || errorData.title || `HTTP ${response.status}`,
+        error: `HTTP ${response.status}: ${rawError}`,
       };
     }
 
     const data = await response.json();
     
-    // Parse the response (same format as mentions)
+    // Parse the response - search endpoint (same format as mentions)
     const mentions: TwitterMention[] = [];
     const usersMap = new Map<string, { username: string; name: string }>();
     
@@ -551,8 +575,10 @@ export async function verifyCredentials(agent: Agent): Promise<{ success: boolea
   const oauth = createOAuthClient(agent);
   const token = getToken(agent);
 
+  // Use v2 API endpoint (works on Free tier) instead of v1.1 (requires paid tier)
+  // Note: Keep URL simple for OAuth signature - we just need user ID
   const requestData = {
-    url: "https://api.twitter.com/1.1/account/verify_credentials.json",
+    url: "https://api.twitter.com/2/users/me",
     method: "GET",
   };
 
@@ -568,21 +594,32 @@ export async function verifyCredentials(agent: Agent): Promise<{ success: boolea
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
+      const errorData = await response.json().catch(() => ({}));
+      const errorText = JSON.stringify(errorData);
+      
+      // 401 on /users/me usually means app lacks "Read" permission
+      if (response.status === 401) {
+        return {
+          success: false,
+          error: `TWITTER_READ_PERMISSION_REQUIRED: Your Twitter app only has "Write" permission. To detect comments and mentions, you need to: 1) Go to Twitter Developer Portal → Your App → Settings → User authentication settings, 2) Enable "Read" permission, 3) Regenerate your Access Token and Secret, then update them in the dashboard.`,
+        };
+      }
+      
       return {
         success: false,
         error: `HTTP ${response.status}: ${errorText}`,
       };
     }
 
-    const userData = await response.json();
+    const data = await response.json();
+    const userData = data.data; // v2 API wraps user in 'data' field
     
     return {
       success: true,
       user: {
-        id: userData.id_str,
+        id: userData.id,        // v2 API uses 'id' (not 'id_str')
         name: userData.name,
-        username: userData.screen_name,
+        username: userData.username,  // v2 API uses 'username' (not 'screen_name')
       },
     };
   } catch (error) {

@@ -1105,13 +1105,16 @@ export async function startMentionPolling(agent: Agent): Promise<void> {
   const timer = setInterval(async () => {
     try {
       const currentAgent = await storage.getAgent(agent.id);
-      if (currentAgent && currentAgent.status === "active" && currentAgent.replyEnabled) {
+      // Only require replyEnabled - don't require "active" status for single-agent dashboard
+      // This allows comment detection to work regardless of posting schedule status
+      if (currentAgent && currentAgent.replyEnabled) {
         // Poll for direct @mentions
         await pollMentions(currentAgent);
         
         // Also poll for comments on bot's recent tweets (replies without @mention)
         await pollComments(currentAgent);
       } else {
+        console.log(`[MentionBot] Replies disabled for agent ${agent.id}, stopping polling`);
         stopMentionPolling(agent.id);
       }
     } catch (error) {
@@ -1161,14 +1164,28 @@ export async function initializeScheduler(): Promise<void> {
   
   try {
     const agents = await storage.getAllAgents();
-    const activeAgents = agents.filter(
+    
+    // Start posting scheduler for active agents with posting enabled
+    const postingAgents = agents.filter(
       (a) => a.status === "active" && a.postingEnabled
     );
     
-    console.log(`[Scheduler] Found ${activeAgents.length} active agents with posting enabled`);
+    console.log(`[Scheduler] Found ${postingAgents.length} active agents with posting enabled`);
     
-    for (const agent of activeAgents) {
+    for (const agent of postingAgents) {
       startAgent(agent);
+    }
+    
+    // CRITICAL: Also start mention polling for agents with replyEnabled
+    // This enables comment detection even if posting isn't enabled or agent isn't "active"
+    const replyAgents = agents.filter(a => a.replyEnabled);
+    console.log(`[Scheduler] Found ${replyAgents.length} agents with replies enabled`);
+    
+    for (const agent of replyAgents) {
+      // Only start if not already started (posting agents already have mention polling)
+      if (!state.mentionPollers.has(agent.id)) {
+        startMentionPolling(agent);
+      }
     }
     
     // Start KB refresh service for agents with auto-refresh enabled
