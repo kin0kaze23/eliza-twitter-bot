@@ -579,17 +579,23 @@ export async function verifyCredentials(agent: Agent): Promise<{ success: boolea
   // Note: Keep URL simple for OAuth signature - we just need user ID
   const requestData = {
     url: "https://api.twitter.com/2/users/me",
-    method: "GET",
+    method: "GET" as const,
   };
 
-  const authHeader = oauth.toHeader(oauth.authorize(requestData, token));
+  const authorized = oauth.authorize(requestData, token);
+  const authHeader = oauth.toHeader(authorized);
+  
+  // Debug logging (safe - only shows key prefixes)
+  const apiKeyPrefix = agent.twitterApiKey?.substring(0, 8) || "missing";
+  const accessTokenPrefix = agent.twitterAccessToken?.substring(0, 8) || "missing";
+  console.log(`[Twitter] verifyCredentials: API Key prefix=${apiKeyPrefix}..., Access Token prefix=${accessTokenPrefix}...`);
+  console.log(`[Twitter] verifyCredentials: Auth header keys: ${Object.keys(authHeader).join(", ")}`);
 
   try {
     const response = await fetch(requestData.url, {
       method: "GET",
       headers: {
         ...authHeader,
-        "Content-Type": "application/json",
       },
     });
 
@@ -597,11 +603,27 @@ export async function verifyCredentials(agent: Agent): Promise<{ success: boolea
       const errorData = await response.json().catch(() => ({}));
       const errorText = JSON.stringify(errorData);
       
-      // 401 on /users/me usually means app lacks "Read" permission
+      // Log full error for debugging
+      console.log(`[Twitter] verifyCredentials FAILED: HTTP ${response.status}, Response: ${errorText}`);
+      console.log(`[Twitter] Response headers:`, Object.fromEntries(response.headers.entries()));
+      
+      // 401 on /users/me - check specific error details
       if (response.status === 401) {
+        // Check for specific Twitter error codes in the response
+        const detail = errorData.detail || errorData.errors?.[0]?.message || "";
+        const title = errorData.title || "";
+        
+        // If it's a generic "Unauthorized" without specifics, might be token issue
+        if (title === "Unauthorized" && detail === "Unauthorized") {
+          return {
+            success: false,
+            error: `TWITTER_AUTH_FAILED: OAuth authentication failed. This usually means: 1) Access Token/Secret in dashboard doesn't match what's in Twitter Developer Portal, OR 2) Tokens were regenerated but not updated in dashboard. Please verify your credentials match.`,
+          };
+        }
+        
         return {
           success: false,
-          error: `TWITTER_READ_PERMISSION_REQUIRED: Your Twitter app only has "Write" permission. To detect comments and mentions, you need to: 1) Go to Twitter Developer Portal → Your App → Settings → User authentication settings, 2) Enable "Read" permission, 3) Regenerate your Access Token and Secret, then update them in the dashboard.`,
+          error: `TWITTER_401_ERROR: ${errorText}`,
         };
       }
       

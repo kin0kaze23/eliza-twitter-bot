@@ -1088,6 +1088,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Diagnose Twitter credentials - check both POST and GET capabilities
+  app.get("/api/agents/:agentId/diagnose/twitter", async (req, res) => {
+    try {
+      const { agentId } = req.params;
+      const agent = await storage.getAgent(agentId);
+      
+      if (!agent) {
+        return res.status(404).json({ error: "Agent not found" });
+      }
+      
+      // Credential info (safe - only prefixes and lengths)
+      const credentialInfo = {
+        apiKey: {
+          present: !!agent.twitterApiKey,
+          length: agent.twitterApiKey?.length || 0,
+          prefix: agent.twitterApiKey?.substring(0, 8) || "missing",
+        },
+        apiSecret: {
+          present: !!agent.twitterApiSecret,
+          length: agent.twitterApiSecret?.length || 0,
+          prefix: agent.twitterApiSecret?.substring(0, 8) || "missing",
+        },
+        accessToken: {
+          present: !!agent.twitterAccessToken,
+          length: agent.twitterAccessToken?.length || 0,
+          prefix: agent.twitterAccessToken?.substring(0, 12) || "missing",
+        },
+        accessSecret: {
+          present: !!agent.twitterAccessSecret,
+          length: agent.twitterAccessSecret?.length || 0,
+          prefix: agent.twitterAccessSecret?.substring(0, 8) || "missing",
+        },
+      };
+      
+      // Test 1: GET /2/users/me (should work on Free tier)
+      let getUserTest = { success: false, error: "", details: "" };
+      try {
+        const oauth = new OAuth({
+          consumer: { key: agent.twitterApiKey!, secret: agent.twitterApiSecret! },
+          signature_method: 'HMAC-SHA1',
+          hash_function(base_string: string, key: string) {
+            return crypto.createHmac('sha1', key).update(base_string).digest('base64');
+          },
+        });
+        const token = { key: agent.twitterAccessToken!, secret: agent.twitterAccessSecret! };
+        const requestData = { url: 'https://api.twitter.com/2/users/me', method: 'GET' as const };
+        const authHeader = oauth.toHeader(oauth.authorize(requestData, token));
+        
+        const response = await fetch(requestData.url, {
+          method: 'GET',
+          headers: { ...authHeader },
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          getUserTest = { success: true, error: "", details: JSON.stringify(data) };
+        } else {
+          const errorData = await response.json().catch(() => ({}));
+          getUserTest = { success: false, error: `HTTP ${response.status}`, details: JSON.stringify(errorData) };
+        }
+      } catch (e: any) {
+        getUserTest = { success: false, error: e.message, details: "" };
+      }
+      
+      res.json({
+        agentName: agent.name,
+        credentials: credentialInfo,
+        tests: {
+          getUserMe: getUserTest,
+        },
+        recommendation: getUserTest.success 
+          ? "Credentials are working! GET requests are functional."
+          : `GET request failed. Check if: 1) Access Token was regenerated AFTER enabling Read+Write permissions, 2) All 4 credentials are complete (not truncated), 3) No extra spaces in credential values`,
+      });
+      
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Test Twitter API credentials
   app.post("/api/agents/:agentId/test/twitter", async (req, res) => {
     try {
