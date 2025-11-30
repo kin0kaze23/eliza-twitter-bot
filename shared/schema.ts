@@ -40,6 +40,14 @@ export const agents = pgTable("agents", {
   twitterOAuthClientId: text("twitter_oauth_client_id"),
   twitterOAuthClientSecret: text("twitter_oauth_client_secret"),
   
+  // Cookie-based authentication (for scraping - like ElizaOS)
+  // This bypasses Twitter API limitations for reading mentions/replies
+  twitterUsername: text("twitter_username"), // @username (without @)
+  twitterPassword: text("twitter_password"), // account password
+  twitterEmail: text("twitter_email"), // account email (for login)
+  twitter2faSecret: text("twitter_2fa_secret"), // optional 2FA TOTP secret
+  twitterCookies: text("twitter_cookies"), // cached session cookies (JSON)
+  
   // Character & Prompts
   systemPrompt: text("system_prompt"),
   personalityPrompt: text("personality_prompt"),
