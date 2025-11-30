@@ -28,7 +28,13 @@ interface SchedulerState {
   repliesThisHour: Map<string, { count: number; hourStart: Date }>; // Track replies per hour per agent
   recentBotTweets: Map<string, TrackedTweet[]>; // Track recent bot tweets for comment detection
   lastCleanupDate: string;
+  // NEW: Rate limit backoff and posting lock
+  rateLimitBackoff: Map<string, Date>; // When rate limited, store the time to resume
+  postingLock: Map<string, boolean>; // Prevent concurrent posting attempts
 }
+
+// Rate limit backoff duration (15 minutes)
+const RATE_LIMIT_BACKOFF_MS = 15 * 60 * 1000;
 
 const state: SchedulerState = {
   isRunning: false,
@@ -41,6 +47,8 @@ const state: SchedulerState = {
   repliesThisHour: new Map(),
   recentBotTweets: new Map(),
   lastCleanupDate: new Date().toISOString().split("T")[0],
+  rateLimitBackoff: new Map(),
+  postingLock: new Map(),
 };
 
 /**
@@ -265,6 +273,7 @@ function detectContentType(content: string): string | null {
 /**
  * Strip content type labels and decorative elements from generated content
  * Removes: [EVENT-BASED], EVENT-BASED, em-dashes, double-dashes used as separators
+ * PRESERVES: Newlines and paragraph structure for proper Twitter formatting
  */
 function stripContentTypeLabels(content: string): string {
   return content
@@ -276,7 +285,10 @@ function stripContentTypeLabels(content: string): string {
     // Remove decorative separators (em-dashes, double-dashes used as dividers)
     .replace(/\n\s*[-–—]{2,}\s*\n/g, "\n") // Lines with only dashes
     .replace(/\s+[-–—]\s+/g, " ") // Em-dashes or dashes as separators (but keep single dash in context like "don't")
-    .replace(/\s+/g, " ") // Normalize multiple spaces
+    // CRITICAL: Only normalize horizontal whitespace (spaces/tabs), NOT newlines
+    // This preserves paragraph structure for Twitter formatting
+    .replace(/[^\S\n]+/g, " ") // Replace multiple spaces/tabs with single space, but keep newlines
+    .replace(/\n{3,}/g, "\n\n") // Limit to maximum 2 consecutive newlines
     .trim();
 }
 
@@ -342,6 +354,20 @@ function getPostIntervalMs(agent: Agent): number {
 function canPostNow(agent: Agent): boolean {
   if (!agent.postingEnabled) return false;
   if (isInQuietHours(agent)) return false;
+  
+  // Check if we're in rate limit backoff
+  const backoffUntil = state.rateLimitBackoff.get(agent.id);
+  if (backoffUntil && Date.now() < backoffUntil.getTime()) {
+    const remainingMs = backoffUntil.getTime() - Date.now();
+    console.log(`[Scheduler] Agent ${agent.name} in rate limit backoff for ${Math.ceil(remainingMs / 60000)} more minutes`);
+    return false;
+  }
+  
+  // Check if already posting (prevent duplicates)
+  if (state.postingLock.get(agent.id)) {
+    console.log(`[Scheduler] Agent ${agent.name} already posting, skipping`);
+    return false;
+  }
   
   cleanupOldPostCounts();
   
@@ -496,15 +522,19 @@ async function logActivity(data: {
 }
 
 async function executePost(agent: Agent): Promise<void> {
+  // Check if we can post (includes rate limit backoff and lock check)
+  if (!canPostNow(agent)) {
+    return;
+  }
+  
+  // Acquire posting lock to prevent duplicate posts
+  state.postingLock.set(agent.id, true);
+  
   try {
-    if (!canPostNow(agent)) {
-      return;
-    }
-    
     const validation = validateTwitterCredentials(agent);
     if (!validation.valid) {
       console.log(`Agent ${agent.name}: Missing Twitter credentials`);
-      return;
+      return; // finally block will release lock
     }
     
     console.log(`[Scheduler] Generating post for agent: ${agent.name}`);
@@ -543,6 +573,9 @@ async function executePost(agent: Agent): Promise<void> {
     if (result.success) {
       state.lastPostTime.set(agent.id, new Date());
       state.postsToday.set(postsKey, (state.postsToday.get(postsKey) || 0) + 1);
+      
+      // Clear any rate limit backoff on success - posting is working again
+      state.rateLimitBackoff.delete(agent.id);
       
       // Track this tweet for comment detection (replies without @mention)
       if (result.tweetId) {
@@ -596,6 +629,13 @@ async function executePost(agent: Agent): Promise<void> {
         );
       }
     } else {
+      // Set rate limit backoff if rate limited
+      if (result.rateLimited) {
+        const backoffUntil = new Date(Date.now() + RATE_LIMIT_BACKOFF_MS);
+        state.rateLimitBackoff.set(agent.id, backoffUntil);
+        console.log(`[Scheduler] Rate limited! Agent ${agent.name} in backoff until ${backoffUntil.toISOString()}`);
+      }
+      
       await logActivity({
         agentId: agent.id,
         eventType: "post",
@@ -627,6 +667,9 @@ async function executePost(agent: Agent): Promise<void> {
       errorMessage: error instanceof Error ? error.message : "Unknown error",
       errorCode: "SCHEDULER_ERROR",
     });
+  } finally {
+    // Always release the posting lock
+    state.postingLock.set(agent.id, false);
   }
 }
 

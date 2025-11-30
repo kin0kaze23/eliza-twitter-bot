@@ -46,6 +46,14 @@ export function validateTwitterCredentials(agent: Agent): { valid: boolean; miss
   return { valid: missing.length === 0, missing };
 }
 
+// Retry configuration for transient errors
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 2000;
+
+async function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export async function postTweet(agent: Agent, content: string): Promise<TwitterPostResult> {
   const validation = validateTwitterCredentials(agent);
   if (!validation.valid) {
@@ -65,89 +73,122 @@ export async function postTweet(agent: Agent, content: string): Promise<TwitterP
 
   const authHeader = oauth.toHeader(oauth.authorize(requestData, token));
 
-  try {
-    const response = await fetch(requestData.url, {
-      method: "POST",
-      headers: {
-        ...authHeader,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ text: content }),
-    });
+  let lastError: TwitterPostResult | null = null;
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
+  // Retry loop for transient network errors
+  for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+    try {
+      console.log(`[Twitter] Posting tweet (attempt ${attempt}/${MAX_RETRIES + 1})`);
       
-      if (response.status === 429) {
-        return {
-          success: false,
-          error: "Rate limit exceeded",
-          errorCode: "RATE_LIMIT",
-          rateLimited: true,
-        };
-      }
+      const response = await fetch(requestData.url, {
+        method: "POST",
+        headers: {
+          ...authHeader,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ text: content }),
+      });
 
-      if (response.status === 403) {
-        // Parse Twitter's specific error format
-        const errorDetail = errorData.detail || 
-                           errorData.errors?.[0]?.message ||
-                           errorData.title ||
-                           "Forbidden";
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
         
-        // Check for common 403 error patterns
-        let userFriendlyError = errorDetail;
-        let hint = "";
+        // Rate limit - no retry, return immediately
+        if (response.status === 429) {
+          return {
+            success: false,
+            error: "Rate limit exceeded",
+            errorCode: "RATE_LIMIT",
+            rateLimited: true,
+          };
+        }
+
+        // 403 Forbidden - no retry, return immediately
+        if (response.status === 403) {
+          const errorDetail = errorData.detail || 
+                             errorData.errors?.[0]?.message ||
+                             errorData.title ||
+                             "Forbidden";
+          
+          let userFriendlyError = errorDetail;
+          let hint = "";
+          
+          if (errorDetail.includes("not permitted") || errorDetail.includes("permission")) {
+            userFriendlyError = "You are not permitted to perform this action";
+            hint = "Your Twitter app may not have write permissions. Go to Twitter Developer Portal → Your App → Settings → App permissions → Enable 'Read and Write'. Then regenerate your Access Token and Secret.";
+          } else if (errorDetail.includes("suspended") || errorDetail.includes("locked")) {
+            userFriendlyError = "Twitter account is suspended or locked";
+            hint = "Check your Twitter account status at twitter.com";
+          } else if (errorDetail.includes("duplicate")) {
+            userFriendlyError = "Duplicate tweet detected";
+            hint = "Twitter doesn't allow posting the exact same content twice. The system will try a different post next time.";
+          }
+          
+          console.error(`[Twitter] 403 Error: ${errorDetail}${hint ? ` | Hint: ${hint}` : ""}`);
+          
+          return {
+            success: false,
+            error: hint ? `${userFriendlyError} - ${hint}` : userFriendlyError,
+            errorCode: "FORBIDDEN",
+            hint: hint || undefined,
+          };
+        }
+
+        // 401 Auth failed - no retry
+        if (response.status === 401) {
+          return {
+            success: false,
+            error: "Authentication failed - check Twitter credentials",
+            errorCode: "AUTH_FAILED",
+          };
+        }
+
+        // Other errors - might be transient, can retry
+        lastError = {
+          success: false,
+          error: errorData.detail || errorData.title || `HTTP ${response.status}`,
+          errorCode: `HTTP_${response.status}`,
+        };
         
-        if (errorDetail.includes("not permitted") || errorDetail.includes("permission")) {
-          userFriendlyError = "You are not permitted to perform this action";
-          hint = "Your Twitter app may not have write permissions. Go to Twitter Developer Portal → Your App → Settings → App permissions → Enable 'Read and Write'. Then regenerate your Access Token and Secret.";
-        } else if (errorDetail.includes("suspended") || errorDetail.includes("locked")) {
-          userFriendlyError = "Twitter account is suspended or locked";
-          hint = "Check your Twitter account status at twitter.com";
-        } else if (errorDetail.includes("duplicate")) {
-          userFriendlyError = "Duplicate tweet detected";
-          hint = "Twitter doesn't allow posting the exact same content twice. The system will try a different post next time.";
+        // Retry for 5xx server errors
+        if (response.status >= 500 && attempt <= MAX_RETRIES) {
+          console.log(`[Twitter] Server error, retrying in ${RETRY_DELAY_MS}ms...`);
+          await delay(RETRY_DELAY_MS);
+          continue;
         }
         
-        console.error(`[Twitter] 403 Error: ${errorDetail}${hint ? ` | Hint: ${hint}` : ""}`);
-        
-        return {
-          success: false,
-          error: hint ? `${userFriendlyError} - ${hint}` : userFriendlyError,
-          errorCode: "FORBIDDEN",
-          hint: hint || undefined,
-        };
+        return lastError;
       }
 
-      if (response.status === 401) {
-        return {
-          success: false,
-          error: "Authentication failed - check Twitter credentials",
-          errorCode: "AUTH_FAILED",
-        };
-      }
-
+      const data = await response.json();
+      console.log(`[Twitter] Tweet posted successfully: ${data.data?.id}`);
+      
       return {
-        success: false,
-        error: errorData.detail || errorData.title || `HTTP ${response.status}`,
-        errorCode: `HTTP_${response.status}`,
+        success: true,
+        tweetId: data.data?.id,
       };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      lastError = {
+        success: false,
+        error: message,
+        errorCode: "NETWORK_ERROR",
+      };
+      
+      // Retry network errors
+      if (attempt <= MAX_RETRIES) {
+        console.log(`[Twitter] Network error, retrying in ${RETRY_DELAY_MS}ms: ${message}`);
+        await delay(RETRY_DELAY_MS);
+        continue;
+      }
     }
-
-    const data = await response.json();
-    
-    return {
-      success: true,
-      tweetId: data.data?.id,
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return {
-      success: false,
-      error: message,
-      errorCode: "NETWORK_ERROR",
-    };
   }
+  
+  // If we exhausted all retries
+  return lastError || {
+    success: false,
+    error: "Failed after multiple attempts",
+    errorCode: "MAX_RETRIES_EXCEEDED",
+  };
 }
 
 export async function replyToTweet(
