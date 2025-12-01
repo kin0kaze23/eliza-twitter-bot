@@ -40,6 +40,10 @@ export interface SendReplyResult extends ScraperResult {
   tweetId?: string;
 }
 
+export interface SendTweetResult extends ScraperResult {
+  tweetId?: string;
+}
+
 async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; error?: string }> {
   const agentId = agent.id;
   
@@ -268,6 +272,28 @@ export async function sendReplyViaScraper(
     
   } catch (error: any) {
     console.error(`[Scraper] Error sending reply: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
+export async function sendTweetViaScraper(
+  agent: Agent,
+  tweetText: string
+): Promise<SendTweetResult> {
+  const { scraper, error } = await getOrCreateScraper(agent);
+  if (error) {
+    return { success: false, error };
+  }
+  
+  try {
+    // Send the tweet (no replyToTweetId means it's a new tweet)
+    const response = await scraper.sendTweet(tweetText);
+    
+    console.log(`[Scraper] Tweet posted successfully for ${agent.name}`);
+    return { success: true };
+    
+  } catch (error: any) {
+    console.error(`[Scraper] Error posting tweet: ${error.message}`);
     return { success: false, error: error.message };
   }
 }

@@ -12,6 +12,7 @@ import { assemblePrompt, buildMessagesArray, selectNextContentType, formatConten
 import { sendPostCreatedWebhook, sendPostFailedWebhook } from "./webhook";
 import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
 import { requireAuth, verifyPassword, hashPassword } from "./auth";
+import { verifyScraperCredentials } from "./twitterScraper";
 
 /**
  * Strip content type labels and decorative elements from generated content
@@ -1168,7 +1169,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Test Twitter API credentials
+  // Test Twitter credentials (API or Scraper - versatile endpoint)
   app.post("/api/agents/:agentId/test/twitter", async (req, res) => {
     try {
       const { agentId } = req.params;
@@ -1179,113 +1180,165 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Agent not found" });
       }
       
-      // Check if all required OAuth 1.0a credentials are present
-      const requiredFields = [
-        { key: 'twitterApiKey', name: 'API Key (Consumer Key)' },
-        { key: 'twitterApiSecret', name: 'API Key Secret' },
-        { key: 'twitterAccessToken', name: 'Access Token' },
-        { key: 'twitterAccessSecret', name: 'Access Token Secret' },
-      ];
+      // Check which credentials are available
+      const hasApiCredentials = agent.twitterApiKey && agent.twitterApiSecret && 
+                                agent.twitterAccessToken && agent.twitterAccessSecret;
+      const hasScraperCredentials = agent.twitterUsername && agent.twitterPassword;
       
-      const missingFields = requiredFields.filter(field => !agent[field.key as keyof typeof agent]);
-      
-      if (missingFields.length > 0) {
+      // If neither credential type is present
+      if (!hasApiCredentials && !hasScraperCredentials) {
         return res.status(400).json({
           success: false,
-          error: "Missing Twitter credentials",
-          missingFields: missingFields.map(f => f.name),
-          details: "Please add all required OAuth 1.0a credentials in the Credentials tab",
-          hint: "For Twitter API access, you need: API Key, API Key Secret, Access Token, and Access Token Secret"
+          error: "No Twitter credentials found",
+          details: "Please provide either API credentials (for posting) OR login credentials (for mentions/replies)",
+          hint: "Option 1: Add API Key, API Secret, Access Token, Access Secret for official posting. Option 2: Add Twitter Username and Password for scraper-based access."
         });
       }
       
-      // Initialize OAuth
-      const oauth = new OAuth({
-        consumer: {
-          key: agent.twitterApiKey!,
-          secret: agent.twitterApiSecret!,
-        },
-        signature_method: 'HMAC-SHA1',
-        hash_function(base_string: string, key: string) {
-          return crypto
-            .createHmac('sha1', key)
-            .update(base_string)
-            .digest('base64');
-        },
-      });
-      
-      // Prepare token
-      const token = {
-        key: agent.twitterAccessToken!,
-        secret: agent.twitterAccessSecret!,
-      };
-      
-      // Test endpoint: Verify credentials
-      const requestData = {
-        url: 'https://api.twitter.com/1.1/account/verify_credentials.json',
-        method: 'GET',
-      };
-      
-      // Generate OAuth header
-      const authHeader = oauth.toHeader(oauth.authorize(requestData, token));
-      
-      // Make request
-      const response = await fetch(requestData.url, {
-        method: requestData.method,
-        headers: {
-          ...authHeader,
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        let errorDetails;
-        try {
-          errorDetails = JSON.parse(errorText);
-        } catch {
-          errorDetails = { message: errorText };
-        }
-        
-        let hint = "Please verify your Twitter API credentials are correct.";
-        if (response.status === 401) {
-          hint = "Authentication failed. Check that your API Key, API Secret, Access Token, and Access Token Secret are correct.";
-        } else if (response.status === 403) {
-          hint = "Access forbidden. Make sure your Twitter app has the required permissions (Read and Write).";
-        }
-        
-        return res.status(response.status).json({
-          success: false,
-          error: "Twitter API authentication failed",
-          statusCode: response.status,
-          details: errorDetails,
-          hint
-        });
-      }
-      
-      const userData = await response.json();
-      
-      // Successfully authenticated
-      res.json({
-        success: true,
-        message: "Twitter API credentials are valid! ✓",
-        user: {
-          id: userData.id_str,
-          name: userData.name,
-          username: userData.screen_name,
-          verified: userData.verified,
-          followers: userData.followers_count,
-          following: userData.friends_count,
-        },
+      const results: any = {
+        agentName: agent.name,
         testedAt: new Date().toISOString(),
-        hint: "Your Twitter bot is ready to post and interact!"
+        api: null,
+        scraper: null,
+      };
+      
+      // Test API credentials if present
+      if (hasApiCredentials) {
+        try {
+          const oauth = new OAuth({
+            consumer: {
+              key: agent.twitterApiKey!,
+              secret: agent.twitterApiSecret!,
+            },
+            signature_method: 'HMAC-SHA1',
+            hash_function(base_string: string, key: string) {
+              return crypto
+                .createHmac('sha1', key)
+                .update(base_string)
+                .digest('base64');
+            },
+          });
+          
+          const token = {
+            key: agent.twitterAccessToken!,
+            secret: agent.twitterAccessSecret!,
+          };
+          
+          const requestData = {
+            url: 'https://api.twitter.com/1.1/account/verify_credentials.json',
+            method: 'GET',
+          };
+          
+          const authHeader = oauth.toHeader(oauth.authorize(requestData, token));
+          
+          const response = await fetch(requestData.url, {
+            method: requestData.method,
+            headers: {
+              ...authHeader,
+              'Content-Type': 'application/json',
+            },
+          });
+          
+          if (response.ok) {
+            const userData = await response.json();
+            results.api = {
+              success: true,
+              message: "API credentials valid",
+              user: {
+                id: userData.id_str,
+                name: userData.name,
+                username: userData.screen_name,
+                followers: userData.followers_count,
+              },
+              capabilities: ["Posting tweets", "Replying (via API)"]
+            };
+          } else {
+            const errorText = await response.text();
+            results.api = {
+              success: false,
+              error: `HTTP ${response.status}`,
+              details: errorText,
+              hint: response.status === 401 
+                ? "Check API Key, Secret, Access Token, and Access Secret are correct"
+                : "API authentication failed"
+            };
+          }
+        } catch (e: any) {
+          results.api = {
+            success: false,
+            error: e.message,
+            hint: "Error testing API credentials"
+          };
+        }
+      }
+      
+      // Test Scraper credentials if present
+      if (hasScraperCredentials) {
+        try {
+          const scraperResult = await verifyScraperCredentials(agent);
+          if (scraperResult.success) {
+            results.scraper = {
+              success: true,
+              message: "Login credentials valid",
+              username: agent.twitterUsername,
+              capabilities: ["Detecting mentions", "Detecting comments", "Posting (fallback)", "Replying"]
+            };
+          } else {
+            results.scraper = {
+              success: false,
+              error: scraperResult.error,
+              hint: scraperResult.error?.includes('2fa') || scraperResult.error?.includes('2FA')
+                ? "Two-factor authentication required. Add your 2FA secret."
+                : scraperResult.error?.includes('locked') || scraperResult.error?.includes('suspended')
+                ? "Account may be locked or suspended. Check your Twitter account."
+                : "Check username and password are correct. Email may also be required."
+            };
+          }
+        } catch (e: any) {
+          results.scraper = {
+            success: false,
+            error: e.message,
+            hint: "Error testing login credentials"
+          };
+        }
+      }
+      
+      // Determine overall success and provide recommendation
+      const apiSuccess = results.api?.success === true;
+      const scraperSuccess = results.scraper?.success === true;
+      
+      let recommendation = "";
+      if (apiSuccess && scraperSuccess) {
+        recommendation = "Both credential types working. API will be used for posting, scraper for mention/comment detection.";
+      } else if (apiSuccess && !hasScraperCredentials) {
+        recommendation = "API credentials working. Add Twitter username/password for free mention and comment detection.";
+      } else if (scraperSuccess && !hasApiCredentials) {
+        recommendation = "Login credentials working. Scraper will handle posting and replies. For more stable posting, add API credentials.";
+      } else if (apiSuccess && !scraperSuccess) {
+        recommendation = "API working but login failed. Fix login credentials for mention/comment detection.";
+      } else if (scraperSuccess && !apiSuccess) {
+        recommendation = "Login working but API failed. Scraper will be used for all operations.";
+      } else {
+        recommendation = "Both credential types failed. Please check your credentials.";
+      }
+      
+      res.json({
+        success: apiSuccess || scraperSuccess,
+        ...results,
+        recommendation,
+        summary: {
+          canPost: apiSuccess || scraperSuccess,
+          canDetectMentions: scraperSuccess,
+          canDetectComments: scraperSuccess,
+          preferredPostMethod: apiSuccess ? "API" : (scraperSuccess ? "Scraper" : "None"),
+        }
       });
       
     } catch (error: any) {
-      console.error("Error testing Twitter API:", error);
+      console.error("Error testing Twitter credentials:", error);
       res.status(500).json({ 
         success: false,
-        error: "Failed to test Twitter API",
+        error: "Failed to test Twitter credentials",
         details: error.message,
         hint: "An unexpected error occurred. Check server logs for details."
       });

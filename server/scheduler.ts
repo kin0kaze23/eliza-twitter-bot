@@ -1,7 +1,7 @@
 import { storage, db } from "./storage";
 import { activityLogs } from "@shared/schema";
 import { postTweet, validateTwitterCredentials, replyToTweet, fetchMentions, fetchRepliesToTweet, type TwitterMention } from "./twitter";
-import { fetchMentionsViaScraper, fetchRepliesViaScraper, sendReplyViaScraper, type ScrapedTweet } from "./twitterScraper";
+import { fetchMentionsViaScraper, fetchRepliesViaScraper, sendReplyViaScraper, sendTweetViaScraper, type ScrapedTweet } from "./twitterScraper";
 import { assemblePrompt, buildMessagesArray, selectNextContentType, formatContentType, assembleConversationPrompt, buildConversationMessages, type ContentType } from "./promptAssembly";
 import { sendPostCreatedWebhook, sendPostFailedWebhook, sendReplyCreatedWebhook, sendReplyFailedWebhook } from "./webhook";
 import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
@@ -10,6 +10,12 @@ import type { Agent } from "@shared/schema";
 // Helper to check if scraper credentials are available
 function hasScraperCredentials(agent: Agent): boolean {
   return !!(agent.twitterUsername && agent.twitterPassword);
+}
+
+// Helper to check if API credentials are available
+function hasApiCredentials(agent: Agent): boolean {
+  return !!(agent.twitterApiKey && agent.twitterApiSecret && 
+            agent.twitterAccessToken && agent.twitterAccessSecret);
 }
 
 // Convert scraped tweet to TwitterMention format
@@ -551,13 +557,16 @@ async function executePost(agent: Agent): Promise<void> {
   state.postingLock.set(agent.id, true);
   
   try {
-    const validation = validateTwitterCredentials(agent);
-    if (!validation.valid) {
-      console.log(`Agent ${agent.name}: Missing Twitter credentials`);
+    // Check if either API or scraper credentials are available for posting
+    const hasApi = hasApiCredentials(agent);
+    const hasScraper = hasScraperCredentials(agent);
+    
+    if (!hasApi && !hasScraper) {
+      console.log(`Agent ${agent.name}: Missing Twitter credentials (no API or scraper credentials)`);
       return; // finally block will release lock
     }
     
-    console.log(`[Scheduler] Generating post for agent: ${agent.name}`);
+    console.log(`[Scheduler] Generating post for agent: ${agent.name} (method: ${hasApi ? 'API' : 'Scraper'})`);
     
     const generated = await generateTweetContent(agent);
     if (!generated) {
@@ -585,7 +594,34 @@ async function executePost(agent: Agent): Promise<void> {
     
     console.log(`[Scheduler] Posting to Twitter for agent: ${agent.name}`);
     
-    const result = await postTweet(agent, cleanedContent);
+    // Try API first if available, otherwise use scraper
+    let result: { success: boolean; tweetId?: string; error?: string; errorCode?: string; rateLimited?: boolean };
+    
+    if (hasApi) {
+      // Use official Twitter API
+      result = await postTweet(agent, cleanedContent);
+      
+      // If API fails and scraper is available, try scraper as fallback
+      if (!result.success && hasScraper) {
+        console.log(`[Scheduler] API failed, trying scraper fallback for ${agent.name}`);
+        const scraperResult = await sendTweetViaScraper(agent, cleanedContent);
+        if (scraperResult.success) {
+          result = {
+            success: true,
+            tweetId: scraperResult.tweetId,
+          };
+        }
+      }
+    } else {
+      // No API credentials, use scraper
+      const scraperResult = await sendTweetViaScraper(agent, cleanedContent);
+      result = {
+        success: scraperResult.success,
+        tweetId: scraperResult.tweetId,
+        error: scraperResult.error,
+        errorCode: scraperResult.error ? 'SCRAPER_ERROR' : undefined,
+      };
+    }
     
     const today = new Date().toISOString().split("T")[0];
     const postsKey = `${agent.id}_${today}`;
