@@ -44,13 +44,23 @@ The bot automatically detects and responds to Twitter mentions:
 - **Persistence**: lastMentionId stored in agents table to survive server restarts
 - **Monitoring**: API routes `/api/agents/:agentId/mentions` and `/api/agents/:agentId/mentions/stats` for viewing activity
 
-**Authentication & Security**: Currently, no authentication is implemented. API keys are stored in the database.
+**Authentication & Security**: Login required (admin/graceimmutable). API keys stored encrypted in database.
+
+### Twitter Authentication (Simplified - ElizaOS-style)
+The bot uses a simplified credential flow similar to ElizaOS:
+- **Required**: Username, Password (Email often required for verification)
+- **Optional**: 2FA TOTP Secret (if you have 2FA enabled)
+- **Auto-Caching**: Session cookies cached after successful login
+- **Retry Logic**: 3 attempts with exponential backoff
+- **CRITICAL**: User must mark Twitter account as "Automated" in Twitter Settings → Account Information → Automation
+- **Advanced**: API credentials (collapsible) for developers with Twitter API access
 
 ## External Dependencies
 
 ### Third-Party Services
 - **AI Model Providers**: OpenAI, Anthropic (Claude), Groq, Together AI, Mistral, Cohere, Replicate, Hugging Face, Ollama, vLLM, LocalAI.
-- **Twitter API**: Requires OAuth 1.0a credentials.
+- **Twitter Scraper**: Uses `agent-twitter-client` for login-based authentication (ElizaOS approach)
+- **Twitter API** (optional): OAuth 1.0a for advanced features
 - **Data Sources** (configurable): CoinGecko API, DexScreener, Crypto News APIs, Custom API endpoints.
 
 ### Database & Infrastructure

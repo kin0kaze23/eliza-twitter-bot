@@ -73,166 +73,116 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
   const scraper = new Scraper();
   
   try {
-    // Try to restore from manually provided cookies first (most reliable method)
+    // Try to restore from cached cookies first
     if (agent.twitterCookies) {
       try {
-        const cookiesData = JSON.parse(agent.twitterCookies);
-        if (Array.isArray(cookiesData) && cookiesData.length > 0) {
-          console.log(`[Scraper] Using manually provided cookies for ${agent.name} (${cookiesData.length} cookies)...`);
-          
-          // Check for required cookies
-          const cookieNames = cookiesData.map((c: any) => c.name);
-          const hasAuthToken = cookieNames.includes('auth_token');
-          const hasCt0 = cookieNames.includes('ct0');
-          
-          if (!hasAuthToken || !hasCt0) {
-            console.log(`[Scraper] Missing required cookies. Has auth_token: ${hasAuthToken}, Has ct0: ${hasCt0}`);
-            return {
-              scraper: null as any,
-              error: `COOKIES_INCOMPLETE: Missing required cookies. Need auth_token and ct0 at minimum. Found: ${cookieNames.join(', ')}`,
-            };
-          }
-          
-          // Convert cookies to the format expected by agent-twitter-client
-          // The library expects an array of cookie strings in Set-Cookie format
-          const cookieStrings: string[] = [];
-          for (const cookie of cookiesData) {
-            if (cookie.name && cookie.value) {
-              // Build Set-Cookie format string with all attributes
-              const parts: string[] = [`${cookie.name}=${cookie.value}`];
-              parts.push(`Domain=${cookie.domain || '.twitter.com'}`);
-              parts.push(`Path=${cookie.path || '/'}`);
-              if (cookie.secure !== false) parts.push('Secure');
-              if (cookie.httpOnly) parts.push('HttpOnly');
-              if (cookie.sameSite) parts.push(`SameSite=${cookie.sameSite}`);
-              if (cookie.expires) {
-                const expDate = new Date(cookie.expires * 1000);
-                parts.push(`Expires=${expDate.toUTCString()}`);
-              }
-              cookieStrings.push(parts.join('; '));
-            }
-          }
-          
-          console.log(`[Scraper] Setting ${cookieStrings.length} cookies for ${agent.name}`);
-          await scraper.setCookies(cookieStrings);
+        const cookies = JSON.parse(agent.twitterCookies);
+        if (Array.isArray(cookies) && cookies.length > 0) {
+          console.log(`[Scraper] Restoring session from cached cookies for ${agent.name}...`);
+          await scraper.setCookies(cookies);
           
           const isLoggedIn = await scraper.isLoggedIn();
-          console.log(`[Scraper] isLoggedIn check result: ${isLoggedIn}`);
-          
           if (isLoggedIn) {
-            console.log(`[Scraper] Successfully authenticated via cookies for ${agent.name}`);
+            console.log(`[Scraper] Session restored from cookies for ${agent.name}`);
             scraperCache.set(agentId, {
               scraper,
               lastLogin: Date.now(),
               username: agent.twitterUsername || 'unknown',
             });
             return { scraper };
-          } else {
-            console.log(`[Scraper] Cookies provided but session invalid for ${agent.name}. May need more cookies or cookies expired.`);
-            return {
-              scraper: null as any,
-              error: 'COOKIES_INVALID: Session could not be established. Export ALL cookies from Twitter (not just auth_token and ct0). Use a browser extension like "EditThisCookie" to export the full cookie set as JSON.',
-            };
           }
+          console.log(`[Scraper] Cached cookies expired for ${agent.name}, will login fresh`);
         }
-      } catch (e: any) {
-        console.log(`[Scraper] Cookie parsing failed for ${agent.name}: ${e.message || e}`);
-        return {
-          scraper: null as any,
-          error: `COOKIE_PARSE_ERROR: ${e.message}. Make sure cookies are in valid JSON format.`,
-        };
+      } catch (e) {
+        console.log(`[Scraper] Cookie restore failed for ${agent.name}, will login fresh`);
       }
     }
     
-    // Fall back to username/password login if cookies not provided or expired
+    // Login with username/password (with retry)
     if (!agent.twitterUsername || !agent.twitterPassword) {
       return {
         scraper: null as any,
-        error: 'COOKIES_REQUIRED: Username/password login is currently blocked by Twitter. Please use the Browser Cookies method instead - see instructions in the Credentials tab.',
+        error: 'Missing credentials: Enter your Twitter username and password in the Credentials tab.',
       };
     }
     
-    // Try username/password login (may fail due to Twitter security measures)
-    console.log(`[Scraper] Attempting username/password login for @${agent.twitterUsername}...`);
-    await scraper.login(
-      agent.twitterUsername,
-      agent.twitterPassword,
-      agent.twitterEmail || undefined,
-      agent.twitter2faSecret || undefined
-    );
+    const maxRetries = 3;
+    let lastError: string = '';
     
-    // Verify login
-    const isLoggedIn = await scraper.isLoggedIn();
-    if (!isLoggedIn) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        if (attempt > 1) {
+          const waitTime = Math.pow(2, attempt) * 1000;
+          console.log(`[Scraper] Retry ${attempt}/${maxRetries} for ${agent.name} after ${waitTime}ms...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+        
+        console.log(`[Scraper] Login attempt ${attempt} for @${agent.twitterUsername}...`);
+        await scraper.login(
+          agent.twitterUsername,
+          agent.twitterPassword,
+          agent.twitterEmail || undefined,
+          agent.twitter2faSecret || undefined
+        );
+        
+        // Verify login succeeded
+        const isLoggedIn = await scraper.isLoggedIn();
+        if (isLoggedIn) {
+          console.log(`[Scraper] Login successful for @${agent.twitterUsername}`);
+          
+          // Cache cookies for future use
+          try {
+            const cookies = await scraper.getCookies();
+            const cookiesJson = JSON.stringify(cookies);
+            await storage.updateAgent(agentId, { twitterCookies: cookiesJson });
+            console.log(`[Scraper] Session cookies cached for ${agent.name}`);
+          } catch (e) {
+            console.log(`[Scraper] Failed to cache cookies: ${e}`);
+          }
+          
+          scraperCache.set(agentId, {
+            scraper,
+            lastLogin: Date.now(),
+            username: agent.twitterUsername,
+          });
+          
+          return { scraper };
+        }
+        
+        lastError = 'Login completed but session verification failed';
+      } catch (e: any) {
+        lastError = e.message || String(e);
+        console.log(`[Scraper] Attempt ${attempt} failed: ${lastError}`);
+      }
+    }
+    
+    // All retries failed - provide helpful error message
+    console.error(`[Scraper] All login attempts failed for ${agent.name}: ${lastError}`);
+    
+    if (lastError.includes('page does not exist') || lastError.includes('code":34')) {
       return {
         scraper: null as any,
-        error: 'SCRAPER_LOGIN_FAILED: Could not log in to Twitter. Check username, password, and email are correct.',
+        error: 'Login blocked by Twitter. Please: 1) Mark your account as "Automated" in Twitter Settings, 2) Log out of Twitter in all browsers, 3) Try again.',
       };
     }
     
-    // Cache the cookies for next time
-    try {
-      const cookies = await scraper.getCookies();
-      const cookiesJson = JSON.stringify(cookies);
-      await storage.updateAgent(agentId, { twitterCookies: cookiesJson });
-      console.log(`[Scraper] Cached session cookies for ${agent.name}`);
-    } catch (e) {
-      console.log(`[Scraper] Failed to cache cookies: ${e}`);
-    }
-    
-    // Cache the scraper instance
-    scraperCache.set(agentId, {
-      scraper,
-      lastLogin: Date.now(),
-      username: agent.twitterUsername,
-    });
-    
-    console.log(`[Scraper] Successfully logged in as @${agent.twitterUsername}`);
-    return { scraper };
-    
-  } catch (error: any) {
-    const message = error.message || String(error) || 'Unknown error';
-    console.error(`[Scraper] Login failed for ${agent.name}: ${message}`);
-    
-    // Check for common error types and provide helpful messages
-    if (message.includes('page does not exist') || message.includes('code":34') || message.includes('code: 34')) {
+    if (lastError.includes('ArkoseLogin') || lastError.includes('challenge')) {
       return {
         scraper: null as any,
-        error: 'LOGIN_FAILED: Twitter could not find your account. Please check: 1) Username is correct (no @ symbol), 2) Add your account email, 3) Password is correct. Twitter often requires email verification.',
-      };
-    }
-    
-    if (message.includes('locked') || message.includes('suspended')) {
-      return {
-        scraper: null as any,
-        error: 'ACCOUNT_LOCKED: Your Twitter account may be locked or suspended. Check your account status on Twitter.',
-      };
-    }
-    
-    if (message.includes('2fa') || message.includes('verification') || message.includes('challenge')) {
-      return {
-        scraper: null as any,
-        error: 'VERIFICATION_REQUIRED: Twitter requires additional verification. Try adding your account email or 2FA secret.',
-      };
-    }
-    
-    if (message.includes('wrong password') || message.includes('incorrect')) {
-      return {
-        scraper: null as any,
-        error: 'WRONG_PASSWORD: The password appears to be incorrect. Please check and try again.',
-      };
-    }
-    
-    if (message.includes('rate limit') || message.includes('too many')) {
-      return {
-        scraper: null as any,
-        error: 'RATE_LIMITED: Too many login attempts. Please wait a few minutes and try again.',
+        error: 'Twitter requires CAPTCHA verification. Log into Twitter manually in a browser first, then try again.',
       };
     }
     
     return {
       scraper: null as any,
-      error: `LOGIN_ERROR: ${message}. Try adding your account email - Twitter often requires it for verification.`,
+      error: `Login failed after ${maxRetries} attempts: ${lastError}`,
+    };
+  } catch (error: any) {
+    const message = error.message || String(error) || 'Unknown error';
+    console.error(`[Scraper] Unexpected error for ${agent.name}: ${message}`);
+    return {
+      scraper: null as any,
+      error: `Unexpected error: ${message}`,
     };
   }
 }

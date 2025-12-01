@@ -22,9 +22,14 @@ import {
   DialogTrigger,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap, Pencil, Star, Info, Sparkles, BookOpen, MessageSquare, Thermometer, Hash, Database, Layers, Twitter } from "lucide-react";
+import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap, Pencil, Star, Info, Sparkles, BookOpen, MessageSquare, Thermometer, Hash, Database, Layers, Twitter, ChevronDown } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -1159,349 +1164,105 @@ export default function AgentConfigure() {
         </TabsList>
 
         <TabsContent value="twitter" className="space-y-6">
-          <Alert>
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>
-              <strong>Two Options:</strong> You can use either API credentials (for posting) OR login credentials (for free mention/comment detection), or both for full functionality.
-              <ul className="mt-2 text-sm space-y-1">
-                <li><strong>API Credentials:</strong> Best for posting tweets. Get from <a href="https://developer.twitter.com/en/portal/dashboard" target="_blank" rel="noopener noreferrer" className="underline">Twitter Developer Portal</a>.</li>
-                <li><strong>Login Credentials:</strong> Enables free mention and comment detection (bypasses API read limitations).</li>
-              </ul>
-            </AlertDescription>
-          </Alert>
-
           <Card>
             <CardHeader>
-              <CardTitle>Twitter API Credentials (For Posting)</CardTitle>
-              <CardDescription>Official Twitter API - recommended for stable posting. Required: API Key, API Secret, Access Token, Access Secret.</CardDescription>
+              <CardTitle className="flex items-center gap-2">
+                <Twitter className="h-5 w-5" />
+                Twitter Login (Required)
+              </CardTitle>
+              <CardDescription>
+                Enter your Twitter account credentials. This is how ElizaOS connects to Twitter.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="twitter-app-id">App ID</Label>
-                <Input
-                  id="twitter-app-id"
-                  value={twitterConfig.appId}
-                  onChange={(e) => setTwitterConfig({ ...twitterConfig, appId: e.target.value })}
-                  placeholder="Your Twitter App ID"
-                  className="font-mono text-sm"
-                  data-testid="input-twitter-app-id"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="twitter-api-key">API Key (Consumer Key)</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="twitter-api-key"
-                    type={showSecrets.apiKey ? "text" : "password"}
-                    value={showSecrets.apiKey ? twitterConfig.apiKey : maskSecret(twitterConfig.apiKey)}
-                    onChange={(e) => setTwitterConfig({ ...twitterConfig, apiKey: e.target.value })}
-                    placeholder="Enter API Key..."
-                    className="font-mono text-sm"
-                    data-testid="input-twitter-api-key"
-                  />
-                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("apiKey")}>
-                    {showSecrets.apiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="twitter-api-secret">API Key Secret</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="twitter-api-secret"
-                    type={showSecrets.apiKeySecret ? "text" : "password"}
-                    value={showSecrets.apiKeySecret ? twitterConfig.apiKeySecret : maskSecret(twitterConfig.apiKeySecret)}
-                    onChange={(e) => setTwitterConfig({ ...twitterConfig, apiKeySecret: e.target.value })}
-                    placeholder="Enter API Key Secret..."
-                    className="font-mono text-sm"
-                    data-testid="input-twitter-api-secret"
-                  />
-                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("apiKeySecret")}>
-                    {showSecrets.apiKeySecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="twitter-access-token">Access Token</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="twitter-access-token"
-                    type={showSecrets.accessToken ? "text" : "password"}
-                    value={showSecrets.accessToken ? twitterConfig.accessToken : maskSecret(twitterConfig.accessToken)}
-                    onChange={(e) => setTwitterConfig({ ...twitterConfig, accessToken: e.target.value })}
-                    placeholder="Enter Access Token..."
-                    className="font-mono text-sm"
-                    data-testid="input-twitter-access-token"
-                  />
-                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("accessToken")}>
-                    {showSecrets.accessToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="twitter-access-secret">Access Token Secret</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="twitter-access-secret"
-                    type={showSecrets.accessTokenSecret ? "text" : "password"}
-                    value={showSecrets.accessTokenSecret ? twitterConfig.accessTokenSecret : maskSecret(twitterConfig.accessTokenSecret)}
-                    onChange={(e) => setTwitterConfig({ ...twitterConfig, accessTokenSecret: e.target.value })}
-                    placeholder="Enter Access Token Secret..."
-                    className="font-mono text-sm"
-                    data-testid="input-twitter-access-secret"
-                  />
-                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("accessTokenSecret")}>
-                    {showSecrets.accessTokenSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="twitter-bearer">Bearer Token</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="twitter-bearer"
-                    type={showSecrets.bearerToken ? "text" : "password"}
-                    value={showSecrets.bearerToken ? twitterConfig.bearerToken : maskSecret(twitterConfig.bearerToken)}
-                    onChange={(e) => setTwitterConfig({ ...twitterConfig, bearerToken: e.target.value })}
-                    placeholder="Enter Bearer Token..."
-                    className="font-mono text-sm"
-                    data-testid="input-twitter-bearer"
-                  />
-                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("bearerToken")}>
-                    {showSecrets.bearerToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                </div>
-              </div>
-
-              <Alert>
-                <AlertCircle className="h-4 w-4" />
+              <Alert className="bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800">
+                <AlertCircle className="h-4 w-4 text-amber-600" />
                 <AlertDescription className="text-sm">
-                  <strong>OAuth 2.0 Credentials</strong> (optional, for user authorization flows only)
+                  <strong>Important:</strong> Mark your Twitter account as "Automated" first.
+                  <br />
+                  Go to <a href="https://twitter.com/settings/account" target="_blank" rel="noopener noreferrer" className="underline font-medium">Twitter Settings</a> → Account Information → Automation → Enable it.
                 </AlertDescription>
               </Alert>
 
-              <div className="space-y-2">
-                <Label htmlFor="twitter-oauth-client-id">OAuth 2.0 Client ID</Label>
-                <div className="flex gap-2">
+              <div className="grid gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="twitter-username-simple">Username</Label>
                   <Input
-                    id="twitter-oauth-client-id"
-                    type={showSecrets.oauthClientId ? "text" : "password"}
-                    value={showSecrets.oauthClientId ? twitterConfig.oauthClientId : maskSecret(twitterConfig.oauthClientId)}
-                    onChange={(e) => setTwitterConfig({ ...twitterConfig, oauthClientId: e.target.value })}
-                    placeholder="Enter OAuth 2.0 Client ID (optional)..."
-                    className="font-mono text-sm"
-                    data-testid="input-twitter-oauth-client-id"
-                  />
-                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("oauthClientId")}>
-                    {showSecrets.oauthClientId ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Only needed if you're implementing user authorization flows. Not required for basic bot functionality.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="twitter-oauth-client-secret">OAuth 2.0 Client Secret</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="twitter-oauth-client-secret"
-                    type={showSecrets.oauthClientSecret ? "text" : "password"}
-                    value={showSecrets.oauthClientSecret ? twitterConfig.oauthClientSecret : maskSecret(twitterConfig.oauthClientSecret)}
-                    onChange={(e) => setTwitterConfig({ ...twitterConfig, oauthClientSecret: e.target.value })}
-                    placeholder="Enter OAuth 2.0 Client Secret (optional)..."
-                    className="font-mono text-sm"
-                    data-testid="input-twitter-oauth-client-secret"
-                  />
-                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("oauthClientSecret")}>
-                    {showSecrets.oauthClientSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                </div>
-              </div>
-
-              <Separator className="my-6" />
-
-              <Alert className="bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800">
-                <Twitter className="h-4 w-4 text-blue-500" />
-                <AlertDescription className="text-sm">
-                  <strong>Login Authentication</strong> - Uses your Twitter login to read mentions and comments for FREE (no API subscription needed).
-                  <div className="mt-2 p-2 bg-white/50 dark:bg-black/20 rounded text-xs">
-                    <strong>Required:</strong> Username + Password<br />
-                    <strong>Often needed:</strong> Email (Twitter sometimes asks for verification)<br />
-                    <strong>If you have 2FA:</strong> Enter your TOTP secret
-                  </div>
-                </AlertDescription>
-              </Alert>
-
-              <div className="space-y-2">
-                <Label htmlFor="twitter-username">Twitter Username (Required)</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="twitter-username"
-                    type="text"
+                    id="twitter-username-simple"
                     value={twitterConfig.username}
                     onChange={(e) => setTwitterConfig({ ...twitterConfig, username: e.target.value })}
-                    placeholder="immutablegrace (without the @)"
-                    className="font-mono text-sm"
-                    data-testid="input-twitter-username"
+                    placeholder="your_username (no @)"
+                    className="font-mono"
+                    data-testid="input-twitter-username-simple"
                   />
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Enter your exact Twitter handle (case-sensitive, no @ symbol). Example: elonmusk
-                </p>
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="twitter-password">Twitter Password (Required)</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="twitter-password"
-                    type={showSecrets.twitterPassword ? "text" : "password"}
-                    value={showSecrets.twitterPassword ? twitterConfig.password : maskSecret(twitterConfig.password)}
-                    onChange={(e) => setTwitterConfig({ ...twitterConfig, password: e.target.value })}
-                    placeholder="Your Twitter account password"
-                    className="font-mono text-sm"
-                    data-testid="input-twitter-password"
-                  />
-                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("twitterPassword")}>
-                    {showSecrets.twitterPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
+                <div className="space-y-2">
+                  <Label htmlFor="twitter-password-simple">Password</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="twitter-password-simple"
+                      type={showSecrets.twitterPassword ? "text" : "password"}
+                      value={showSecrets.twitterPassword ? twitterConfig.password : maskSecret(twitterConfig.password)}
+                      onChange={(e) => setTwitterConfig({ ...twitterConfig, password: e.target.value })}
+                      placeholder="Your password"
+                      className="font-mono"
+                      data-testid="input-twitter-password-simple"
+                    />
+                    <Button variant="outline" size="icon" onClick={() => toggleShowSecret("twitterPassword")}>
+                      {showSecrets.twitterPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
                 </div>
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="twitter-email">Account Email (Often Required)</Label>
-                <div className="flex gap-2">
+                <div className="space-y-2">
+                  <Label htmlFor="twitter-email-simple">Email</Label>
                   <Input
-                    id="twitter-email"
+                    id="twitter-email-simple"
                     type="email"
                     value={twitterConfig.email}
                     onChange={(e) => setTwitterConfig({ ...twitterConfig, email: e.target.value })}
-                    placeholder="email@example.com"
-                    className="font-mono text-sm"
-                    data-testid="input-twitter-email"
+                    placeholder="your@email.com"
+                    className="font-mono"
+                    data-testid="input-twitter-email-simple"
                   />
+                  <p className="text-xs text-muted-foreground">Twitter often requires this for verification</p>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Twitter often requires email verification during login. Add this if login fails.
-                </p>
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="twitter-2fa">2FA Secret (optional)</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="twitter-2fa"
-                    type={showSecrets.twitter2FA ? "text" : "password"}
-                    value={showSecrets.twitter2FA ? twitterConfig.twoFactorSecret : maskSecret(twitterConfig.twoFactorSecret)}
-                    onChange={(e) => setTwitterConfig({ ...twitterConfig, twoFactorSecret: e.target.value })}
-                    placeholder="TOTP secret for 2FA..."
-                    className="font-mono text-sm"
-                    data-testid="input-twitter-2fa"
-                  />
-                  <Button variant="outline" size="icon" onClick={() => toggleShowSecret("twitter2FA")}>
-                    {showSecrets.twitter2FA ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  If you have 2FA enabled, provide the TOTP secret (from your authenticator app setup).
-                </p>
-              </div>
-
-              <Separator className="my-4" />
-
-              <Alert className="bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800">
-                <AlertCircle className="h-4 w-4 text-amber-500" />
-                <AlertDescription className="text-sm">
-                  <strong>Login Not Working?</strong> Twitter has recently added new security measures that can block automated logins. If username/password fails, use the <strong>Browser Cookies</strong> method below - it's more reliable.
-                </AlertDescription>
-              </Alert>
-
-              <div className="space-y-4">
-                <div className="text-sm space-y-2">
-                  <p><strong>How to export cookies (requires ALL cookies, not just 2):</strong></p>
-                  <ol className="list-decimal list-inside space-y-1 text-muted-foreground ml-2">
-                    <li>Install a cookie export extension: <a href="https://chrome.google.com/webstore/detail/editthiscookie/fngmhnnpilhplaeedifhccceomclgfbg" target="_blank" rel="noopener noreferrer" className="underline text-primary">EditThisCookie (Chrome)</a> or <a href="https://addons.mozilla.org/en-US/firefox/addon/cookie-quick-manager/" target="_blank" rel="noopener noreferrer" className="underline text-primary">Cookie Quick Manager (Firefox)</a></li>
-                    <li>Go to <a href="https://twitter.com" target="_blank" rel="noopener noreferrer" className="underline">twitter.com</a> and log in</li>
-                    <li>Click the cookie extension icon → Export as JSON</li>
-                    <li>Paste the entire JSON below</li>
-                  </ol>
-                </div>
-                
                 <div className="space-y-2">
-                  <Label htmlFor="twitter-cookies-json">All Cookies (JSON Export)</Label>
-                  <Textarea
-                    id="twitter-cookies-json"
-                    value={twitterConfig.cookies}
-                    onChange={(e) => setTwitterConfig({ ...twitterConfig, cookies: e.target.value })}
-                    placeholder='Paste the full cookie JSON export here. It should be an array like: [{"name":"auth_token","value":"xxx","domain":".twitter.com",...}, ...]'
-                    className="font-mono text-xs min-h-[100px]"
-                    data-testid="input-twitter-cookies-json"
-                  />
-                  <div className="text-xs text-muted-foreground">
-                    {twitterConfig.cookies && (() => {
-                      try {
-                        const parsed = JSON.parse(twitterConfig.cookies);
-                        if (Array.isArray(parsed)) {
-                          const names = parsed.map((c: any) => c.name).filter(Boolean);
-                          const hasAuth = names.includes('auth_token');
-                          const hasCt0 = names.includes('ct0');
-                          return (
-                            <span className={hasAuth && hasCt0 ? 'text-green-600' : 'text-amber-600'}>
-                              Found {parsed.length} cookies. {hasAuth ? 'auth_token present.' : 'Missing auth_token!'} {hasCt0 ? 'ct0 present.' : 'Missing ct0!'}
-                            </span>
-                          );
-                        }
-                        return <span className="text-red-500">Invalid format - must be a JSON array</span>;
-                      } catch {
-                        return <span className="text-red-500">Invalid JSON format</span>;
-                      }
-                    })()}
+                  <Label htmlFor="twitter-2fa-simple">2FA Secret (if enabled)</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="twitter-2fa-simple"
+                      type={showSecrets.twitter2FA ? "text" : "password"}
+                      value={showSecrets.twitter2FA ? twitterConfig.twoFactorSecret : maskSecret(twitterConfig.twoFactorSecret)}
+                      onChange={(e) => setTwitterConfig({ ...twitterConfig, twoFactorSecret: e.target.value })}
+                      placeholder="TOTP secret (optional)"
+                      className="font-mono"
+                      data-testid="input-twitter-2fa-simple"
+                    />
+                    <Button variant="outline" size="icon" onClick={() => toggleShowSecret("twitter2FA")}>
+                      {showSecrets.twitter2FA ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
                   </div>
                 </div>
               </div>
             </CardContent>
-            <CardFooter className="flex flex-col gap-4">
+            <CardFooter>
               <div className="flex items-center justify-between w-full">
                 <div className="flex-1">
-                  {twitterTestResult && (
-                    <div className="space-y-2">
-                      {/* API Status */}
-                      {twitterTestResult.api && (
-                        <div className={`flex items-center gap-2 text-sm ${twitterTestResult.api.success ? 'text-green-600' : 'text-amber-600'}`}>
-                          {twitterTestResult.api.success ? (
-                            <>
-                              <CheckCircle2 className="h-4 w-4" />
-                              <span>API: Connected as @{twitterTestResult.api.user?.username}</span>
-                            </>
-                          ) : (
-                            <>
-                              <XCircle className="h-4 w-4" />
-                              <span>API: {twitterTestResult.api.error || 'Failed'}</span>
-                            </>
-                          )}
-                        </div>
-                      )}
-                      {/* Scraper Status */}
-                      {twitterTestResult.scraper && (
-                        <div className={`flex items-center gap-2 text-sm ${twitterTestResult.scraper.success ? 'text-green-600' : 'text-amber-600'}`}>
-                          {twitterTestResult.scraper.success ? (
-                            <>
-                              <CheckCircle2 className="h-4 w-4" />
-                              <span>Login: Connected as @{twitterTestResult.scraper.username}</span>
-                            </>
-                          ) : (
-                            <>
-                              <XCircle className="h-4 w-4" />
-                              <span>Login: {twitterTestResult.scraper.error || 'Failed'}</span>
-                            </>
-                          )}
-                        </div>
+                  {twitterTestResult && twitterTestResult.scraper && (
+                    <div className={`flex items-center gap-2 text-sm ${twitterTestResult.scraper.success ? 'text-green-600' : 'text-red-500'}`}>
+                      {twitterTestResult.scraper.success ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4" />
+                          <span>Connected as @{twitterTestResult.scraper.username}</span>
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="h-4 w-4" />
+                          <span>{twitterTestResult.scraper.error || 'Login failed'}</span>
+                        </>
                       )}
                     </div>
                   )}
@@ -1509,39 +1270,120 @@ export default function AgentConfigure() {
                 <Button
                   variant="outline"
                   onClick={() => testTwitter.mutate()}
-                  disabled={
-                    (!(twitterConfig.apiKey && twitterConfig.apiKeySecret && twitterConfig.accessToken && twitterConfig.accessTokenSecret) &&
-                     !(twitterConfig.username && twitterConfig.password) &&
-                     !twitterConfig.cookies) ||
-                    testTwitter.isPending
-                  }
-                  data-testid="button-test-twitter"
+                  disabled={!(twitterConfig.username && twitterConfig.password) || testTwitter.isPending}
+                  data-testid="button-test-login"
                 >
-                  {testTwitter.isPending ? "Testing..." : "Test Connection"}
+                  {testTwitter.isPending ? "Testing..." : "Test Login"}
                   <Play className="ml-2 h-4 w-4" />
                 </Button>
               </div>
-              {twitterTestResult && twitterTestResult.recommendation && (
-                <Alert className={twitterTestResult.success ? "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800" : "bg-destructive/10"}>
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription className="text-sm">{twitterTestResult.recommendation}</AlertDescription>
-                </Alert>
-              )}
-              {twitterTestResult && twitterTestResult.summary && (
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  <div className={`p-2 rounded ${twitterTestResult.summary.canPost ? 'bg-green-50 dark:bg-green-950/20' : 'bg-red-50 dark:bg-red-950/20'}`}>
-                    <span className="font-medium">Posting:</span> {twitterTestResult.summary.canPost ? 'Ready' : 'Not Available'}
-                  </div>
-                  <div className={`p-2 rounded ${twitterTestResult.summary.canDetectMentions ? 'bg-green-50 dark:bg-green-950/20' : 'bg-amber-50 dark:bg-amber-950/20'}`}>
-                    <span className="font-medium">Mentions:</span> {twitterTestResult.summary.canDetectMentions ? 'Ready' : 'Need Login'}
-                  </div>
-                  <div className={`p-2 rounded ${twitterTestResult.summary.canDetectComments ? 'bg-green-50 dark:bg-green-950/20' : 'bg-amber-50 dark:bg-amber-950/20'}`}>
-                    <span className="font-medium">Comments:</span> {twitterTestResult.summary.canDetectComments ? 'Ready' : 'Need Login'}
-                  </div>
-                </div>
-              )}
             </CardFooter>
           </Card>
+
+          <Collapsible>
+            <Card>
+              <CardHeader className="cursor-pointer">
+                <CollapsibleTrigger className="flex items-center justify-between w-full">
+                  <div>
+                    <CardTitle className="text-sm">Advanced: Twitter API Credentials</CardTitle>
+                    <CardDescription className="text-xs">Optional - only for developers with Twitter API access</CardDescription>
+                  </div>
+                  <ChevronDown className="h-4 w-4" />
+                </CollapsibleTrigger>
+              </CardHeader>
+              <CollapsibleContent>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="twitter-api-key">API Key</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="twitter-api-key"
+                        type={showSecrets.apiKey ? "text" : "password"}
+                        value={showSecrets.apiKey ? twitterConfig.apiKey : maskSecret(twitterConfig.apiKey)}
+                        onChange={(e) => setTwitterConfig({ ...twitterConfig, apiKey: e.target.value })}
+                        placeholder="Enter API Key..."
+                        className="font-mono text-sm"
+                        data-testid="input-twitter-api-key"
+                      />
+                      <Button variant="outline" size="icon" onClick={() => toggleShowSecret("apiKey")}>
+                        {showSecrets.apiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="twitter-api-secret">API Secret</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="twitter-api-secret"
+                        type={showSecrets.apiKeySecret ? "text" : "password"}
+                        value={showSecrets.apiKeySecret ? twitterConfig.apiKeySecret : maskSecret(twitterConfig.apiKeySecret)}
+                        onChange={(e) => setTwitterConfig({ ...twitterConfig, apiKeySecret: e.target.value })}
+                        placeholder="Enter API Secret..."
+                        className="font-mono text-sm"
+                        data-testid="input-twitter-api-secret"
+                      />
+                      <Button variant="outline" size="icon" onClick={() => toggleShowSecret("apiKeySecret")}>
+                        {showSecrets.apiKeySecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="twitter-access-token">Access Token</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="twitter-access-token"
+                        type={showSecrets.accessToken ? "text" : "password"}
+                        value={showSecrets.accessToken ? twitterConfig.accessToken : maskSecret(twitterConfig.accessToken)}
+                        onChange={(e) => setTwitterConfig({ ...twitterConfig, accessToken: e.target.value })}
+                        placeholder="Enter Access Token..."
+                        className="font-mono text-sm"
+                        data-testid="input-twitter-access-token"
+                      />
+                      <Button variant="outline" size="icon" onClick={() => toggleShowSecret("accessToken")}>
+                        {showSecrets.accessToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="twitter-access-secret">Access Token Secret</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="twitter-access-secret"
+                        type={showSecrets.accessTokenSecret ? "text" : "password"}
+                        value={showSecrets.accessTokenSecret ? twitterConfig.accessTokenSecret : maskSecret(twitterConfig.accessTokenSecret)}
+                        onChange={(e) => setTwitterConfig({ ...twitterConfig, accessTokenSecret: e.target.value })}
+                        placeholder="Enter Access Token Secret..."
+                        className="font-mono text-sm"
+                        data-testid="input-twitter-access-secret"
+                      />
+                      <Button variant="outline" size="icon" onClick={() => toggleShowSecret("accessTokenSecret")}>
+                        {showSecrets.accessTokenSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {twitterTestResult && twitterTestResult.api && (
+                    <div className={`flex items-center gap-2 text-sm ${twitterTestResult.api.success ? 'text-green-600' : 'text-amber-600'}`}>
+                      {twitterTestResult.api.success ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4" />
+                          <span>API Connected as @{twitterTestResult.api.user?.username}</span>
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="h-4 w-4" />
+                          <span>API: {twitterTestResult.api.error || 'Not configured'}</span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
         </TabsContent>
 
         <TabsContent value="character" className="space-y-6">
