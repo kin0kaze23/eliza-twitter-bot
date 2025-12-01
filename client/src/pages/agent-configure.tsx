@@ -1325,37 +1325,42 @@ export default function AgentConfigure() {
               <Alert className="bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800">
                 <Twitter className="h-4 w-4 text-blue-500" />
                 <AlertDescription className="text-sm">
-                  <strong>Scraper Authentication</strong> (recommended for Free tier) - Uses cookie-based login to bypass API limitations for reading mentions and comments. This is the same approach used by ElizaOS.
+                  <strong>Login Authentication</strong> - Uses your Twitter login to read mentions and comments for FREE (no API subscription needed).
+                  <div className="mt-2 p-2 bg-white/50 dark:bg-black/20 rounded text-xs">
+                    <strong>Required:</strong> Username + Password<br />
+                    <strong>Often needed:</strong> Email (Twitter sometimes asks for verification)<br />
+                    <strong>If you have 2FA:</strong> Enter your TOTP secret
+                  </div>
                 </AlertDescription>
               </Alert>
 
               <div className="space-y-2">
-                <Label htmlFor="twitter-username">Twitter Username</Label>
+                <Label htmlFor="twitter-username">Twitter Username (Required)</Label>
                 <div className="flex gap-2">
                   <Input
                     id="twitter-username"
                     type="text"
                     value={twitterConfig.username}
                     onChange={(e) => setTwitterConfig({ ...twitterConfig, username: e.target.value })}
-                    placeholder="Your Twitter username (without @)..."
+                    placeholder="immutablegrace (without the @)"
                     className="font-mono text-sm"
                     data-testid="input-twitter-username"
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Used for cookie-based authentication to read mentions and comments without API access.
+                  Enter your exact Twitter handle (case-sensitive, no @ symbol). Example: elonmusk
                 </p>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="twitter-password">Twitter Password</Label>
+                <Label htmlFor="twitter-password">Twitter Password (Required)</Label>
                 <div className="flex gap-2">
                   <Input
                     id="twitter-password"
                     type={showSecrets.twitterPassword ? "text" : "password"}
                     value={showSecrets.twitterPassword ? twitterConfig.password : maskSecret(twitterConfig.password)}
                     onChange={(e) => setTwitterConfig({ ...twitterConfig, password: e.target.value })}
-                    placeholder="Your Twitter password..."
+                    placeholder="Your Twitter account password"
                     className="font-mono text-sm"
                     data-testid="input-twitter-password"
                   />
@@ -1366,20 +1371,20 @@ export default function AgentConfigure() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="twitter-email">Twitter Account Email (optional)</Label>
+                <Label htmlFor="twitter-email">Account Email (Often Required)</Label>
                 <div className="flex gap-2">
                   <Input
                     id="twitter-email"
                     type="email"
                     value={twitterConfig.email}
                     onChange={(e) => setTwitterConfig({ ...twitterConfig, email: e.target.value })}
-                    placeholder="Email associated with your Twitter account..."
+                    placeholder="email@example.com"
                     className="font-mono text-sm"
                     data-testid="input-twitter-email"
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Sometimes required for login verification. Provide if login fails.
+                  Twitter often requires email verification during login. Add this if login fails.
                 </p>
               </div>
 

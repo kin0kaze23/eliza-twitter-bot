@@ -133,27 +133,48 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
     return { scraper };
     
   } catch (error: any) {
-    const message = error.message || 'Unknown error';
+    const message = error.message || String(error) || 'Unknown error';
     console.error(`[Scraper] Login failed for ${agent.name}: ${message}`);
     
-    // Check for common error types
-    if (message.includes('locked') || message.includes('suspended')) {
+    // Check for common error types and provide helpful messages
+    if (message.includes('page does not exist') || message.includes('code":34') || message.includes('code: 34')) {
       return {
         scraper: null as any,
-        error: 'TWITTER_ACCOUNT_LOCKED: Your Twitter account may be locked or suspended. Check your account status.',
+        error: 'LOGIN_FAILED: Twitter could not find your account. Please check: 1) Username is correct (no @ symbol), 2) Add your account email, 3) Password is correct. Twitter often requires email verification.',
       };
     }
     
-    if (message.includes('2fa') || message.includes('verification')) {
+    if (message.includes('locked') || message.includes('suspended')) {
       return {
         scraper: null as any,
-        error: 'TWITTER_2FA_REQUIRED: Two-factor authentication is required. Add your 2FA secret in the Credentials tab.',
+        error: 'ACCOUNT_LOCKED: Your Twitter account may be locked or suspended. Check your account status on Twitter.',
+      };
+    }
+    
+    if (message.includes('2fa') || message.includes('verification') || message.includes('challenge')) {
+      return {
+        scraper: null as any,
+        error: 'VERIFICATION_REQUIRED: Twitter requires additional verification. Try adding your account email or 2FA secret.',
+      };
+    }
+    
+    if (message.includes('wrong password') || message.includes('incorrect')) {
+      return {
+        scraper: null as any,
+        error: 'WRONG_PASSWORD: The password appears to be incorrect. Please check and try again.',
+      };
+    }
+    
+    if (message.includes('rate limit') || message.includes('too many')) {
+      return {
+        scraper: null as any,
+        error: 'RATE_LIMITED: Too many login attempts. Please wait a few minutes and try again.',
       };
     }
     
     return {
       scraper: null as any,
-      error: `SCRAPER_LOGIN_ERROR: ${message}`,
+      error: `LOGIN_ERROR: ${message}. Try adding your account email - Twitter often requires it for verification.`,
     };
   }
 }
