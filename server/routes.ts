@@ -1170,20 +1170,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Test Twitter credentials (API or Scraper - versatile endpoint)
+  // Accepts credentials from request body (for testing unsaved form values) or falls back to database
   app.post("/api/agents/:agentId/test/twitter", async (req, res) => {
     try {
       const { agentId } = req.params;
+      const bodyCredentials = req.body || {};
       
-      // Get agent configuration
+      // Get agent configuration from database
       const agent = await storage.getAgent(agentId);
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
       
-      // Check which credentials are available
-      const hasApiCredentials = agent.twitterApiKey && agent.twitterApiSecret && 
-                                agent.twitterAccessToken && agent.twitterAccessSecret;
-      const hasScraperCredentials = agent.twitterUsername && agent.twitterPassword;
+      // Use request body credentials if provided, otherwise fall back to database
+      // This allows testing unsaved form values
+      const testCredentials = {
+        twitterApiKey: bodyCredentials.twitterApiKey || agent.twitterApiKey,
+        twitterApiSecret: bodyCredentials.twitterApiSecret || agent.twitterApiSecret,
+        twitterAccessToken: bodyCredentials.twitterAccessToken || agent.twitterAccessToken,
+        twitterAccessSecret: bodyCredentials.twitterAccessSecret || agent.twitterAccessSecret,
+        twitterUsername: bodyCredentials.twitterUsername || agent.twitterUsername,
+        twitterPassword: bodyCredentials.twitterPassword || agent.twitterPassword,
+        twitterEmail: bodyCredentials.twitterEmail || agent.twitterEmail,
+        twitter2faSecret: bodyCredentials.twitter2faSecret || agent.twitter2faSecret,
+      };
+      
+      // Check which credentials are available (using merged credentials)
+      const hasApiCredentials = testCredentials.twitterApiKey && testCredentials.twitterApiSecret && 
+                                testCredentials.twitterAccessToken && testCredentials.twitterAccessSecret;
+      const hasScraperCredentials = testCredentials.twitterUsername && testCredentials.twitterPassword;
       
       // If neither credential type is present
       if (!hasApiCredentials && !hasScraperCredentials) {
@@ -1207,8 +1222,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           const oauth = new OAuth({
             consumer: {
-              key: agent.twitterApiKey!,
-              secret: agent.twitterApiSecret!,
+              key: testCredentials.twitterApiKey!,
+              secret: testCredentials.twitterApiSecret!,
             },
             signature_method: 'HMAC-SHA1',
             hash_function(base_string: string, key: string) {
@@ -1220,8 +1235,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
           
           const token = {
-            key: agent.twitterAccessToken!,
-            secret: agent.twitterAccessSecret!,
+            key: testCredentials.twitterAccessToken!,
+            secret: testCredentials.twitterAccessSecret!,
           };
           
           const requestData = {
@@ -1275,12 +1290,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Test Scraper credentials if present
       if (hasScraperCredentials) {
         try {
-          const scraperResult = await verifyScraperCredentials(agent);
+          // Create a temporary agent-like object with test credentials for scraper verification
+          const testAgent = {
+            ...agent,
+            twitterUsername: testCredentials.twitterUsername,
+            twitterPassword: testCredentials.twitterPassword,
+            twitterEmail: testCredentials.twitterEmail,
+            twitter2faSecret: testCredentials.twitter2faSecret,
+          };
+          // Force refresh to test new credentials (bypass cache)
+          const scraperResult = await verifyScraperCredentials(testAgent as any, true);
           if (scraperResult.success) {
             results.scraper = {
               success: true,
               message: "Login credentials valid",
-              username: agent.twitterUsername,
+              username: testCredentials.twitterUsername,
               capabilities: ["Detecting mentions", "Detecting comments", "Posting (fallback)", "Replying"]
             };
           } else {
@@ -1291,6 +1315,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 ? "Two-factor authentication required. Add your 2FA secret."
                 : scraperResult.error?.includes('locked') || scraperResult.error?.includes('suspended')
                 ? "Account may be locked or suspended. Check your Twitter account."
+                : scraperResult.error?.includes('page does not exist') || scraperResult.error?.includes('code 34')
+                ? "Twitter is blocking automated logins. Mark your account as 'Automated' in Twitter Settings > Account Information."
                 : "Check username and password are correct. Email may also be required."
             };
           }

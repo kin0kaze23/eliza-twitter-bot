@@ -327,7 +327,13 @@ export async function sendTweetViaScraper(
   }
 }
 
-export async function verifyScraperCredentials(agent: Agent): Promise<ScraperResult> {
+export async function verifyScraperCredentials(agent: Agent, forceRefresh: boolean = false): Promise<ScraperResult> {
+  // Clear cache if force refresh is requested (for testing new credentials)
+  if (forceRefresh && agent.id) {
+    scraperCache.delete(agent.id);
+    console.log(`[Scraper] Force refresh: cleared cache for ${agent.name || agent.id}`);
+  }
+  
   const { scraper, error } = await getOrCreateScraper(agent);
   if (error) {
     return { success: false, error };

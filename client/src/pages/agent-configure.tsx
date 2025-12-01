@@ -138,12 +138,22 @@ export default function AgentConfigure() {
   const [availablePostModels, setAvailablePostModels] = useState<any[]>([]);
   const [availableConversationModels, setAvailableConversationModels] = useState<any[]>([]);
   
-  // Twitter API Test Mutation
+  // Twitter API Test Mutation - sends current form values to test without requiring save first
   const testTwitter = useMutation({
     mutationFn: async () => {
       const response = await fetch(`/api/agents/${id}/test/twitter`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          twitterApiKey: twitterConfig.apiKey,
+          twitterApiSecret: twitterConfig.apiKeySecret,
+          twitterAccessToken: twitterConfig.accessToken,
+          twitterAccessSecret: twitterConfig.accessTokenSecret,
+          twitterUsername: twitterConfig.username,
+          twitterPassword: twitterConfig.password,
+          twitterEmail: twitterConfig.email,
+          twitter2faSecret: twitterConfig.twoFactorSecret,
+        }),
       });
       if (!response.ok) {
         const errorData = await response.json();
