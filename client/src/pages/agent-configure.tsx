@@ -115,7 +115,17 @@ export default function AgentConfigure() {
     twoFactorSecret: "",
   });
   
-  const [twitterTestResult, setTwitterTestResult] = useState<{ success: boolean; message?: string; error?: string; hint?: string; user?: any } | null>(null);
+  const [twitterTestResult, setTwitterTestResult] = useState<{ 
+    success: boolean; 
+    message?: string; 
+    error?: string; 
+    hint?: string; 
+    user?: any;
+    api?: { success: boolean; message?: string; error?: string; user?: any; capabilities?: string[] };
+    scraper?: { success: boolean; message?: string; error?: string; username?: string; capabilities?: string[] };
+    recommendation?: string;
+    summary?: { canPost: boolean; canDetectMentions: boolean; canDetectComments: boolean; preferredPostMethod: string };
+  } | null>(null);
   const [modelTestResult, setModelTestResult] = useState<{ success: boolean; provider?: string; modelCount?: number; latestModel?: string; models?: any[]; error?: string; hint?: string; note?: string } | null>(null);
   const [availableModels, setAvailableModels] = useState<any[]>([]);
   const [availablePostModels, setAvailablePostModels] = useState<any[]>([]);
@@ -136,9 +146,16 @@ export default function AgentConfigure() {
     },
     onSuccess: (data: any) => {
       setTwitterTestResult(data);
+      const apiOk = data.api?.success;
+      const scraperOk = data.scraper?.success;
+      const username = data.api?.user?.username || data.scraper?.username;
+      
       toast({
-        title: "Success!",
-        description: data.user ? `Connected as @${data.user.username}` : data.message,
+        title: data.success ? "Connection Test Complete" : "Connection Issues",
+        description: username 
+          ? `Connected as @${username}` 
+          : data.recommendation || data.message,
+        variant: data.success ? "default" : "destructive",
       });
     },
     onError: (error: any) => {
@@ -1141,18 +1158,18 @@ export default function AgentConfigure() {
           <Alert>
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
-              <strong>Required:</strong> Get credentials from{" "}
-              <a href="https://developer.twitter.com/en/portal/dashboard" target="_blank" rel="noopener noreferrer" className="underline">
-                Twitter Developer Portal
-              </a>
-              . Create an app with Read and Write permissions.
+              <strong>Two Options:</strong> You can use either API credentials (for posting) OR login credentials (for free mention/comment detection), or both for full functionality.
+              <ul className="mt-2 text-sm space-y-1">
+                <li><strong>API Credentials:</strong> Best for posting tweets. Get from <a href="https://developer.twitter.com/en/portal/dashboard" target="_blank" rel="noopener noreferrer" className="underline">Twitter Developer Portal</a>.</li>
+                <li><strong>Login Credentials:</strong> Enables free mention and comment detection (bypasses API read limitations).</li>
+              </ul>
             </AlertDescription>
           </Alert>
 
           <Card>
             <CardHeader>
-              <CardTitle>Twitter API v2 Credentials</CardTitle>
-              <CardDescription>All 6 credentials required for full functionality</CardDescription>
+              <CardTitle>Twitter API Credentials (For Posting)</CardTitle>
+              <CardDescription>Official Twitter API - recommended for stable posting. Required: API Key, API Secret, Access Token, Access Secret.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -1391,17 +1408,38 @@ export default function AgentConfigure() {
               <div className="flex items-center justify-between w-full">
                 <div className="flex-1">
                   {twitterTestResult && (
-                    <div className={`flex items-center gap-2 text-sm ${twitterTestResult.success ? 'text-green-600' : 'text-destructive'}`}>
-                      {twitterTestResult.success ? (
-                        <>
-                          <CheckCircle2 className="h-4 w-4" />
-                          <span>Connected as @{twitterTestResult.user?.username}</span>
-                        </>
-                      ) : (
-                        <>
-                          <XCircle className="h-4 w-4" />
-                          <span>{twitterTestResult.error || 'Connection failed'}</span>
-                        </>
+                    <div className="space-y-2">
+                      {/* API Status */}
+                      {twitterTestResult.api && (
+                        <div className={`flex items-center gap-2 text-sm ${twitterTestResult.api.success ? 'text-green-600' : 'text-amber-600'}`}>
+                          {twitterTestResult.api.success ? (
+                            <>
+                              <CheckCircle2 className="h-4 w-4" />
+                              <span>API: Connected as @{twitterTestResult.api.user?.username}</span>
+                            </>
+                          ) : (
+                            <>
+                              <XCircle className="h-4 w-4" />
+                              <span>API: {twitterTestResult.api.error || 'Failed'}</span>
+                            </>
+                          )}
+                        </div>
+                      )}
+                      {/* Scraper Status */}
+                      {twitterTestResult.scraper && (
+                        <div className={`flex items-center gap-2 text-sm ${twitterTestResult.scraper.success ? 'text-green-600' : 'text-amber-600'}`}>
+                          {twitterTestResult.scraper.success ? (
+                            <>
+                              <CheckCircle2 className="h-4 w-4" />
+                              <span>Login: Connected as @{twitterTestResult.scraper.username}</span>
+                            </>
+                          ) : (
+                            <>
+                              <XCircle className="h-4 w-4" />
+                              <span>Login: {twitterTestResult.scraper.error || 'Failed'}</span>
+                            </>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
@@ -1409,18 +1447,35 @@ export default function AgentConfigure() {
                 <Button
                   variant="outline"
                   onClick={() => testTwitter.mutate()}
-                  disabled={!twitterConfig.bearerToken || testTwitter.isPending}
+                  disabled={
+                    (!(twitterConfig.apiKey && twitterConfig.apiKeySecret && twitterConfig.accessToken && twitterConfig.accessTokenSecret) &&
+                     !(twitterConfig.username && twitterConfig.password)) ||
+                    testTwitter.isPending
+                  }
                   data-testid="button-test-twitter"
                 >
                   {testTwitter.isPending ? "Testing..." : "Test Connection"}
                   <Play className="ml-2 h-4 w-4" />
                 </Button>
               </div>
-              {twitterTestResult && !twitterTestResult.success && twitterTestResult.hint && (
-                <Alert className="bg-destructive/10">
+              {twitterTestResult && twitterTestResult.recommendation && (
+                <Alert className={twitterTestResult.success ? "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800" : "bg-destructive/10"}>
                   <AlertCircle className="h-4 w-4" />
-                  <AlertDescription className="text-sm">{twitterTestResult.hint}</AlertDescription>
+                  <AlertDescription className="text-sm">{twitterTestResult.recommendation}</AlertDescription>
                 </Alert>
+              )}
+              {twitterTestResult && twitterTestResult.summary && (
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className={`p-2 rounded ${twitterTestResult.summary.canPost ? 'bg-green-50 dark:bg-green-950/20' : 'bg-red-50 dark:bg-red-950/20'}`}>
+                    <span className="font-medium">Posting:</span> {twitterTestResult.summary.canPost ? 'Ready' : 'Not Available'}
+                  </div>
+                  <div className={`p-2 rounded ${twitterTestResult.summary.canDetectMentions ? 'bg-green-50 dark:bg-green-950/20' : 'bg-amber-50 dark:bg-amber-950/20'}`}>
+                    <span className="font-medium">Mentions:</span> {twitterTestResult.summary.canDetectMentions ? 'Ready' : 'Need Login'}
+                  </div>
+                  <div className={`p-2 rounded ${twitterTestResult.summary.canDetectComments ? 'bg-green-50 dark:bg-green-950/20' : 'bg-amber-50 dark:bg-amber-950/20'}`}>
+                    <span className="font-medium">Comments:</span> {twitterTestResult.summary.canDetectComments ? 'Ready' : 'Need Login'}
+                  </div>
+                </div>
               )}
             </CardFooter>
           </Card>
