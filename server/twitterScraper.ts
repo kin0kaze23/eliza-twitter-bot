@@ -73,29 +73,42 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
   const scraper = new Scraper();
   
   try {
-    // Try to restore from cached cookies first
+    // Try to restore from manually provided cookies first (most reliable method)
     if (agent.twitterCookies) {
       try {
         const cookies = JSON.parse(agent.twitterCookies);
-        await scraper.setCookies(cookies);
-        
-        const isLoggedIn = await scraper.isLoggedIn();
-        if (isLoggedIn) {
-          console.log(`[Scraper] Restored session from cookies for ${agent.name}`);
-          scraperCache.set(agentId, {
-            scraper,
-            lastLogin: Date.now(),
-            username: agent.twitterUsername,
-          });
-          return { scraper };
+        if (Array.isArray(cookies) && cookies.length > 0) {
+          console.log(`[Scraper] Using manually provided cookies for ${agent.name}...`);
+          await scraper.setCookies(cookies);
+          
+          const isLoggedIn = await scraper.isLoggedIn();
+          if (isLoggedIn) {
+            console.log(`[Scraper] Successfully authenticated via cookies for ${agent.name}`);
+            scraperCache.set(agentId, {
+              scraper,
+              lastLogin: Date.now(),
+              username: agent.twitterUsername || 'unknown',
+            });
+            return { scraper };
+          } else {
+            console.log(`[Scraper] Cookies provided but session expired/invalid for ${agent.name}`);
+          }
         }
-      } catch (e) {
-        console.log(`[Scraper] Cookie restore failed for ${agent.name}, will login fresh`);
+      } catch (e: any) {
+        console.log(`[Scraper] Cookie parsing failed for ${agent.name}: ${e.message || e}`);
       }
     }
     
-    // Fresh login
-    console.log(`[Scraper] Logging in as @${agent.twitterUsername}...`);
+    // Fall back to username/password login if cookies not provided or expired
+    if (!agent.twitterUsername || !agent.twitterPassword) {
+      return {
+        scraper: null as any,
+        error: 'COOKIES_REQUIRED: Username/password login is currently blocked by Twitter. Please use the Browser Cookies method instead - see instructions in the Credentials tab.',
+      };
+    }
+    
+    // Try username/password login (may fail due to Twitter security measures)
+    console.log(`[Scraper] Attempting username/password login for @${agent.twitterUsername}...`);
     await scraper.login(
       agent.twitterUsername,
       agent.twitterPassword,

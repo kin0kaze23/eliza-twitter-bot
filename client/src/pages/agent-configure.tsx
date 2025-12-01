@@ -113,6 +113,8 @@ export default function AgentConfigure() {
     password: "",
     email: "",
     twoFactorSecret: "",
+    // Browser cookies (most reliable method)
+    cookies: "",
   });
   
   const [twitterTestResult, setTwitterTestResult] = useState<{ 
@@ -733,6 +735,7 @@ export default function AgentConfigure() {
         twitterPassword: twitterConfig.password,
         twitterEmail: twitterConfig.email,
         twitter2faSecret: twitterConfig.twoFactorSecret,
+        twitterCookies: twitterConfig.cookies,
         // Character
         name: character.name,
         username: character.username,
@@ -918,6 +921,7 @@ export default function AgentConfigure() {
       password: agent.twitterPassword || "",
       email: agent.twitterEmail || "",
       twoFactorSecret: agent.twitter2faSecret || "",
+      cookies: agent.twitterCookies || "",
     });
     
     // Load character
@@ -1408,6 +1412,36 @@ export default function AgentConfigure() {
                   If you have 2FA enabled, provide the TOTP secret (from your authenticator app setup).
                 </p>
               </div>
+
+              <Separator className="my-4" />
+
+              <Alert className="bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800">
+                <AlertCircle className="h-4 w-4 text-amber-500" />
+                <AlertDescription className="text-sm">
+                  <strong>Login Not Working?</strong> Twitter has recently added new security measures that can block automated logins. If username/password fails, use the <strong>Browser Cookies</strong> method below - it's more reliable.
+                </AlertDescription>
+              </Alert>
+
+              <div className="space-y-2">
+                <Label htmlFor="twitter-cookies">Browser Cookies (Most Reliable)</Label>
+                <Textarea
+                  id="twitter-cookies"
+                  value={twitterConfig.cookies}
+                  onChange={(e) => setTwitterConfig({ ...twitterConfig, cookies: e.target.value })}
+                  placeholder='Paste cookies here as JSON array, e.g.: [{"name":"auth_token","value":"xxx","domain":".twitter.com"},{"name":"ct0","value":"yyy","domain":".twitter.com"}]'
+                  className="font-mono text-xs min-h-[80px]"
+                  data-testid="input-twitter-cookies"
+                />
+                <div className="text-xs text-muted-foreground space-y-1">
+                  <p><strong>How to get cookies:</strong></p>
+                  <ol className="list-decimal list-inside space-y-1 ml-2">
+                    <li>Log into Twitter/X in your browser</li>
+                    <li>Open DevTools (F12) → Application tab → Cookies → twitter.com</li>
+                    <li>Copy the values for: <code className="bg-muted px-1 rounded">auth_token</code> and <code className="bg-muted px-1 rounded">ct0</code></li>
+                    <li>Format as JSON: <code className="bg-muted px-1 rounded text-[10px]">[{`{"name":"auth_token","value":"YOUR_VALUE","domain":".twitter.com"},{"name":"ct0","value":"YOUR_VALUE","domain":".twitter.com"}`}]</code></li>
+                  </ol>
+                </div>
+              </div>
             </CardContent>
             <CardFooter className="flex flex-col gap-4">
               <div className="flex items-center justify-between w-full">
@@ -1454,7 +1488,8 @@ export default function AgentConfigure() {
                   onClick={() => testTwitter.mutate()}
                   disabled={
                     (!(twitterConfig.apiKey && twitterConfig.apiKeySecret && twitterConfig.accessToken && twitterConfig.accessTokenSecret) &&
-                     !(twitterConfig.username && twitterConfig.password)) ||
+                     !(twitterConfig.username && twitterConfig.password) &&
+                     !twitterConfig.cookies) ||
                     testTwitter.isPending
                   }
                   data-testid="button-test-twitter"
