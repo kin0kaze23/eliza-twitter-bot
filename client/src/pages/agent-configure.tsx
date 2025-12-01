@@ -1422,24 +1422,89 @@ export default function AgentConfigure() {
                 </AlertDescription>
               </Alert>
 
-              <div className="space-y-2">
-                <Label htmlFor="twitter-cookies">Browser Cookies (Most Reliable)</Label>
-                <Textarea
-                  id="twitter-cookies"
-                  value={twitterConfig.cookies}
-                  onChange={(e) => setTwitterConfig({ ...twitterConfig, cookies: e.target.value })}
-                  placeholder='Paste cookies here as JSON array, e.g.: [{"name":"auth_token","value":"xxx","domain":".twitter.com"},{"name":"ct0","value":"yyy","domain":".twitter.com"}]'
-                  className="font-mono text-xs min-h-[80px]"
-                  data-testid="input-twitter-cookies"
-                />
-                <div className="text-xs text-muted-foreground space-y-1">
-                  <p><strong>How to get cookies:</strong></p>
-                  <ol className="list-decimal list-inside space-y-1 ml-2">
-                    <li>Log into Twitter/X in your browser</li>
-                    <li>Open DevTools (F12) → Application tab → Cookies → twitter.com</li>
-                    <li>Copy the values for: <code className="bg-muted px-1 rounded">auth_token</code> and <code className="bg-muted px-1 rounded">ct0</code></li>
-                    <li>Format as JSON: <code className="bg-muted px-1 rounded text-[10px]">[{`{"name":"auth_token","value":"YOUR_VALUE","domain":".twitter.com"},{"name":"ct0","value":"YOUR_VALUE","domain":".twitter.com"}`}]</code></li>
-                  </ol>
+              <div className="space-y-4">
+                <div className="text-sm text-muted-foreground">
+                  <strong>How to get cookies:</strong> Log into Twitter in your browser → Press F12 → Application tab → Cookies → twitter.com → Copy the values below
+                </div>
+                
+                <div className="grid grid-cols-1 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="twitter-auth-token">auth_token (Required)</Label>
+                    <Input
+                      id="twitter-auth-token"
+                      type="text"
+                      value={twitterConfig.cookies ? (() => {
+                        try {
+                          const parsed = JSON.parse(twitterConfig.cookies);
+                          const found = parsed.find((c: any) => c.name === 'auth_token');
+                          return found?.value || '';
+                        } catch { return twitterConfig.cookies.includes('auth_token') ? '' : twitterConfig.cookies; }
+                      })() : ''}
+                      onChange={(e) => {
+                        const authToken = e.target.value;
+                        let ct0 = '';
+                        try {
+                          const parsed = JSON.parse(twitterConfig.cookies);
+                          const found = parsed.find((c: any) => c.name === 'ct0');
+                          ct0 = found?.value || '';
+                        } catch {}
+                        if (authToken || ct0) {
+                          const cookies = [
+                            { name: 'auth_token', value: authToken, domain: '.twitter.com' },
+                            { name: 'ct0', value: ct0, domain: '.twitter.com' }
+                          ];
+                          setTwitterConfig({ ...twitterConfig, cookies: JSON.stringify(cookies) });
+                        } else {
+                          setTwitterConfig({ ...twitterConfig, cookies: '' });
+                        }
+                      }}
+                      placeholder="Paste the auth_token value here (e.g., 72423dec7a397c3d46486e...)"
+                      className="font-mono text-sm"
+                      data-testid="input-twitter-auth-token"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Find "auth_token" in the cookies list and copy its Value
+                    </p>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="twitter-ct0">ct0 (Required)</Label>
+                    <Input
+                      id="twitter-ct0"
+                      type="text"
+                      value={(() => {
+                        try {
+                          const parsed = JSON.parse(twitterConfig.cookies);
+                          const found = parsed.find((c: any) => c.name === 'ct0');
+                          return found?.value || '';
+                        } catch { return ''; }
+                      })()}
+                      onChange={(e) => {
+                        const ct0 = e.target.value;
+                        let authToken = '';
+                        try {
+                          const parsed = JSON.parse(twitterConfig.cookies);
+                          const found = parsed.find((c: any) => c.name === 'auth_token');
+                          authToken = found?.value || '';
+                        } catch {}
+                        if (authToken || ct0) {
+                          const cookies = [
+                            { name: 'auth_token', value: authToken, domain: '.twitter.com' },
+                            { name: 'ct0', value: ct0, domain: '.twitter.com' }
+                          ];
+                          setTwitterConfig({ ...twitterConfig, cookies: JSON.stringify(cookies) });
+                        } else {
+                          setTwitterConfig({ ...twitterConfig, cookies: '' });
+                        }
+                      }}
+                      placeholder="Paste the ct0 value here (e.g., 22efab12fc617ae41b7242b...)"
+                      className="font-mono text-sm"
+                      data-testid="input-twitter-ct0"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Find "ct0" in the cookies list and copy its Value
+                    </p>
+                  </div>
                 </div>
               </div>
             </CardContent>
