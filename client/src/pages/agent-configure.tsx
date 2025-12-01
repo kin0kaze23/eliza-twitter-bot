@@ -1423,87 +1423,45 @@ export default function AgentConfigure() {
               </Alert>
 
               <div className="space-y-4">
-                <div className="text-sm text-muted-foreground">
-                  <strong>How to get cookies:</strong> Log into Twitter in your browser → Press F12 → Application tab → Cookies → twitter.com → Copy the values below
+                <div className="text-sm space-y-2">
+                  <p><strong>How to export cookies (requires ALL cookies, not just 2):</strong></p>
+                  <ol className="list-decimal list-inside space-y-1 text-muted-foreground ml-2">
+                    <li>Install a cookie export extension: <a href="https://chrome.google.com/webstore/detail/editthiscookie/fngmhnnpilhplaeedifhccceomclgfbg" target="_blank" rel="noopener noreferrer" className="underline text-primary">EditThisCookie (Chrome)</a> or <a href="https://addons.mozilla.org/en-US/firefox/addon/cookie-quick-manager/" target="_blank" rel="noopener noreferrer" className="underline text-primary">Cookie Quick Manager (Firefox)</a></li>
+                    <li>Go to <a href="https://twitter.com" target="_blank" rel="noopener noreferrer" className="underline">twitter.com</a> and log in</li>
+                    <li>Click the cookie extension icon → Export as JSON</li>
+                    <li>Paste the entire JSON below</li>
+                  </ol>
                 </div>
                 
-                <div className="grid grid-cols-1 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="twitter-auth-token">auth_token (Required)</Label>
-                    <Input
-                      id="twitter-auth-token"
-                      type="text"
-                      value={twitterConfig.cookies ? (() => {
-                        try {
-                          const parsed = JSON.parse(twitterConfig.cookies);
-                          const found = parsed.find((c: any) => c.name === 'auth_token');
-                          return found?.value || '';
-                        } catch { return twitterConfig.cookies.includes('auth_token') ? '' : twitterConfig.cookies; }
-                      })() : ''}
-                      onChange={(e) => {
-                        const authToken = e.target.value;
-                        let ct0 = '';
-                        try {
-                          const parsed = JSON.parse(twitterConfig.cookies);
-                          const found = parsed.find((c: any) => c.name === 'ct0');
-                          ct0 = found?.value || '';
-                        } catch {}
-                        if (authToken || ct0) {
-                          const cookies = [
-                            { name: 'auth_token', value: authToken, domain: '.twitter.com' },
-                            { name: 'ct0', value: ct0, domain: '.twitter.com' }
-                          ];
-                          setTwitterConfig({ ...twitterConfig, cookies: JSON.stringify(cookies) });
-                        } else {
-                          setTwitterConfig({ ...twitterConfig, cookies: '' });
+                <div className="space-y-2">
+                  <Label htmlFor="twitter-cookies-json">All Cookies (JSON Export)</Label>
+                  <Textarea
+                    id="twitter-cookies-json"
+                    value={twitterConfig.cookies}
+                    onChange={(e) => setTwitterConfig({ ...twitterConfig, cookies: e.target.value })}
+                    placeholder='Paste the full cookie JSON export here. It should be an array like: [{"name":"auth_token","value":"xxx","domain":".twitter.com",...}, ...]'
+                    className="font-mono text-xs min-h-[100px]"
+                    data-testid="input-twitter-cookies-json"
+                  />
+                  <div className="text-xs text-muted-foreground">
+                    {twitterConfig.cookies && (() => {
+                      try {
+                        const parsed = JSON.parse(twitterConfig.cookies);
+                        if (Array.isArray(parsed)) {
+                          const names = parsed.map((c: any) => c.name).filter(Boolean);
+                          const hasAuth = names.includes('auth_token');
+                          const hasCt0 = names.includes('ct0');
+                          return (
+                            <span className={hasAuth && hasCt0 ? 'text-green-600' : 'text-amber-600'}>
+                              Found {parsed.length} cookies. {hasAuth ? 'auth_token present.' : 'Missing auth_token!'} {hasCt0 ? 'ct0 present.' : 'Missing ct0!'}
+                            </span>
+                          );
                         }
-                      }}
-                      placeholder="Paste the auth_token value here (e.g., 72423dec7a397c3d46486e...)"
-                      className="font-mono text-sm"
-                      data-testid="input-twitter-auth-token"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Find "auth_token" in the cookies list and copy its Value
-                    </p>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="twitter-ct0">ct0 (Required)</Label>
-                    <Input
-                      id="twitter-ct0"
-                      type="text"
-                      value={(() => {
-                        try {
-                          const parsed = JSON.parse(twitterConfig.cookies);
-                          const found = parsed.find((c: any) => c.name === 'ct0');
-                          return found?.value || '';
-                        } catch { return ''; }
-                      })()}
-                      onChange={(e) => {
-                        const ct0 = e.target.value;
-                        let authToken = '';
-                        try {
-                          const parsed = JSON.parse(twitterConfig.cookies);
-                          const found = parsed.find((c: any) => c.name === 'auth_token');
-                          authToken = found?.value || '';
-                        } catch {}
-                        if (authToken || ct0) {
-                          const cookies = [
-                            { name: 'auth_token', value: authToken, domain: '.twitter.com' },
-                            { name: 'ct0', value: ct0, domain: '.twitter.com' }
-                          ];
-                          setTwitterConfig({ ...twitterConfig, cookies: JSON.stringify(cookies) });
-                        } else {
-                          setTwitterConfig({ ...twitterConfig, cookies: '' });
-                        }
-                      }}
-                      placeholder="Paste the ct0 value here (e.g., 22efab12fc617ae41b7242b...)"
-                      className="font-mono text-sm"
-                      data-testid="input-twitter-ct0"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Find "ct0" in the cookies list and copy its Value
-                    </p>
+                        return <span className="text-red-500">Invalid format - must be a JSON array</span>;
+                      } catch {
+                        return <span className="text-red-500">Invalid JSON format</span>;
+                      }
+                    })()}
                   </div>
                 </div>
               </div>

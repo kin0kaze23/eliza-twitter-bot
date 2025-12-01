@@ -76,12 +76,49 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
     // Try to restore from manually provided cookies first (most reliable method)
     if (agent.twitterCookies) {
       try {
-        const cookies = JSON.parse(agent.twitterCookies);
-        if (Array.isArray(cookies) && cookies.length > 0) {
-          console.log(`[Scraper] Using manually provided cookies for ${agent.name}...`);
-          await scraper.setCookies(cookies);
+        const cookiesData = JSON.parse(agent.twitterCookies);
+        if (Array.isArray(cookiesData) && cookiesData.length > 0) {
+          console.log(`[Scraper] Using manually provided cookies for ${agent.name} (${cookiesData.length} cookies)...`);
+          
+          // Check for required cookies
+          const cookieNames = cookiesData.map((c: any) => c.name);
+          const hasAuthToken = cookieNames.includes('auth_token');
+          const hasCt0 = cookieNames.includes('ct0');
+          
+          if (!hasAuthToken || !hasCt0) {
+            console.log(`[Scraper] Missing required cookies. Has auth_token: ${hasAuthToken}, Has ct0: ${hasCt0}`);
+            return {
+              scraper: null as any,
+              error: `COOKIES_INCOMPLETE: Missing required cookies. Need auth_token and ct0 at minimum. Found: ${cookieNames.join(', ')}`,
+            };
+          }
+          
+          // Convert cookies to the format expected by agent-twitter-client
+          // The library expects an array of cookie strings in Set-Cookie format
+          const cookieStrings: string[] = [];
+          for (const cookie of cookiesData) {
+            if (cookie.name && cookie.value) {
+              // Build Set-Cookie format string with all attributes
+              const parts: string[] = [`${cookie.name}=${cookie.value}`];
+              parts.push(`Domain=${cookie.domain || '.twitter.com'}`);
+              parts.push(`Path=${cookie.path || '/'}`);
+              if (cookie.secure !== false) parts.push('Secure');
+              if (cookie.httpOnly) parts.push('HttpOnly');
+              if (cookie.sameSite) parts.push(`SameSite=${cookie.sameSite}`);
+              if (cookie.expires) {
+                const expDate = new Date(cookie.expires * 1000);
+                parts.push(`Expires=${expDate.toUTCString()}`);
+              }
+              cookieStrings.push(parts.join('; '));
+            }
+          }
+          
+          console.log(`[Scraper] Setting ${cookieStrings.length} cookies for ${agent.name}`);
+          await scraper.setCookies(cookieStrings);
           
           const isLoggedIn = await scraper.isLoggedIn();
+          console.log(`[Scraper] isLoggedIn check result: ${isLoggedIn}`);
+          
           if (isLoggedIn) {
             console.log(`[Scraper] Successfully authenticated via cookies for ${agent.name}`);
             scraperCache.set(agentId, {
@@ -91,11 +128,19 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
             });
             return { scraper };
           } else {
-            console.log(`[Scraper] Cookies provided but session expired/invalid for ${agent.name}`);
+            console.log(`[Scraper] Cookies provided but session invalid for ${agent.name}. May need more cookies or cookies expired.`);
+            return {
+              scraper: null as any,
+              error: 'COOKIES_INVALID: Session could not be established. Export ALL cookies from Twitter (not just auth_token and ct0). Use a browser extension like "EditThisCookie" to export the full cookie set as JSON.',
+            };
           }
         }
       } catch (e: any) {
         console.log(`[Scraper] Cookie parsing failed for ${agent.name}: ${e.message || e}`);
+        return {
+          scraper: null as any,
+          error: `COOKIE_PARSE_ERROR: ${e.message}. Make sure cookies are in valid JSON format.`,
+        };
       }
     }
     
