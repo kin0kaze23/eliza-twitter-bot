@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap, Pencil, Star, Info, Sparkles, BookOpen, MessageSquare, Thermometer, Hash, Database, Layers, Twitter, ChevronDown } from "lucide-react";
+import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap, Pencil, Star, Info, Sparkles, BookOpen, MessageSquare, Thermometer, Hash, Database, Layers, Twitter, ChevronDown, Cookie } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -153,6 +153,7 @@ export default function AgentConfigure() {
           twitterPassword: twitterConfig.password,
           twitterEmail: twitterConfig.email,
           twitter2faSecret: twitterConfig.twoFactorSecret,
+          twitterCookies: twitterConfig.cookies,
         }),
       });
       if (!response.ok) {
@@ -1257,6 +1258,49 @@ export default function AgentConfigure() {
                   </div>
                 </div>
               </div>
+
+              <Separator className="my-4" />
+
+              <Collapsible>
+                <CollapsibleTrigger className="flex items-center justify-between w-full p-2 rounded hover-elevate">
+                  <div className="flex items-center gap-2">
+                    <Cookie className="h-4 w-4" />
+                    <span className="font-medium text-sm">Import Session Cookies (Recommended)</span>
+                  </div>
+                  <ChevronDown className="h-4 w-4" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-3 space-y-3">
+                  <Alert className="bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800">
+                    <Info className="h-4 w-4 text-blue-600" />
+                    <AlertDescription className="text-xs">
+                      <strong>Most Reliable Method:</strong> Twitter blocks automated logins, but session cookies work perfectly.
+                      <ol className="list-decimal list-inside mt-2 space-y-1">
+                        <li>Log into Twitter in your browser</li>
+                        <li>Open DevTools (F12) → Application → Cookies → twitter.com</li>
+                        <li>Copy all cookies as JSON using a browser extension like "EditThisCookie"</li>
+                        <li>Paste the JSON array below</li>
+                      </ol>
+                      <p className="mt-2 text-amber-600 dark:text-amber-400">
+                        <strong>Note:</strong> Username is still required above for mention detection to work.
+                      </p>
+                    </AlertDescription>
+                  </Alert>
+                  <div className="space-y-2">
+                    <Label htmlFor="twitter-cookies">Session Cookies (JSON)</Label>
+                    <textarea
+                      id="twitter-cookies"
+                      value={twitterConfig.cookies || ""}
+                      onChange={(e) => setTwitterConfig({ ...twitterConfig, cookies: e.target.value })}
+                      placeholder='[{"name":"auth_token","value":"...","domain":".twitter.com"}, ...]'
+                      className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 font-mono"
+                      data-testid="input-twitter-cookies"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Cookies bypass login entirely. If provided, username/password are only used as backup.
+                    </p>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
             </CardContent>
             <CardFooter>
               <div className="flex items-center justify-between w-full">

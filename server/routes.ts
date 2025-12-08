@@ -12,7 +12,7 @@ import { assemblePrompt, buildMessagesArray, selectNextContentType, formatConten
 import { sendPostCreatedWebhook, sendPostFailedWebhook } from "./webhook";
 import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
 import { requireAuth, verifyPassword, hashPassword } from "./auth";
-import { verifyScraperCredentials } from "./twitterScraper";
+import { verifyScraperCredentials, validateSessionCookies } from "./twitterScraper";
 
 /**
  * Strip content type labels and decorative elements from generated content
@@ -1193,20 +1193,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         twitterPassword: bodyCredentials.twitterPassword || agent.twitterPassword,
         twitterEmail: bodyCredentials.twitterEmail || agent.twitterEmail,
         twitter2faSecret: bodyCredentials.twitter2faSecret || agent.twitter2faSecret,
+        twitterCookies: bodyCredentials.twitterCookies || agent.twitterCookies,
       };
       
       // Check which credentials are available (using merged credentials)
       const hasApiCredentials = testCredentials.twitterApiKey && testCredentials.twitterApiSecret && 
                                 testCredentials.twitterAccessToken && testCredentials.twitterAccessSecret;
       const hasScraperCredentials = testCredentials.twitterUsername && testCredentials.twitterPassword;
+      const hasCookies = testCredentials.twitterCookies && testCredentials.twitterCookies.trim() !== '';
       
-      // If neither credential type is present
-      if (!hasApiCredentials && !hasScraperCredentials) {
+      // If no credential type is present (API, login, or cookies)
+      if (!hasApiCredentials && !hasScraperCredentials && !hasCookies) {
         return res.status(400).json({
           success: false,
           error: "No Twitter credentials found",
-          details: "Please provide either API credentials (for posting) OR login credentials (for mentions/replies)",
-          hint: "Option 1: Add API Key, API Secret, Access Token, Access Secret for official posting. Option 2: Add Twitter Username and Password for scraper-based access."
+          details: "Please provide session cookies (recommended), login credentials, OR API credentials",
+          hint: "Option 1 (Recommended): Import session cookies from your browser. Option 2: Add Twitter Username and Password. Option 3: Add API credentials for official posting."
         });
       }
       
@@ -1287,8 +1289,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
-      // Test Scraper credentials if present
-      if (hasScraperCredentials) {
+      // Test Scraper credentials: First try cookies (most reliable), then fall back to login
+      if (hasCookies) {
+        // Validate session using cookies - no login attempt (avoids Twitter blocks)
+        try {
+          const cookieResult = await validateSessionCookies(testCredentials.twitterCookies!, testCredentials.twitterUsername || undefined);
+          
+          if (cookieResult.usernameRequired) {
+            // Session is valid but username is missing - partial success
+            results.scraper = {
+              success: false,
+              message: "Session cookies valid",
+              method: "cookies",
+              error: "Username required - please enter your Twitter username above",
+              hint: "Session cookies work, but username is required for mention detection. Enter your Twitter username above and test again.",
+              partialSuccess: true
+            };
+          } else if (cookieResult.success && cookieResult.username) {
+            results.scraper = {
+              success: true,
+              message: "Session cookies valid",
+              username: cookieResult.username,
+              method: "cookies",
+              capabilities: ["Detecting mentions", "Detecting comments", "Posting", "Replying"]
+            };
+          } else {
+            results.scraper = {
+              success: false,
+              error: cookieResult.error,
+              method: "cookies",
+              hint: "Cookies expired or invalid. Export fresh cookies from your browser."
+            };
+          }
+        } catch (e: any) {
+          results.scraper = {
+            success: false,
+            error: e.message,
+            method: "cookies",
+            hint: "Error validating session cookies"
+          };
+        }
+      } else if (hasScraperCredentials) {
+        // Fall back to login credentials (may be blocked by Twitter)
         try {
           // Create a temporary agent-like object with test credentials for scraper verification
           const testAgent = {
@@ -1297,6 +1339,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             twitterPassword: testCredentials.twitterPassword,
             twitterEmail: testCredentials.twitterEmail,
             twitter2faSecret: testCredentials.twitter2faSecret,
+            twitterCookies: null, // Force fresh login
           };
           // Force refresh to test new credentials (bypass cache)
           const scraperResult = await verifyScraperCredentials(testAgent as any, true);
@@ -1305,18 +1348,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
               success: true,
               message: "Login credentials valid",
               username: testCredentials.twitterUsername,
+              method: "login",
               capabilities: ["Detecting mentions", "Detecting comments", "Posting (fallback)", "Replying"]
             };
           } else {
             results.scraper = {
               success: false,
               error: scraperResult.error,
+              method: "login",
               hint: scraperResult.error?.includes('2fa') || scraperResult.error?.includes('2FA')
                 ? "Two-factor authentication required. Add your 2FA secret."
                 : scraperResult.error?.includes('locked') || scraperResult.error?.includes('suspended')
                 ? "Account may be locked or suspended. Check your Twitter account."
                 : scraperResult.error?.includes('page does not exist') || scraperResult.error?.includes('code 34')
-                ? "Twitter is blocking automated logins. Mark your account as 'Automated' in Twitter Settings > Account Information."
+                ? "Twitter is blocking automated logins. Use 'Import Session Cookies' below instead."
                 : "Check username and password are correct. Email may also be required."
             };
           }
@@ -1324,6 +1369,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           results.scraper = {
             success: false,
             error: e.message,
+            method: "login",
             hint: "Error testing login credentials"
           };
         }

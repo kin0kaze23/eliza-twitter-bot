@@ -47,11 +47,14 @@ export interface SendTweetResult extends ScraperResult {
 async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; error?: string }> {
   const agentId = agent.id;
   
-  // Check if we have valid login credentials
-  if (!agent.twitterUsername || !agent.twitterPassword) {
+  // Check if we have any form of authentication (cookies OR login credentials)
+  const hasCookies = agent.twitterCookies && agent.twitterCookies.trim() !== '';
+  const hasLoginCredentials = agent.twitterUsername && agent.twitterPassword;
+  
+  if (!hasCookies && !hasLoginCredentials) {
     return {
       scraper: null as any,
-      error: 'SCRAPER_CREDENTIALS_MISSING: Twitter username and password are required for comment/mention detection. Add them in the Credentials tab.',
+      error: 'SCRAPER_CREDENTIALS_MISSING: Session cookies or Twitter login credentials required. Import cookies (recommended) or add username/password in the Credentials tab.',
     };
   }
   
@@ -73,12 +76,12 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
   const scraper = new Scraper();
   
   try {
-    // Try to restore from cached cookies first
-    if (agent.twitterCookies) {
+    // Try to restore from session cookies first (most reliable method)
+    if (hasCookies) {
       try {
-        const cookies = JSON.parse(agent.twitterCookies);
+        const cookies = JSON.parse(agent.twitterCookies!);
         if (Array.isArray(cookies) && cookies.length > 0) {
-          console.log(`[Scraper] Restoring session from cached cookies for ${agent.name}...`);
+          console.log(`[Scraper] Restoring session from cookies for ${agent.name}...`);
           await scraper.setCookies(cookies);
           
           const isLoggedIn = await scraper.isLoggedIn();
@@ -87,22 +90,22 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
             scraperCache.set(agentId, {
               scraper,
               lastLogin: Date.now(),
-              username: agent.twitterUsername || 'unknown',
+              username: agent.twitterUsername || 'cookie-session',
             });
             return { scraper };
           }
-          console.log(`[Scraper] Cached cookies expired for ${agent.name}, will login fresh`);
+          console.log(`[Scraper] Cookies expired for ${agent.name}, will try login if credentials available`);
         }
       } catch (e) {
-        console.log(`[Scraper] Cookie restore failed for ${agent.name}, will login fresh`);
+        console.log(`[Scraper] Cookie restore failed for ${agent.name}, will try login if credentials available`);
       }
     }
     
-    // Login with username/password (with retry)
-    if (!agent.twitterUsername || !agent.twitterPassword) {
+    // Fall back to username/password login (may be blocked by Twitter)
+    if (!hasLoginCredentials) {
       return {
         scraper: null as any,
-        error: 'Missing credentials: Enter your Twitter username and password in the Credentials tab.',
+        error: 'Session cookies expired and no login credentials available. Please import fresh cookies from your browser.',
       };
     }
     
@@ -119,8 +122,8 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
         
         console.log(`[Scraper] Login attempt ${attempt} for @${agent.twitterUsername}...`);
         await scraper.login(
-          agent.twitterUsername,
-          agent.twitterPassword,
+          agent.twitterUsername!,
+          agent.twitterPassword!,
           agent.twitterEmail || undefined,
           agent.twitter2faSecret || undefined
         );
@@ -143,7 +146,7 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
           scraperCache.set(agentId, {
             scraper,
             lastLogin: Date.now(),
-            username: agent.twitterUsername,
+            username: agent.twitterUsername!,
           });
           
           return { scraper };
@@ -191,6 +194,14 @@ export async function fetchRepliesViaScraper(
   agent: Agent,
   tweetId: string
 ): Promise<FetchRepliesResult> {
+  // Guard: username is required for filtering own tweets from search results
+  if (!agent.twitterUsername) {
+    return { 
+      success: false, 
+      error: 'MISSING_USERNAME: Twitter username is required for reply detection. Add it in the Credentials tab.' 
+    };
+  }
+  
   const { scraper, error } = await getOrCreateScraper(agent);
   if (error) {
     return { success: false, error };
@@ -241,6 +252,14 @@ export async function fetchMentionsViaScraper(
   agent: Agent,
   limit: number = 20
 ): Promise<FetchMentionsResult> {
+  // Guard: username is required for mention detection
+  if (!agent.twitterUsername) {
+    return { 
+      success: false, 
+      error: 'MISSING_USERNAME: Twitter username is required for mention detection. Add it in the Credentials tab.' 
+    };
+  }
+  
   const { scraper, error } = await getOrCreateScraper(agent);
   if (error) {
     return { success: false, error };
@@ -347,6 +366,64 @@ export async function verifyScraperCredentials(agent: Agent, forceRefresh: boole
       return { success: false, error: 'Not logged in' };
     }
   } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+// Validate session using cookies only (no login attempt)
+export async function validateSessionCookies(cookies: string, providedUsername?: string): Promise<{ success: boolean; error?: string; username?: string; usernameRequired?: boolean }> {
+  if (!cookies || cookies.trim() === '') {
+    return { success: false, error: 'No cookies provided' };
+  }
+  
+  try {
+    const cookieArray = JSON.parse(cookies);
+    if (!Array.isArray(cookieArray) || cookieArray.length === 0) {
+      return { success: false, error: 'Invalid cookie format - expected JSON array' };
+    }
+    
+    const scraper = new Scraper();
+    await scraper.setCookies(cookieArray);
+    
+    const isLoggedIn = await scraper.isLoggedIn();
+    if (isLoggedIn) {
+      // Use provided username or try to detect it from the session
+      let resolvedUsername = providedUsername;
+      
+      // If no username provided, try to detect from session via scraper.me()
+      if (!resolvedUsername) {
+        try {
+          // scraper.me() returns user info for the authenticated account
+          const me = await (scraper as any).me?.();
+          if (me && me.username) {
+            resolvedUsername = me.username;
+            console.log(`[Scraper] Detected username from session: @${resolvedUsername}`);
+          }
+        } catch (e) {
+          console.log(`[Scraper] Could not detect username from session: ${e}`);
+        }
+      }
+      
+      // Username is required for mention/reply detection
+      if (!resolvedUsername) {
+        return { 
+          success: true,
+          usernameRequired: true,
+          error: 'Session valid but username could not be detected. Please enter your Twitter username above for mention detection to work.'
+        };
+      }
+      
+      return { 
+        success: true,
+        username: resolvedUsername
+      };
+    } else {
+      return { success: false, error: 'Cookies expired or invalid - please export fresh cookies from browser' };
+    }
+  } catch (error: any) {
+    if (error.message?.includes('JSON')) {
+      return { success: false, error: 'Invalid JSON format - paste the raw cookie JSON array' };
+    }
     return { success: false, error: error.message };
   }
 }
