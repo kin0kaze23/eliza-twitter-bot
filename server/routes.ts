@@ -1296,22 +1296,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const cookieResult = await validateSessionCookies(testCredentials.twitterCookies!, testCredentials.twitterUsername || undefined);
           
           if (cookieResult.usernameRequired) {
-            // Session is valid but username is missing - partial success
+            // Session is valid but username is missing - this is a blocking error
             results.scraper = {
               success: false,
-              message: "Session cookies valid",
+              message: "Session cookies valid but username missing",
               method: "cookies",
               error: "Username required - please enter your Twitter username above",
               hint: "Session cookies work, but username is required for mention detection. Enter your Twitter username above and test again.",
-              partialSuccess: true
+              partialSuccess: true,
+              canPost: true,
+              canDetectMentions: false
             };
           } else if (cookieResult.success && cookieResult.username) {
+            // If username was auto-detected and differs from what's stored, persist it
+            const detectedUsername = cookieResult.username;
+            if (detectedUsername && detectedUsername !== agent.twitterUsername) {
+              try {
+                await storage.updateAgent(parseInt(agentId), { twitterUsername: detectedUsername });
+                console.log(`[Test] Updated agent ${agentId} with detected username: @${detectedUsername}`);
+              } catch (e) {
+                console.warn(`[Test] Could not persist detected username: ${e}`);
+              }
+            }
+            
             results.scraper = {
               success: true,
               message: "Session cookies valid",
-              username: cookieResult.username,
+              username: detectedUsername,
               method: "cookies",
-              capabilities: ["Detecting mentions", "Detecting comments", "Posting", "Replying"]
+              capabilities: ["Detecting mentions", "Detecting comments", "Posting", "Replying"],
+              usernameAutoDetected: detectedUsername !== testCredentials.twitterUsername
             };
           } else {
             results.scraper = {
@@ -1378,31 +1392,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Determine overall success and provide recommendation
       const apiSuccess = results.api?.success === true;
       const scraperSuccess = results.scraper?.success === true;
+      const scraperPartialSuccess = (results.scraper as any)?.partialSuccess === true;
+      const scraperCanPost = scraperSuccess || scraperPartialSuccess;
+      const scraperCanDetectMentions = scraperSuccess; // Only true if username resolved
       
       let recommendation = "";
       if (apiSuccess && scraperSuccess) {
         recommendation = "Both credential types working. API will be used for posting, scraper for mention/comment detection.";
-      } else if (apiSuccess && !hasScraperCredentials) {
-        recommendation = "API credentials working. Add Twitter username/password for free mention and comment detection.";
+      } else if (apiSuccess && scraperPartialSuccess) {
+        recommendation = "API working, cookies valid but username missing. Enter your Twitter username above and test again for mention detection.";
+      } else if (apiSuccess && !hasScraperCredentials && !hasCookies) {
+        recommendation = "API credentials working. Add Twitter username/password or cookies for free mention and comment detection.";
       } else if (scraperSuccess && !hasApiCredentials) {
         recommendation = "Login credentials working. Scraper will handle posting and replies. For more stable posting, add API credentials.";
-      } else if (apiSuccess && !scraperSuccess) {
-        recommendation = "API working but login failed. Fix login credentials for mention/comment detection.";
+      } else if (apiSuccess && !scraperSuccess && !scraperPartialSuccess) {
+        recommendation = "API working but login failed. Fix login credentials or import cookies for mention/comment detection.";
       } else if (scraperSuccess && !apiSuccess) {
         recommendation = "Login working but API failed. Scraper will be used for all operations.";
+      } else if (scraperPartialSuccess && !apiSuccess) {
+        recommendation = "Cookies valid but username required. Enter your Twitter username above to enable mention detection.";
       } else {
         recommendation = "Both credential types failed. Please check your credentials.";
       }
       
+      // Overall success requires at least one working credential AND username resolved for scraper
+      // If using cookies and username is not provided/detected, that's a blocking error
+      const overallSuccess = (apiSuccess && scraperSuccess) || // Both work = full success
+                             (apiSuccess && !hasCookies && !hasScraperCredentials) || // API only, no scraper attempted
+                             (scraperSuccess && !hasApiCredentials) || // Scraper only (with username)
+                             (apiSuccess && scraperSuccess); // Both work
+      
+      // If only partial success (cookies work but no username), overall should be false
+      const hasUsernameBlocker = scraperPartialSuccess && !scraperSuccess;
+      
       res.json({
-        success: apiSuccess || scraperSuccess,
+        success: overallSuccess && !hasUsernameBlocker,
+        usernameRequired: hasUsernameBlocker,
         ...results,
         recommendation,
         summary: {
-          canPost: apiSuccess || scraperSuccess,
-          canDetectMentions: scraperSuccess,
-          canDetectComments: scraperSuccess,
-          preferredPostMethod: apiSuccess ? "API" : (scraperSuccess ? "Scraper" : "None"),
+          canPost: apiSuccess || scraperCanPost,
+          canDetectMentions: scraperCanDetectMentions,
+          canDetectComments: scraperCanDetectMentions,
+          preferredPostMethod: apiSuccess ? "API" : (scraperCanPost ? "Scraper" : "None"),
+          usernameRequired: hasUsernameBlocker
         }
       });
       

@@ -394,13 +394,17 @@ export async function validateSessionCookies(cookies: string, providedUsername?:
       if (!resolvedUsername) {
         try {
           // scraper.me() returns user info for the authenticated account
-          const me = await (scraper as any).me?.();
-          if (me && me.username) {
-            resolvedUsername = me.username;
+          const me = await scraper.me();
+          // Profile may have username OR screen_name depending on the scraper version
+          const detectedHandle = me?.username || (me as any)?.screen_name || (me as any)?.screenName;
+          if (detectedHandle) {
+            resolvedUsername = detectedHandle;
             console.log(`[Scraper] Detected username from session: @${resolvedUsername}`);
+          } else {
+            console.log(`[Scraper] scraper.me() returned profile but no username found:`, JSON.stringify(me).substring(0, 200));
           }
-        } catch (e) {
-          console.log(`[Scraper] Could not detect username from session: ${e}`);
+        } catch (e: any) {
+          console.log(`[Scraper] Could not detect username from session: ${e.message || e}`);
         }
       }
       
