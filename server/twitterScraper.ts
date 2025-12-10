@@ -81,34 +81,51 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
       try {
         const rawCookies = JSON.parse(agent.twitterCookies!);
         if (Array.isArray(rawCookies) && rawCookies.length > 0) {
-          // Convert EditThisCookie format (name) to agent-twitter-client format (key)
-          const cookies = rawCookies.map(c => {
-            const cookie: any = {
-              key: c.key || c.name, // Support both formats
-              value: c.value,
-              domain: c.domain || '.twitter.com',
-              path: c.path || '/',
-            };
-            // Preserve original boolean values if present
-            if (typeof c.secure === 'boolean') cookie.secure = c.secure;
-            if (typeof c.httpOnly === 'boolean') cookie.httpOnly = c.httpOnly;
-            if (c.sameSite) cookie.sameSite = c.sameSite;
-            // Handle expiration - expirationDate is in seconds (Unix timestamp)
-            if (c.expirationDate) {
-              cookie.expires = new Date(c.expirationDate * 1000).toISOString();
-            } else if (c.expires) {
-              // expires could be a Date string or seconds
-              cookie.expires = typeof c.expires === 'number' 
-                ? new Date(c.expires * 1000).toISOString() 
-                : c.expires;
-            }
-            return cookie;
-          });
+          // Check if cookies are already in string format (from scraper.getCookies())
+          const firstCookie = rawCookies[0];
+          let cookies: string[];
+          
+          if (typeof firstCookie === 'string') {
+            // Already in string format (from getCookies() after login)
+            cookies = rawCookies;
+          } else {
+            // Convert browser's EditThisCookie format to cookie strings
+            // Format: "name=value; Domain=.twitter.com; Path=/; Secure; HttpOnly"
+            cookies = rawCookies.map(c => {
+              const name = c.key || c.name;
+              const value = c.value;
+              const domain = c.domain || '.twitter.com';
+              const path = c.path || '/';
+              
+              let cookieStr = `${name}=${value}; Domain=${domain}; Path=${path}`;
+              
+              if (c.secure === true) cookieStr += '; Secure';
+              if (c.httpOnly === true) cookieStr += '; HttpOnly';
+              if (c.sameSite) cookieStr += `; SameSite=${c.sameSite}`;
+              
+              // Handle expiration
+              if (c.expirationDate) {
+                const expires = new Date(c.expirationDate * 1000).toUTCString();
+                cookieStr += `; Expires=${expires}`;
+              } else if (c.expires && typeof c.expires === 'number') {
+                const expires = new Date(c.expires * 1000).toUTCString();
+                cookieStr += `; Expires=${expires}`;
+              }
+              
+              return cookieStr;
+            });
+          }
           
           console.log(`[Scraper] Restoring session from ${cookies.length} cookies for ${agent.name}...`);
+          // Debug: log cookie names being restored
+          const cookieNames = cookies.map(c => typeof c === 'string' ? c.split('=')[0] : 'invalid');
+          console.log(`[Scraper] Cookie names: ${cookieNames.join(', ')}`);
+          
           await scraper.setCookies(cookies);
           
           const isLoggedIn = await scraper.isLoggedIn();
+          console.log(`[Scraper] isLoggedIn check for ${agent.name}: ${isLoggedIn}`);
+          
           if (isLoggedIn) {
             console.log(`[Scraper] Session restored from cookies for ${agent.name}`);
             scraperCache.set(agentId, {
@@ -118,7 +135,7 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
             });
             return { scraper };
           }
-          console.log(`[Scraper] Cookies expired for ${agent.name}, will try login if credentials available`);
+          console.log(`[Scraper] Cookies may be expired or invalid for ${agent.name}, will try login if credentials available`);
         }
       } catch (e: any) {
         console.log(`[Scraper] Cookie restore failed for ${agent.name}: ${e.message}`);
@@ -406,28 +423,40 @@ export async function validateSessionCookies(cookies: string, providedUsername?:
       return { success: false, error: 'Invalid cookie format - expected JSON array' };
     }
     
-    // Convert EditThisCookie format (name) to agent-twitter-client format (key)
-    const cookieArray = rawCookies.map(c => {
-      const cookie: any = {
-        key: c.key || c.name, // Support both formats
-        value: c.value,
-        domain: c.domain || '.twitter.com',
-        path: c.path || '/',
-      };
-      // Preserve original boolean values if present
-      if (typeof c.secure === 'boolean') cookie.secure = c.secure;
-      if (typeof c.httpOnly === 'boolean') cookie.httpOnly = c.httpOnly;
-      if (c.sameSite) cookie.sameSite = c.sameSite;
-      // Handle expiration - expirationDate is in seconds (Unix timestamp)
-      if (c.expirationDate) {
-        cookie.expires = new Date(c.expirationDate * 1000).toISOString();
-      } else if (c.expires) {
-        cookie.expires = typeof c.expires === 'number' 
-          ? new Date(c.expires * 1000).toISOString() 
-          : c.expires;
-      }
-      return cookie;
-    });
+    // Check if cookies are already in string format (from scraper.getCookies())
+    const firstCookie = rawCookies[0];
+    let cookieArray: string[];
+    
+    if (typeof firstCookie === 'string') {
+      // Already in string format (from getCookies() after login)
+      cookieArray = rawCookies;
+    } else {
+      // Convert browser's EditThisCookie format to cookie strings
+      // Format: "name=value; Domain=.twitter.com; Path=/; Secure; HttpOnly"
+      cookieArray = rawCookies.map(c => {
+        const name = c.key || c.name;
+        const value = c.value;
+        const domain = c.domain || '.twitter.com';
+        const path = c.path || '/';
+        
+        let cookieStr = `${name}=${value}; Domain=${domain}; Path=${path}`;
+        
+        if (c.secure === true) cookieStr += '; Secure';
+        if (c.httpOnly === true) cookieStr += '; HttpOnly';
+        if (c.sameSite) cookieStr += `; SameSite=${c.sameSite}`;
+        
+        // Handle expiration
+        if (c.expirationDate) {
+          const expires = new Date(c.expirationDate * 1000).toUTCString();
+          cookieStr += `; Expires=${expires}`;
+        } else if (c.expires && typeof c.expires === 'number') {
+          const expires = new Date(c.expires * 1000).toUTCString();
+          cookieStr += `; Expires=${expires}`;
+        }
+        
+        return cookieStr;
+      });
+    }
     
     const scraper = new Scraper();
     await scraper.setCookies(cookieArray);
