@@ -1312,7 +1312,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const detectedUsername = cookieResult.username;
             if (detectedUsername && detectedUsername !== agent.twitterUsername) {
               try {
-                await storage.updateAgent(parseInt(agentId), { twitterUsername: detectedUsername });
+                await storage.updateAgent(agentId, { twitterUsername: detectedUsername });
                 console.log(`[Test] Updated agent ${agentId} with detected username: @${detectedUsername}`);
               } catch (e) {
                 console.warn(`[Test] Could not persist detected username: ${e}`);

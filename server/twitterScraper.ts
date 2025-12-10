@@ -79,9 +79,33 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
     // Try to restore from session cookies first (most reliable method)
     if (hasCookies) {
       try {
-        const cookies = JSON.parse(agent.twitterCookies!);
-        if (Array.isArray(cookies) && cookies.length > 0) {
-          console.log(`[Scraper] Restoring session from cookies for ${agent.name}...`);
+        const rawCookies = JSON.parse(agent.twitterCookies!);
+        if (Array.isArray(rawCookies) && rawCookies.length > 0) {
+          // Convert EditThisCookie format (name) to agent-twitter-client format (key)
+          const cookies = rawCookies.map(c => {
+            const cookie: any = {
+              key: c.key || c.name, // Support both formats
+              value: c.value,
+              domain: c.domain || '.twitter.com',
+              path: c.path || '/',
+            };
+            // Preserve original boolean values if present
+            if (typeof c.secure === 'boolean') cookie.secure = c.secure;
+            if (typeof c.httpOnly === 'boolean') cookie.httpOnly = c.httpOnly;
+            if (c.sameSite) cookie.sameSite = c.sameSite;
+            // Handle expiration - expirationDate is in seconds (Unix timestamp)
+            if (c.expirationDate) {
+              cookie.expires = new Date(c.expirationDate * 1000).toISOString();
+            } else if (c.expires) {
+              // expires could be a Date string or seconds
+              cookie.expires = typeof c.expires === 'number' 
+                ? new Date(c.expires * 1000).toISOString() 
+                : c.expires;
+            }
+            return cookie;
+          });
+          
+          console.log(`[Scraper] Restoring session from ${cookies.length} cookies for ${agent.name}...`);
           await scraper.setCookies(cookies);
           
           const isLoggedIn = await scraper.isLoggedIn();
@@ -96,8 +120,8 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
           }
           console.log(`[Scraper] Cookies expired for ${agent.name}, will try login if credentials available`);
         }
-      } catch (e) {
-        console.log(`[Scraper] Cookie restore failed for ${agent.name}, will try login if credentials available`);
+      } catch (e: any) {
+        console.log(`[Scraper] Cookie restore failed for ${agent.name}: ${e.message}`);
       }
     }
     
@@ -377,10 +401,33 @@ export async function validateSessionCookies(cookies: string, providedUsername?:
   }
   
   try {
-    const cookieArray = JSON.parse(cookies);
-    if (!Array.isArray(cookieArray) || cookieArray.length === 0) {
+    const rawCookies = JSON.parse(cookies);
+    if (!Array.isArray(rawCookies) || rawCookies.length === 0) {
       return { success: false, error: 'Invalid cookie format - expected JSON array' };
     }
+    
+    // Convert EditThisCookie format (name) to agent-twitter-client format (key)
+    const cookieArray = rawCookies.map(c => {
+      const cookie: any = {
+        key: c.key || c.name, // Support both formats
+        value: c.value,
+        domain: c.domain || '.twitter.com',
+        path: c.path || '/',
+      };
+      // Preserve original boolean values if present
+      if (typeof c.secure === 'boolean') cookie.secure = c.secure;
+      if (typeof c.httpOnly === 'boolean') cookie.httpOnly = c.httpOnly;
+      if (c.sameSite) cookie.sameSite = c.sameSite;
+      // Handle expiration - expirationDate is in seconds (Unix timestamp)
+      if (c.expirationDate) {
+        cookie.expires = new Date(c.expirationDate * 1000).toISOString();
+      } else if (c.expires) {
+        cookie.expires = typeof c.expires === 'number' 
+          ? new Date(c.expires * 1000).toISOString() 
+          : c.expires;
+      }
+      return cookie;
+    });
     
     const scraper = new Scraper();
     await scraper.setCookies(cookieArray);
