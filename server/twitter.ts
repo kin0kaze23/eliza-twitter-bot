@@ -96,6 +96,8 @@ export async function postTweet(agent: Agent, content: string): Promise<TwitterP
   for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
     try {
       console.log(`[Twitter] Posting tweet (attempt ${attempt}/${MAX_RETRIES + 1})`);
+      console.log(`[Twitter] Using API endpoint: ${requestData.url}`);
+      console.log(`[Twitter] OAuth Authorization header present: ${!!authHeader.Authorization}`);
       
       const response = await fetch(requestData.url, {
         method: "POST",
@@ -111,6 +113,7 @@ export async function postTweet(agent: Agent, content: string): Promise<TwitterP
         
         // Rate limit - no retry, return immediately
         if (response.status === 429) {
+          console.log(`[Twitter] Rate limit hit (429) - will back off automatically`);
           return {
             success: false,
             error: "Rate limit exceeded",
@@ -159,18 +162,30 @@ export async function postTweet(agent: Agent, content: string): Promise<TwitterP
           };
         }
 
+        // Build comprehensive error message for 5xx errors
+        const errorMessage = errorData.detail || errorData.title || errorData.error || 
+                            errorData.errors?.[0]?.message || `HTTP ${response.status}`;
+        
         // Other errors - might be transient, can retry
         lastError = {
           success: false,
-          error: errorData.detail || errorData.title || `HTTP ${response.status}`,
+          error: response.status === 503 ? "Service Unavailable" : errorMessage,
           errorCode: `HTTP_${response.status}`,
         };
         
         // Retry for 5xx server errors
         if (response.status >= 500 && attempt <= MAX_RETRIES) {
-          console.log(`[Twitter] Server error, retrying in ${RETRY_DELAY_MS}ms...`);
+          console.log(`[Twitter] HTTP ${response.status} error (attempt ${attempt}/${MAX_RETRIES}): ${errorMessage}`);
+          console.log(`[Twitter] Full error response:`, JSON.stringify(errorData));
+          console.log(`[Twitter] Retrying in ${RETRY_DELAY_MS}ms...`);
           await delay(RETRY_DELAY_MS);
           continue;
+        }
+        
+        // Final attempt failed - log comprehensive details
+        if (response.status >= 500) {
+          console.error(`[Twitter] All ${MAX_RETRIES} attempts failed with HTTP ${response.status}`);
+          console.error(`[Twitter] This is a Twitter server issue, not a credential problem.`);
         }
         
         return lastError;
