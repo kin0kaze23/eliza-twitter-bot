@@ -91,29 +91,48 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
           } else {
             // Convert browser's EditThisCookie format to cookie strings
             // Format: "name=value; Domain=.twitter.com; Path=/; Secure; HttpOnly"
-            cookies = rawCookies.map(c => {
-              const name = c.key || c.name;
-              const value = c.value;
-              const domain = c.domain || '.twitter.com';
-              const path = c.path || '/';
-              
-              let cookieStr = `${name}=${value}; Domain=${domain}; Path=${path}`;
-              
-              if (c.secure === true) cookieStr += '; Secure';
-              if (c.httpOnly === true) cookieStr += '; HttpOnly';
-              if (c.sameSite) cookieStr += `; SameSite=${c.sameSite}`;
-              
-              // Handle expiration
-              if (c.expirationDate) {
-                const expires = new Date(c.expirationDate * 1000).toUTCString();
-                cookieStr += `; Expires=${expires}`;
-              } else if (c.expires && typeof c.expires === 'number') {
-                const expires = new Date(c.expires * 1000).toUTCString();
-                cookieStr += `; Expires=${expires}`;
-              }
-              
-              return cookieStr;
-            });
+            cookies = rawCookies
+              .filter(c => {
+                // Validate required fields exist
+                const name = c.key || c.name;
+                if (!name || !c.value) {
+                  console.log(`[Scraper] Skipping invalid cookie (missing name or value)`);
+                  return false;
+                }
+                return true;
+              })
+              .map(c => {
+                const name = c.key || c.name;
+                // URI-encode value to handle special characters
+                const value = encodeURIComponent(c.value);
+                const domain = c.domain || '.twitter.com';
+                const path = c.path || '/'; // Use provided path or default to '/'
+                
+                let cookieStr = `${name}=${value}; Domain=${domain}; Path=${path}`;
+                
+                if (c.secure === true) cookieStr += '; Secure';
+                if (c.httpOnly === true) cookieStr += '; HttpOnly';
+                if (c.sameSite) cookieStr += `; SameSite=${c.sameSite}`;
+                
+                // Handle expiration - support multiple formats
+                if (c.expirationDate && typeof c.expirationDate === 'number') {
+                  const expires = new Date(c.expirationDate * 1000).toUTCString();
+                  cookieStr += `; Expires=${expires}`;
+                } else if (c.expires) {
+                  if (typeof c.expires === 'number') {
+                    const expires = new Date(c.expires * 1000).toUTCString();
+                    cookieStr += `; Expires=${expires}`;
+                  } else if (typeof c.expires === 'string') {
+                    // Already an ISO/date string, convert to UTC format
+                    const expires = new Date(c.expires).toUTCString();
+                    if (expires !== 'Invalid Date') {
+                      cookieStr += `; Expires=${expires}`;
+                    }
+                  }
+                }
+                
+                return cookieStr;
+              });
           }
           
           console.log(`[Scraper] Restoring session from ${cookies.length} cookies for ${agent.name}...`);
@@ -433,29 +452,48 @@ export async function validateSessionCookies(cookies: string, providedUsername?:
     } else {
       // Convert browser's EditThisCookie format to cookie strings
       // Format: "name=value; Domain=.twitter.com; Path=/; Secure; HttpOnly"
-      cookieArray = rawCookies.map(c => {
-        const name = c.key || c.name;
-        const value = c.value;
-        const domain = c.domain || '.twitter.com';
-        const path = c.path || '/';
-        
-        let cookieStr = `${name}=${value}; Domain=${domain}; Path=${path}`;
-        
-        if (c.secure === true) cookieStr += '; Secure';
-        if (c.httpOnly === true) cookieStr += '; HttpOnly';
-        if (c.sameSite) cookieStr += `; SameSite=${c.sameSite}`;
-        
-        // Handle expiration
-        if (c.expirationDate) {
-          const expires = new Date(c.expirationDate * 1000).toUTCString();
-          cookieStr += `; Expires=${expires}`;
-        } else if (c.expires && typeof c.expires === 'number') {
-          const expires = new Date(c.expires * 1000).toUTCString();
-          cookieStr += `; Expires=${expires}`;
-        }
-        
-        return cookieStr;
-      });
+      cookieArray = rawCookies
+        .filter(c => {
+          // Validate required fields exist
+          const name = c.key || c.name;
+          if (!name || !c.value) {
+            console.log(`[Scraper] Skipping invalid cookie (missing name or value)`);
+            return false;
+          }
+          return true;
+        })
+        .map(c => {
+          const name = c.key || c.name;
+          // URI-encode value to handle special characters
+          const value = encodeURIComponent(c.value);
+          const domain = c.domain || '.twitter.com';
+          const path = c.path || '/'; // Use provided path or default to '/'
+          
+          let cookieStr = `${name}=${value}; Domain=${domain}; Path=${path}`;
+          
+          if (c.secure === true) cookieStr += '; Secure';
+          if (c.httpOnly === true) cookieStr += '; HttpOnly';
+          if (c.sameSite) cookieStr += `; SameSite=${c.sameSite}`;
+          
+          // Handle expiration - support multiple formats
+          if (c.expirationDate && typeof c.expirationDate === 'number') {
+            const expires = new Date(c.expirationDate * 1000).toUTCString();
+            cookieStr += `; Expires=${expires}`;
+          } else if (c.expires) {
+            if (typeof c.expires === 'number') {
+              const expires = new Date(c.expires * 1000).toUTCString();
+              cookieStr += `; Expires=${expires}`;
+            } else if (typeof c.expires === 'string') {
+              // Already an ISO/date string, convert to UTC format
+              const expires = new Date(c.expires).toUTCString();
+              if (expires !== 'Invalid Date') {
+                cookieStr += `; Expires=${expires}`;
+              }
+            }
+          }
+          
+          return cookieStr;
+        });
     }
     
     const scraper = new Scraper();
