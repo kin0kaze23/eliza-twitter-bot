@@ -17,11 +17,26 @@ export interface TwitterUser {
   username: string;
 }
 
+/**
+ * Get Twitter credentials with environment secrets fallback
+ * Priority: Environment secrets > Database values
+ * This ensures credentials work in both dev and production
+ */
+export function getTwitterCredentials(agent: Agent) {
+  return {
+    apiKey: process.env.TWITTER_API_KEY || agent.twitterApiKey,
+    apiSecret: process.env.TWITTER_API_SECRET || agent.twitterApiSecret,
+    accessToken: process.env.TWITTER_ACCESS_TOKEN || agent.twitterAccessToken,
+    accessSecret: process.env.TWITTER_ACCESS_SECRET || agent.twitterAccessSecret,
+  };
+}
+
 function createOAuthClient(agent: Agent): OAuth {
+  const creds = getTwitterCredentials(agent);
   return new OAuth({
     consumer: {
-      key: agent.twitterApiKey!,
-      secret: agent.twitterApiSecret!,
+      key: creds.apiKey!,
+      secret: creds.apiSecret!,
     },
     signature_method: "HMAC-SHA1",
     hash_function(base_string: string, key: string) {
@@ -31,18 +46,20 @@ function createOAuthClient(agent: Agent): OAuth {
 }
 
 function getToken(agent: Agent) {
+  const creds = getTwitterCredentials(agent);
   return {
-    key: agent.twitterAccessToken!,
-    secret: agent.twitterAccessSecret!,
+    key: creds.accessToken!,
+    secret: creds.accessSecret!,
   };
 }
 
 export function validateTwitterCredentials(agent: Agent): { valid: boolean; missing: string[] } {
+  const creds = getTwitterCredentials(agent);
   const missing: string[] = [];
-  if (!agent.twitterApiKey) missing.push("API Key");
-  if (!agent.twitterApiSecret) missing.push("API Secret");
-  if (!agent.twitterAccessToken) missing.push("Access Token");
-  if (!agent.twitterAccessSecret) missing.push("Access Token Secret");
+  if (!creds.apiKey) missing.push("API Key");
+  if (!creds.apiSecret) missing.push("API Secret");
+  if (!creds.accessToken) missing.push("Access Token");
+  if (!creds.accessSecret) missing.push("Access Token Secret");
   return { valid: missing.length === 0, missing };
 }
 
