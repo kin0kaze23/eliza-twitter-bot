@@ -1182,13 +1182,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Agent not found" });
       }
       
-      // Use request body credentials if provided, otherwise fall back to database
-      // This allows testing unsaved form values
+      // Use request body credentials if provided, otherwise fall back to database, then env secrets
+      // Priority: Request body > Database > Environment secrets
+      // This allows testing unsaved form values while still supporting env-based credentials
       const testCredentials = {
-        twitterApiKey: bodyCredentials.twitterApiKey || agent.twitterApiKey,
-        twitterApiSecret: bodyCredentials.twitterApiSecret || agent.twitterApiSecret,
-        twitterAccessToken: bodyCredentials.twitterAccessToken || agent.twitterAccessToken,
-        twitterAccessSecret: bodyCredentials.twitterAccessSecret || agent.twitterAccessSecret,
+        twitterApiKey: bodyCredentials.twitterApiKey || agent.twitterApiKey || process.env.TWITTER_API_KEY,
+        twitterApiSecret: bodyCredentials.twitterApiSecret || agent.twitterApiSecret || process.env.TWITTER_API_SECRET,
+        twitterAccessToken: bodyCredentials.twitterAccessToken || agent.twitterAccessToken || process.env.TWITTER_ACCESS_TOKEN,
+        twitterAccessSecret: bodyCredentials.twitterAccessSecret || agent.twitterAccessSecret || process.env.TWITTER_ACCESS_SECRET,
         twitterUsername: bodyCredentials.twitterUsername || agent.twitterUsername,
         twitterPassword: bodyCredentials.twitterPassword || agent.twitterPassword,
         twitterEmail: bodyCredentials.twitterEmail || agent.twitterEmail,
@@ -1196,7 +1197,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         twitterCookies: bodyCredentials.twitterCookies || agent.twitterCookies,
       };
       
-      // Check which credentials are available (using merged credentials)
+      // Check which credentials are available (using merged credentials including env secrets)
       const hasApiCredentials = testCredentials.twitterApiKey && testCredentials.twitterApiSecret && 
                                 testCredentials.twitterAccessToken && testCredentials.twitterAccessSecret;
       const hasScraperCredentials = testCredentials.twitterUsername && testCredentials.twitterPassword;
@@ -2542,11 +2543,13 @@ OUTPUT: Write ONLY the tweet content with proper spacing.`;
         return res.status(404).json({ error: "Agent not found" });
       }
       
-      const { postTweet } = await import("./twitter");
+      const { postTweet, getTwitterCredentials } = await import("./twitter");
       
       // Check if any Twitter credentials are available (API or Scraper)
-      const hasApiCreds = !!(agent.twitterApiKey && agent.twitterApiSecret && 
-                             agent.twitterAccessToken && agent.twitterAccessSecret);
+      // Uses getTwitterCredentials to check both env secrets AND database values
+      const creds = getTwitterCredentials(agent);
+      const hasApiCreds = !!(creds.apiKey && creds.apiSecret && 
+                             creds.accessToken && creds.accessSecret);
       const hasScraperCreds = !!(agent.twitterCookies || 
                                  (agent.twitterUsername && agent.twitterPassword));
       
@@ -2656,16 +2659,14 @@ DO NOT write one long paragraph - use proper spacing!`;
       tweetContent = cleanSpecialCharacters(tweetContent);
       
       // Post to Twitter with fallback logic (API → Scraper)
-      // Check what credentials are available
-      const hasApi = !!(agent.twitterApiKey && agent.twitterApiSecret && 
-                        agent.twitterAccessToken && agent.twitterAccessSecret);
+      // Re-check credentials (already checked above, but reuse for clarity)
       const hasScraper = !!(agent.twitterCookies || 
                            (agent.twitterUsername && agent.twitterPassword));
       
       let result: { success: boolean; tweetId?: string; error?: string; errorCode?: string; rateLimited?: boolean };
       
-      if (hasApi) {
-        // Try API first
+      if (hasApiCreds) {
+        // Try API first (credentials already validated via getTwitterCredentials)
         result = await postTweet(agent, tweetContent);
         
         // If API fails and scraper is available, try scraper as fallback
@@ -2796,11 +2797,13 @@ DO NOT write one long paragraph - use proper spacing!`;
         return res.status(404).json({ error: "Agent not found" });
       }
       
-      const { postTweet } = await import("./twitter");
+      const { postTweet, getTwitterCredentials } = await import("./twitter");
       
       // Check if any Twitter credentials are available (API or Scraper)
-      const hasApi = !!(agent.twitterApiKey && agent.twitterApiSecret && 
-                        agent.twitterAccessToken && agent.twitterAccessSecret);
+      // Uses getTwitterCredentials to check both env secrets AND database values
+      const creds = getTwitterCredentials(agent);
+      const hasApi = !!(creds.apiKey && creds.apiSecret && 
+                        creds.accessToken && creds.accessSecret);
       const hasScraper = !!(agent.twitterCookies || 
                             (agent.twitterUsername && agent.twitterPassword));
       
@@ -2814,7 +2817,7 @@ DO NOT write one long paragraph - use proper spacing!`;
       let result: { success: boolean; tweetId?: string; error?: string; errorCode?: string; rateLimited?: boolean };
       
       if (hasApi) {
-        // Try API first
+        // Try API first (credentials validated via getTwitterCredentials)
         result = await postTweet(agent, content);
         
         // If API fails and scraper is available, try scraper as fallback

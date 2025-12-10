@@ -13,9 +13,13 @@ function hasScraperCredentials(agent: Agent): boolean {
 }
 
 // Helper to check if API credentials are available
+// Checks BOTH environment secrets AND database values
+import { getTwitterCredentials } from "./twitter";
+
 function hasApiCredentials(agent: Agent): boolean {
-  return !!(agent.twitterApiKey && agent.twitterApiSecret && 
-            agent.twitterAccessToken && agent.twitterAccessSecret);
+  const creds = getTwitterCredentials(agent);
+  return !!(creds.apiKey && creds.apiSecret && 
+            creds.accessToken && creds.accessSecret);
 }
 
 // Convert scraped tweet to TwitterMention format
