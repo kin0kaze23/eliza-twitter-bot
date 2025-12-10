@@ -1276,11 +1276,15 @@ export default function AgentConfigure() {
                       <strong>Most Reliable Method:</strong> Twitter blocks automated logins, but session cookies work perfectly.
                       <ol className="list-decimal list-inside mt-2 space-y-1">
                         <li>Log into Twitter in your browser</li>
-                        <li>Open DevTools (F12) → Application → Cookies → twitter.com</li>
-                        <li>Copy all cookies as JSON using a browser extension like "EditThisCookie"</li>
-                        <li>Paste the JSON array below</li>
+                        <li>Install "Cookie-Editor" or "EditThisCookie" extension</li>
+                        <li>Click the extension icon on twitter.com</li>
+                        <li>Click "Export" → Copy ALL cookies (not just auth_token)</li>
+                        <li>Paste the full JSON array below</li>
                       </ol>
-                      <p className="mt-2 text-amber-600 dark:text-amber-400">
+                      <p className="mt-2 text-red-600 dark:text-red-400">
+                        <strong>Important:</strong> Export ALL cookies, not just auth_token and ct0. The scraper needs additional cookies (kdt, twid, lang, etc.) to work.
+                      </p>
+                      <p className="mt-1 text-amber-600 dark:text-amber-400">
                         <strong>Note:</strong> Username is still required above for mention detection to work.
                       </p>
                     </AlertDescription>

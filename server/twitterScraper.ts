@@ -140,6 +140,18 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
           const cookieNames = cookies.map(c => typeof c === 'string' ? c.split('=')[0] : 'invalid');
           console.log(`[Scraper] Cookie names: ${cookieNames.join(', ')}`);
           
+          // Validate that we have enough cookies - the scraper needs more than just auth_token and ct0
+          const requiredCookies = ['auth_token', 'ct0'];
+          const recommendedCookies = ['kdt', 'twid', 'lang', 'guest_id'];
+          const hasRequired = requiredCookies.every(req => cookieNames.includes(req));
+          const hasRecommended = recommendedCookies.filter(rec => cookieNames.includes(rec));
+          
+          if (!hasRequired) {
+            console.log(`[Scraper] WARNING: Missing required cookies (auth_token, ct0) for ${agent.name}`);
+          } else if (hasRecommended.length < 2) {
+            console.log(`[Scraper] WARNING: Only ${cookies.length} cookies provided for ${agent.name}. For best results, export ALL cookies from your browser, not just auth_token and ct0. The scraper needs additional cookies (kdt, twid, lang, guest_id, etc.) to work reliably.`);
+          }
+          
           await scraper.setCookies(cookies);
           
           const isLoggedIn = await scraper.isLoggedIn();
