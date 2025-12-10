@@ -12,7 +12,7 @@ import { assemblePrompt, buildMessagesArray, selectNextContentType, formatConten
 import { sendPostCreatedWebhook, sendPostFailedWebhook } from "./webhook";
 import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
 import { requireAuth, verifyPassword, hashPassword } from "./auth";
-import { verifyScraperCredentials, validateSessionCookies } from "./twitterScraper";
+import { verifyScraperCredentials, validateSessionCookies, sendTweetViaScraper } from "./twitterScraper";
 
 /**
  * Strip content type labels and decorative elements from generated content
@@ -2542,14 +2542,17 @@ OUTPUT: Write ONLY the tweet content with proper spacing.`;
         return res.status(404).json({ error: "Agent not found" });
       }
       
-      const { postTweet, validateTwitterCredentials } = await import("./twitter");
+      const { postTweet } = await import("./twitter");
       
-      // Validate Twitter credentials
-      const validation = validateTwitterCredentials(agent);
-      if (!validation.valid) {
+      // Check if any Twitter credentials are available (API or Scraper)
+      const hasApiCreds = !!(agent.twitterApiKey && agent.twitterApiSecret && 
+                             agent.twitterAccessToken && agent.twitterAccessSecret);
+      const hasScraperCreds = !!(agent.twitterCookies || 
+                                 (agent.twitterUsername && agent.twitterPassword));
+      
+      if (!hasApiCreds && !hasScraperCreds) {
         return res.status(400).json({
-          error: "Missing Twitter credentials",
-          missing: validation.missing,
+          error: "Missing Twitter credentials - configure either API credentials or username/password/cookies",
         });
       }
       
@@ -2652,8 +2655,47 @@ DO NOT write one long paragraph - use proper spacing!`;
       // Clean special characters (em dashes, smart quotes)
       tweetContent = cleanSpecialCharacters(tweetContent);
       
-      // Post to Twitter
-      const result = await postTweet(agent, tweetContent);
+      // Post to Twitter with fallback logic (API → Scraper)
+      // Check what credentials are available
+      const hasApi = !!(agent.twitterApiKey && agent.twitterApiSecret && 
+                        agent.twitterAccessToken && agent.twitterAccessSecret);
+      const hasScraper = !!(agent.twitterCookies || 
+                           (agent.twitterUsername && agent.twitterPassword));
+      
+      let result: { success: boolean; tweetId?: string; error?: string; errorCode?: string; rateLimited?: boolean };
+      
+      if (hasApi) {
+        // Try API first
+        result = await postTweet(agent, tweetContent);
+        
+        // If API fails and scraper is available, try scraper as fallback
+        if (!result.success && hasScraper) {
+          console.log(`[Force-Post] API failed, trying scraper fallback for ${agent.name}`);
+          const scraperResult = await sendTweetViaScraper(agent, tweetContent);
+          if (scraperResult.success) {
+            result = {
+              success: true,
+              tweetId: scraperResult.tweetId,
+            };
+          }
+        }
+      } else if (hasScraper) {
+        // No API credentials, use scraper
+        console.log(`[Force-Post] Using scraper for ${agent.name} (no API credentials)`);
+        const scraperResult = await sendTweetViaScraper(agent, tweetContent);
+        result = {
+          success: scraperResult.success,
+          tweetId: scraperResult.tweetId,
+          error: scraperResult.error,
+          errorCode: scraperResult.error ? 'SCRAPER_ERROR' : undefined,
+        };
+      } else {
+        result = {
+          success: false,
+          error: "No Twitter credentials available (neither API nor scraper)",
+          errorCode: "NO_CREDENTIALS",
+        };
+      }
       
       // Mark KB entries as used
       const kbUsedIds = assembledPrompt.metadata.kbEntriesUsedIds || [];
@@ -2754,17 +2796,49 @@ DO NOT write one long paragraph - use proper spacing!`;
         return res.status(404).json({ error: "Agent not found" });
       }
       
-      const { postTweet, validateTwitterCredentials } = await import("./twitter");
+      const { postTweet } = await import("./twitter");
       
-      const validation = validateTwitterCredentials(agent);
-      if (!validation.valid) {
+      // Check if any Twitter credentials are available (API or Scraper)
+      const hasApi = !!(agent.twitterApiKey && agent.twitterApiSecret && 
+                        agent.twitterAccessToken && agent.twitterAccessSecret);
+      const hasScraper = !!(agent.twitterCookies || 
+                            (agent.twitterUsername && agent.twitterPassword));
+      
+      if (!hasApi && !hasScraper) {
         return res.status(400).json({
-          error: "Missing Twitter credentials",
-          missing: validation.missing,
+          error: "Missing Twitter credentials - configure either API credentials or username/password/cookies",
         });
       }
       
-      const result = await postTweet(agent, content);
+      // Post to Twitter with fallback logic (API → Scraper)
+      let result: { success: boolean; tweetId?: string; error?: string; errorCode?: string; rateLimited?: boolean };
+      
+      if (hasApi) {
+        // Try API first
+        result = await postTweet(agent, content);
+        
+        // If API fails and scraper is available, try scraper as fallback
+        if (!result.success && hasScraper) {
+          console.log(`[Post-Tweet] API failed, trying scraper fallback for ${agent.name}`);
+          const scraperResult = await sendTweetViaScraper(agent, content);
+          if (scraperResult.success) {
+            result = {
+              success: true,
+              tweetId: scraperResult.tweetId,
+            };
+          }
+        }
+      } else {
+        // No API credentials, use scraper
+        console.log(`[Post-Tweet] Using scraper for ${agent.name} (no API credentials)`);
+        const scraperResult = await sendTweetViaScraper(agent, content);
+        result = {
+          success: scraperResult.success,
+          tweetId: scraperResult.tweetId,
+          error: scraperResult.error,
+          errorCode: scraperResult.error ? 'SCRAPER_ERROR' : undefined,
+        };
+      }
       
       // Extract and log Bible verses from the tweet (if verse tracking enabled)
       if (result.success && result.tweetId && agent.verseTrackingEnabled !== false) {
