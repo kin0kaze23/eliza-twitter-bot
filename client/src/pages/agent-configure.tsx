@@ -3129,12 +3129,17 @@ export default function AgentConfigure() {
                               <Badge variant="outline" className="text-xs">{entry.category}</Badge>
                             </div>
                             <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{entry.content}</p>
-                            <div className="flex gap-2 mt-2 flex-wrap">
+                            <div className="flex gap-2 mt-2 flex-wrap items-center">
                               {entry.tags?.map((tag: string) => (
                                 <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
                               ))}
                               {entry.source && (
                                 <Badge variant="outline" className="text-xs">Source: {entry.source}</Badge>
+                              )}
+                              {entry.lastRefreshedAt && (
+                                <span className="text-xs text-muted-foreground ml-auto" data-testid={`kb-pending-refresh-time-${entry.id}`}>
+                                  Ingested: {new Date(entry.lastRefreshedAt).toLocaleString()}
+                                </span>
                               )}
                             </div>
                           </div>
@@ -3282,6 +3287,11 @@ export default function AgentConfigure() {
                                 <Badge variant="outline" className="text-xs text-muted-foreground">
                                   was: {entry.originalPriority}
                                 </Badge>
+                              )}
+                              {entry.lastRefreshedAt && (
+                                <span className="text-xs text-muted-foreground ml-auto" data-testid={`kb-refresh-time-${entry.id}`}>
+                                  Last refreshed: {new Date(entry.lastRefreshedAt).toLocaleString()}
+                                </span>
                               )}
                             </div>
                           </div>
