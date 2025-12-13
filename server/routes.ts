@@ -1952,6 +1952,11 @@ Respond in JSON format:
       
       const result = await ingestResponse.json();
       
+      // Update lastRefreshedAt on the customApi
+      await storage.updateCustomApi(sourceId, {
+        lastRefreshedAt: new Date(),
+      } as any);
+      
       res.json({
         success: true,
         message: `Refreshed KB from ${customApi.name}`,

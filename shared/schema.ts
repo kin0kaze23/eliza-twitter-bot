@@ -292,6 +292,7 @@ export const customApis = pgTable("custom_apis", {
   lastTestedAt: timestamp("last_tested_at"),
   testStatus: text("test_status"), // success, failed, never_tested
   testError: text("test_error"),
+  lastRefreshedAt: timestamp("last_refreshed_at"), // When KB was last refreshed from this API
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

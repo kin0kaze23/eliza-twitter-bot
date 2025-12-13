@@ -2766,9 +2766,16 @@ export default function AgentConfigure() {
                           <Badge variant="outline" className="text-xs">{api.category}</Badge>
                         </div>
                         <p className="text-sm text-muted-foreground line-clamp-1">{api.description}</p>
-                        {api.endpoint && (
-                          <p className="text-xs text-muted-foreground mt-1 font-mono">{api.endpoint}</p>
-                        )}
+                        <div className="flex items-center gap-3 mt-1">
+                          {api.endpoint && (
+                            <p className="text-xs text-muted-foreground font-mono">{api.endpoint}</p>
+                          )}
+                          {api.lastRefreshedAt && (
+                            <span className="text-xs text-muted-foreground" data-testid={`api-refresh-time-${api.id}`}>
+                              Last refreshed: {new Date(api.lastRefreshedAt).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <Button
                         size="sm"
