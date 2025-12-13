@@ -19,15 +19,15 @@ export interface TwitterUser {
 
 /**
  * Get Twitter credentials with environment secrets fallback
- * Priority: Environment secrets > Database values
- * This ensures credentials work in both dev and production
+ * Priority: Database values (agent config) > Environment secrets
+ * This allows users to manage credentials per-agent via the dashboard
  */
 export function getTwitterCredentials(agent: Agent) {
   return {
-    apiKey: process.env.TWITTER_API_KEY || agent.twitterApiKey,
-    apiSecret: process.env.TWITTER_API_SECRET || agent.twitterApiSecret,
-    accessToken: process.env.TWITTER_ACCESS_TOKEN || agent.twitterAccessToken,
-    accessSecret: process.env.TWITTER_ACCESS_SECRET || agent.twitterAccessSecret,
+    apiKey: agent.twitterApiKey || process.env.TWITTER_API_KEY,
+    apiSecret: agent.twitterApiSecret || process.env.TWITTER_API_SECRET,
+    accessToken: agent.twitterAccessToken || process.env.TWITTER_ACCESS_TOKEN,
+    accessSecret: agent.twitterAccessSecret || process.env.TWITTER_ACCESS_SECRET,
   };
 }
 
