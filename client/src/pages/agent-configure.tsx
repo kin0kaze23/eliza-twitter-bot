@@ -831,6 +831,8 @@ export default function AgentConfigure() {
       });
     },
     onSuccess: () => {
+      // Invalidate both the full agents list and specific agent queries
+      queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
       queryClient.invalidateQueries({ queryKey: ["/api/agents", id] });
       toast({
         title: "Configuration saved",
