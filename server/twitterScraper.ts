@@ -490,6 +490,15 @@ export async function sendTweetViaScraper(
   }
   
   try {
+    // Debug: Check if we're properly authenticated before sending
+    const isLoggedIn = await scraper.isLoggedIn();
+    console.log(`[Scraper] Pre-tweet auth check for ${agent.name}: isLoggedIn=${isLoggedIn}`);
+    
+    // Debug: Get cookies from jar to verify they're stored correctly
+    const cookies = await scraper.getCookies();
+    const cookieNames = cookies.map((c: string) => c.split('=')[0]);
+    console.log(`[Scraper] Cookies in jar (${cookies.length}): ${cookieNames.join(', ')}`);
+    
     // Send the tweet (no replyToTweetId means it's a new tweet)
     const response = await scraper.sendTweet(tweetText);
     
