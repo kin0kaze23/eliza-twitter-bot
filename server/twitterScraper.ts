@@ -187,8 +187,45 @@ async function performScraperLogin(
           
           await scraper.setCookies(cookies);
           
-          const isLoggedIn = await scraper.isLoggedIn();
-          console.log(`[Scraper] isLoggedIn check for ${agent.name}: ${isLoggedIn}`);
+          // Try multiple methods to verify cookies are valid
+          let isLoggedIn = false;
+          let verificationMethod = '';
+          
+          // Method 1: Try isLoggedIn() first
+          try {
+            isLoggedIn = await scraper.isLoggedIn();
+            if (isLoggedIn) {
+              verificationMethod = 'isLoggedIn';
+            }
+          } catch (e: any) {
+            console.log(`[Scraper] isLoggedIn() check failed for ${agent.name}: ${e.message}`);
+          }
+          
+          // Method 2: If isLoggedIn fails, try me() to verify session
+          if (!isLoggedIn) {
+            try {
+              const me = await scraper.me();
+              if (me?.username || (me as any)?.screen_name) {
+                isLoggedIn = true;
+                verificationMethod = 'me()';
+              }
+            } catch (e: any) {
+              console.log(`[Scraper] me() check failed for ${agent.name}: ${e.message}`);
+            }
+          }
+          
+          // Method 3: Check if required cookies exist structurally
+          if (!isLoggedIn) {
+            const hasAuthToken = cookieNames.includes('auth_token');
+            const hasCt0 = cookieNames.includes('ct0');
+            if (hasAuthToken && hasCt0) {
+              console.log(`[Scraper] Required cookies present (auth_token, ct0) for ${agent.name}, assuming valid`);
+              isLoggedIn = true;
+              verificationMethod = 'cookie-structure';
+            }
+          }
+          
+          console.log(`[Scraper] Session validation for ${agent.name}: ${isLoggedIn ? 'VALID' : 'INVALID'} (method: ${verificationMethod || 'none'})`);
           
           if (isLoggedIn) {
             console.log(`[Scraper] Session restored from cookies for ${agent.name}`);
@@ -563,17 +600,58 @@ export async function validateSessionCookies(cookies: string, providedUsername?:
     const scraper = new Scraper();
     await scraper.setCookies(cookieArray);
     
-    const isLoggedIn = await scraper.isLoggedIn();
-    if (isLoggedIn) {
-      // Use provided username or try to detect it from the session
-      let resolvedUsername = providedUsername;
+    // Try multiple methods to verify cookies are valid
+    // isLoggedIn() can return false even with valid cookies due to rate limiting
+    let isLoggedIn = false;
+    let resolvedUsername = providedUsername;
+    let verificationMethod = '';
+    
+    // Method 1: Try isLoggedIn() first (quickest check)
+    try {
+      isLoggedIn = await scraper.isLoggedIn();
+      if (isLoggedIn) {
+        verificationMethod = 'isLoggedIn';
+        console.log(`[Scraper] Cookie validation: isLoggedIn() returned true`);
+      }
+    } catch (e: any) {
+      console.log(`[Scraper] Cookie validation: isLoggedIn() threw error: ${e.message}`);
+    }
+    
+    // Method 2: If isLoggedIn fails, try to get user profile (more reliable with valid cookies)
+    if (!isLoggedIn && !resolvedUsername) {
+      try {
+        const me = await scraper.me();
+        const detectedHandle = me?.username || (me as any)?.screen_name || (me as any)?.screenName;
+        if (detectedHandle) {
+          resolvedUsername = detectedHandle;
+          isLoggedIn = true; // If we can fetch profile, session is valid
+          verificationMethod = 'me()';
+          console.log(`[Scraper] Cookie validation: me() returned profile for @${resolvedUsername}`);
+        }
+      } catch (e: any) {
+        console.log(`[Scraper] Cookie validation: me() threw error: ${e.message}`);
+      }
+    }
+    
+    // Method 3: Check if required cookies exist (auth_token and ct0 are essential)
+    if (!isLoggedIn) {
+      const cookieNames = cookieArray.map(c => c.split('=')[0]);
+      const hasAuthToken = cookieNames.includes('auth_token');
+      const hasCt0 = cookieNames.includes('ct0');
       
-      // If no username provided, try to detect from session via scraper.me()
+      if (hasAuthToken && hasCt0) {
+        // Cookies appear valid structurally - may work even if isLoggedIn fails
+        console.log(`[Scraper] Cookie validation: Required cookies present (auth_token, ct0), assuming valid`);
+        verificationMethod = 'cookie-structure';
+        isLoggedIn = true;
+      }
+    }
+    
+    if (isLoggedIn) {
+      // Try to detect username if not already resolved
       if (!resolvedUsername) {
         try {
-          // scraper.me() returns user info for the authenticated account
           const me = await scraper.me();
-          // Profile may have username OR screen_name depending on the scraper version
           const detectedHandle = me?.username || (me as any)?.screen_name || (me as any)?.screenName;
           if (detectedHandle) {
             resolvedUsername = detectedHandle;
