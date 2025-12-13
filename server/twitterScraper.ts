@@ -131,8 +131,8 @@ async function performScraperLogin(
               })
               .map(c => {
                 const name = c.key || c.name;
-                // URI-encode value to handle special characters
-                const value = encodeURIComponent(c.value);
+                // Use raw value - don't URI-encode as it corrupts auth tokens
+                const value = c.value;
                 // Normalize x.com domain to twitter.com - the agent-twitter-client library
                 // makes requests to twitter.com internally, so x.com cookies won't match
                 let domain = c.domain || '.twitter.com';
@@ -162,6 +162,11 @@ async function performScraperLogin(
                       cookieStr += `; Expires=${expires}`;
                     }
                   }
+                }
+                
+                // Debug: log first few chars of important cookies
+                if (name === 'auth_token' || name === 'ct0') {
+                  console.log(`[Scraper] Cookie ${name}: ${value.substring(0, 10)}... (len=${value.length})`);
                 }
                 
                 return cookieStr;
@@ -494,11 +499,6 @@ export async function sendTweetViaScraper(
     const isLoggedIn = await scraper.isLoggedIn();
     console.log(`[Scraper] Pre-tweet auth check for ${agent.name}: isLoggedIn=${isLoggedIn}`);
     
-    // Debug: Get cookies from jar to verify they're stored correctly
-    const cookies = await scraper.getCookies();
-    const cookieNames = cookies.map((c: string) => c.split('=')[0]);
-    console.log(`[Scraper] Cookies in jar (${cookies.length}): ${cookieNames.join(', ')}`);
-    
     // Send the tweet (no replyToTweetId means it's a new tweet)
     const response = await scraper.sendTweet(tweetText);
     
@@ -569,8 +569,8 @@ export async function validateSessionCookies(cookies: string, providedUsername?:
         })
         .map(c => {
           const name = c.key || c.name;
-          // URI-encode value to handle special characters
-          const value = encodeURIComponent(c.value);
+          // Use raw value - don't URI-encode as it corrupts auth tokens
+          const value = c.value;
           // Normalize x.com domain to twitter.com - the agent-twitter-client library
           // makes requests to twitter.com internally, so x.com cookies won't match
           let domain = c.domain || '.twitter.com';
