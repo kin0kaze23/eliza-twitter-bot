@@ -993,7 +993,7 @@ async function processMention(agent: Agent, mention: TwitterMention, mentionType
 
 /**
  * Poll for new mentions and process them
- * Uses scraper (cookie-based) if credentials available, falls back to API
+ * Prefers OAuth API when credentials available, falls back to scraper
  */
 async function pollMentions(agent: Agent): Promise<void> {
   console.log(`[MentionBot] Polling mentions for agent: ${agent.name}`);
@@ -1005,38 +1005,61 @@ async function pollMentions(agent: Agent): Promise<void> {
     let mentions: TwitterMention[] = [];
     let newestId: string | undefined;
     
-    // Try scraper first (bypasses Twitter API limitations)
-    if (hasScraperCredentials(agent)) {
-      console.log(`[MentionBot] Using scraper (cookie-based) for ${agent.name}`);
+    // Prefer OAuth API when credentials available (more reliable than scraper)
+    const hasApi = hasApiCredentials(agent);
+    const hasScraper = hasScraperCredentials(agent);
+    
+    if (hasApi) {
+      // Use Twitter API (OAuth) - most reliable method
+      console.log(`[MentionBot] Using Twitter API (OAuth) for ${agent.name}`);
+      const result = await fetchMentions(agent, sinceId, 10);
+      
+      if (!result.success) {
+        console.error(`[MentionBot] API failed for ${agent.name}: ${result.error}`);
+        // Try scraper as fallback if available
+        if (hasScraper) {
+          console.log(`[MentionBot] Falling back to scraper for ${agent.name}`);
+          const scraperResult = await fetchMentionsViaScraper(agent, 20);
+          if (scraperResult.success && scraperResult.mentions) {
+            mentions = scraperResult.mentions.map(scrapedToMention);
+            if (sinceId) {
+              mentions = mentions.filter(m => m.id > sinceId);
+            }
+            if (mentions.length > 0) {
+              newestId = mentions[0].id;
+            }
+          } else {
+            console.log(`[MentionBot] Scraper also failed: ${scraperResult.error}`);
+            return;
+          }
+        } else {
+          return;
+        }
+      } else {
+        mentions = result.mentions || [];
+        newestId = result.newestId;
+      }
+    } else if (hasScraper) {
+      // Fall back to scraper (cookie-based)
+      console.log(`[MentionBot] Using scraper (cookie-based) for ${agent.name} - no API credentials`);
       const scraperResult = await fetchMentionsViaScraper(agent, 20);
       
       if (scraperResult.success && scraperResult.mentions) {
         mentions = scraperResult.mentions.map(scrapedToMention);
-        // Filter out already processed mentions
         if (sinceId) {
           mentions = mentions.filter(m => m.id > sinceId);
         }
         if (mentions.length > 0) {
-          newestId = mentions[0].id; // First is most recent
+          newestId = mentions[0].id;
         }
         console.log(`[MentionBot] Scraper found ${mentions.length} new mentions for ${agent.name}`);
       } else {
         console.log(`[MentionBot] Scraper failed: ${scraperResult.error}`);
-        // Don't fall back to API - scraper failure means credentials issue
         return;
       }
     } else {
-      // Fall back to API (requires Twitter API access)
-      console.log(`[MentionBot] Using Twitter API for ${agent.name} (add username/password for scraper)`);
-      const result = await fetchMentions(agent, sinceId, 10);
-      
-      if (!result.success) {
-        console.error(`[MentionBot] Failed to fetch mentions for ${agent.name}:`, result.error);
-        return;
-      }
-      
-      mentions = result.mentions || [];
-      newestId = result.newestId;
+      console.log(`[MentionBot] No Twitter credentials available for ${agent.name}`);
+      return;
     }
     
     console.log(`[MentionBot] Found ${mentions.length} new mentions for ${agent.name}`);
@@ -1079,7 +1102,7 @@ async function pollMentions(agent: Agent): Promise<void> {
 
 /**
  * Poll for comments on the bot's recent tweets (replies without @mention)
- * Uses scraper (cookie-based) if credentials available, falls back to API
+ * Prefers OAuth API when credentials available, falls back to scraper
  */
 async function pollComments(agent: Agent): Promise<void> {
   const trackedTweets = getRecentBotTweetsWithState(agent.id);
@@ -1091,11 +1114,17 @@ async function pollComments(agent: Agent): Promise<void> {
   
   console.log(`[CommentBot] Checking ${trackedTweets.length} recent tweets for comments for ${agent.name}`);
   
-  const useScraper = hasScraperCredentials(agent);
-  if (useScraper) {
-    console.log(`[CommentBot] Using scraper (cookie-based) for ${agent.name}`);
+  // Prefer OAuth API when credentials available (more reliable than scraper)
+  const hasApi = hasApiCredentials(agent);
+  const hasScraper = hasScraperCredentials(agent);
+  
+  if (hasApi) {
+    console.log(`[CommentBot] Using Twitter API (OAuth) for ${agent.name}`);
+  } else if (hasScraper) {
+    console.log(`[CommentBot] Using scraper (cookie-based) for ${agent.name} - no API credentials`);
   } else {
-    console.log(`[CommentBot] Using Twitter API for ${agent.name} (add username/password for scraper)`);
+    console.log(`[CommentBot] No Twitter credentials available for ${agent.name}`);
+    return;
   }
   
   const maxReplies = agent.maxRepliesPerHour || 10;
@@ -1113,8 +1142,33 @@ async function pollComments(agent: Agent): Promise<void> {
     try {
       let replies: TwitterMention[] = [];
       
-      if (useScraper) {
-        // Use scraper to fetch replies
+      if (hasApi) {
+        // Use Twitter API (OAuth) - most reliable method
+        const result = await fetchRepliesToTweet(agent, trackedTweet.tweetId, trackedTweet.lastReplyId, 10);
+        
+        if (!result.success) {
+          console.error(`[CommentBot] API failed for tweet ${trackedTweet.tweetId}:`, result.error);
+          // Try scraper as fallback if available
+          if (hasScraper) {
+            const scraperResult = await fetchRepliesViaScraper(agent, trackedTweet.tweetId);
+            if (scraperResult.success) {
+              const scraperReplies = scraperResult.replies || [];
+              replies = scraperReplies.map(scrapedToMention);
+              if (trackedTweet.lastReplyId) {
+                replies = replies.filter(r => r.id > trackedTweet.lastReplyId!);
+              }
+            } else {
+              console.log(`[CommentBot] Scraper also failed: ${scraperResult.error}`);
+              continue;
+            }
+          } else {
+            continue;
+          }
+        } else {
+          replies = result.mentions || [];
+        }
+      } else if (hasScraper) {
+        // Use scraper (cookie-based) as fallback
         const scraperResult = await fetchRepliesViaScraper(agent, trackedTweet.tweetId);
         
         if (!scraperResult.success) {
@@ -1130,16 +1184,6 @@ async function pollComments(agent: Agent): Promise<void> {
         if (trackedTweet.lastReplyId) {
           replies = replies.filter(r => r.id > trackedTweet.lastReplyId!);
         }
-      } else {
-        // Fall back to API
-        const result = await fetchRepliesToTweet(agent, trackedTweet.tweetId, trackedTweet.lastReplyId, 10);
-        
-        if (!result.success) {
-          console.error(`[CommentBot] Failed to fetch replies for tweet ${trackedTweet.tweetId}:`, result.error);
-          continue;
-        }
-        
-        replies = result.mentions || [];
       }
       
       if (replies.length > 0) {
@@ -1200,10 +1244,10 @@ export async function startMentionPolling(agent: Agent): Promise<void> {
     return;
   }
   
-  if (hasScraper) {
-    console.log(`[MentionBot] Will use scraper (cookie-based) for ${agent.name}`);
-  } else {
-    console.log(`[MentionBot] Will use Twitter API for ${agent.name}`);
+  if (hasApi) {
+    console.log(`[MentionBot] Will use Twitter API (OAuth) for ${agent.name}`);
+  } else if (hasScraper) {
+    console.log(`[MentionBot] Will use scraper (cookie-based) for ${agent.name} - no API credentials`);
   }
   
   // Stop existing poller if running
