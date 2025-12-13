@@ -133,11 +133,11 @@ async function performScraperLogin(
                 const name = c.key || c.name;
                 // URI-encode value to handle special characters
                 const value = encodeURIComponent(c.value);
-                // Normalize domain: x.com cookies should work for twitter.com
+                // Normalize x.com domain to twitter.com - the agent-twitter-client library
+                // makes requests to twitter.com internally, so x.com cookies won't match
                 let domain = c.domain || '.twitter.com';
                 if (domain === '.x.com' || domain === 'x.com') {
                   domain = '.twitter.com';
-                  console.log(`[Scraper] Normalized cookie domain from x.com to twitter.com for: ${name}`);
                 }
                 const path = c.path || '/'; // Use provided path or default to '/'
                 
@@ -562,11 +562,11 @@ export async function validateSessionCookies(cookies: string, providedUsername?:
           const name = c.key || c.name;
           // URI-encode value to handle special characters
           const value = encodeURIComponent(c.value);
-          // Normalize domain: x.com cookies should work for twitter.com
+          // Normalize x.com domain to twitter.com - the agent-twitter-client library
+          // makes requests to twitter.com internally, so x.com cookies won't match
           let domain = c.domain || '.twitter.com';
           if (domain === '.x.com' || domain === 'x.com') {
             domain = '.twitter.com';
-            console.log(`[Scraper] Normalized cookie domain from x.com to twitter.com for: ${name}`);
           }
           const path = c.path || '/'; // Use provided path or default to '/'
           
