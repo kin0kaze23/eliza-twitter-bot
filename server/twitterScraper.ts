@@ -220,13 +220,14 @@ async function performScraperLogin(
           }
           
           // Method 3: Check if required cookies exist structurally
-          // NOTE: This fallback is only used when we DON'T have login credentials
-          // If we have credentials, we should do a proper login to establish session state
-          if (!isLoggedIn && !hasLoginCredentials) {
+          // Trust the cookie structure if we have auth_token and ct0 - Twitter often blocks
+          // API verification calls (isLoggedIn, me) but the cookies still work for scraping
+          if (!isLoggedIn) {
             const hasAuthToken = cookieNames.includes('auth_token');
             const hasCt0 = cookieNames.includes('ct0');
             if (hasAuthToken && hasCt0) {
-              console.log(`[Scraper] Required cookies present (auth_token, ct0) for ${agent.name}, assuming valid (no credentials to retry with)`);
+              console.log(`[Scraper] Required cookies present (auth_token, ct0) for ${agent.name}, trusting cookie structure`);
+              console.log(`[Scraper] Note: API verification failed but cookies may still work for scraping operations`);
               isLoggedIn = true;
               verificationMethod = 'cookie-structure';
             }
@@ -244,11 +245,12 @@ async function performScraperLogin(
             return { scraper };
           }
           
-          // If cookie validation failed but we have login credentials, try fresh login
-          if (hasLoginCredentials) {
-            console.log(`[Scraper] Browser cookies didn't validate via API for ${agent.name}, will try fresh login with credentials`);
-          } else {
-            console.log(`[Scraper] Cookies may be expired or invalid for ${agent.name}, no credentials available`);
+          // Cookies don't have required fields - need fresh login
+          console.log(`[Scraper] Cookies missing required fields (auth_token, ct0) for ${agent.name}`);
+          
+          // If no login credentials available, we can't proceed
+          if (!hasLoginCredentials) {
+            console.log(`[Scraper] No login credentials available for ${agent.name}`);
           }
         }
       } catch (e: any) {
