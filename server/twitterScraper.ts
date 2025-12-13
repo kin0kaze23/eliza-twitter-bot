@@ -11,6 +11,9 @@ interface ScraperInstance {
 const scraperCache = new Map<string, ScraperInstance>();
 const LOGIN_CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
 
+// Login guard to prevent concurrent login attempts for the same agent
+const loginInProgress = new Map<string, Promise<{ scraper: Scraper; error?: string }>>();
+
 export interface ScrapedTweet {
   id: string;
   text: string;
@@ -58,11 +61,10 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
     };
   }
   
-  // Check cache
+  // Check cache first (fast path)
   const cached = scraperCache.get(agentId);
   if (cached && (Date.now() - cached.lastLogin) < LOGIN_CACHE_DURATION) {
     try {
-      // Verify still logged in
       const isLoggedIn = await cached.scraper.isLoggedIn();
       if (isLoggedIn) {
         return { scraper: cached.scraper };
@@ -72,7 +74,33 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
     }
   }
   
-  // Create new scraper and login
+  // Check if login is already in progress for this agent (prevent duplicate concurrent logins)
+  const existingLoginPromise = loginInProgress.get(agentId);
+  if (existingLoginPromise) {
+    console.log(`[Scraper] Login already in progress for ${agent.name}, waiting...`);
+    return existingLoginPromise;
+  }
+  
+  // Start new login and store the promise
+  const loginPromise = performScraperLogin(agent, !!hasCookies, !!hasLoginCredentials);
+  loginInProgress.set(agentId, loginPromise);
+  
+  try {
+    const result = await loginPromise;
+    return result;
+  } finally {
+    // Always clean up the login guard when done
+    loginInProgress.delete(agentId);
+  }
+}
+
+// Internal function that performs the actual login
+async function performScraperLogin(
+  agent: Agent,
+  hasCookies: boolean,
+  hasLoginCredentials: boolean
+): Promise<{ scraper: Scraper; error?: string }> {
+  const agentId = agent.id;
   const scraper = new Scraper();
   
   try {
@@ -237,20 +265,34 @@ async function getOrCreateScraper(agent: Agent): Promise<{ scraper: Scraper; err
     if (lastError.includes('page does not exist') || lastError.includes('code":34')) {
       return {
         scraper: null as any,
-        error: 'Login blocked by Twitter. Please: 1) Mark your account as "Automated" in Twitter Settings, 2) Log out of Twitter in all browsers, 3) Try again.',
+        error: 'SCRAPER_LOGIN_BLOCKED: Twitter is blocking automated logins. Use "Import Session Cookies" instead - export cookies from your browser while logged into Twitter.',
       };
     }
     
     if (lastError.includes('ArkoseLogin') || lastError.includes('challenge')) {
       return {
         scraper: null as any,
-        error: 'Twitter requires CAPTCHA verification. Log into Twitter manually in a browser first, then try again.',
+        error: 'SCRAPER_CAPTCHA_REQUIRED: Twitter requires CAPTCHA verification. Use "Import Session Cookies" instead - log into Twitter in your browser and export the cookies.',
+      };
+    }
+    
+    if (lastError.includes('Unauthorized') || lastError.includes('401')) {
+      return {
+        scraper: null as any,
+        error: 'SCRAPER_AUTH_FAILED: Username or password is incorrect. Check your credentials or use "Import Session Cookies" for more reliable authentication.',
+      };
+    }
+    
+    if (lastError.includes('suspended') || lastError.includes('locked')) {
+      return {
+        scraper: null as any,
+        error: 'SCRAPER_ACCOUNT_ISSUE: Your Twitter account may be suspended or locked. Check your account status at twitter.com.',
       };
     }
     
     return {
       scraper: null as any,
-      error: `Login failed after ${maxRetries} attempts: ${lastError}`,
+      error: `SCRAPER_LOGIN_FAILED: Login failed after ${maxRetries} attempts. Use "Import Session Cookies" for more reliable authentication. Details: ${lastError}`,
     };
   } catch (error: any) {
     const message = error.message || String(error) || 'Unknown error';
