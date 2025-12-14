@@ -109,88 +109,64 @@ async function performScraperLogin(
       try {
         const rawCookies = JSON.parse(agent.twitterCookies!);
         if (Array.isArray(rawCookies) && rawCookies.length > 0) {
-          // Check if cookies are already in string format (from scraper.getCookies())
-          const firstCookie = rawCookies[0];
-          let cookies: string[];
+          // Process cookies: normalize domain and prepare for setCookies
+          const processedCookies = rawCookies
+            .filter(c => {
+              // Validate required fields exist
+              const name = c.key || c.name;
+              if (!name || !c.value) {
+                console.log(`[Scraper] Skipping invalid cookie (missing name or value)`);
+                return false;
+              }
+              return true;
+            })
+            .map(c => {
+              // Normalize domain: x.com -> twitter.com
+              // The agent-twitter-client library makes requests to twitter.com internally
+              let domain = c.domain || '.twitter.com';
+              if (domain === '.x.com' || domain === 'x.com') {
+                domain = '.twitter.com';
+              }
+              
+              // Preserve all cookie metadata for the Cookie object
+              return {
+                ...c,
+                key: c.key || c.name,
+                domain: domain,
+                path: c.path || '/',
+                // Ensure critical dates are in right format
+                expirationDate: c.expirationDate || c.expires ? 
+                  (typeof c.expirationDate === 'number' ? c.expirationDate : 
+                   typeof c.expires === 'number' ? c.expires :
+                   c.expirationDate && typeof c.expirationDate === 'string' ?
+                     Math.floor(new Date(c.expirationDate).getTime() / 1000) :
+                   c.expires && typeof c.expires === 'string' ?
+                     Math.floor(new Date(c.expires).getTime() / 1000) : undefined)
+                  : undefined,
+              };
+            });
           
-          if (typeof firstCookie === 'string') {
-            // Already in string format (from getCookies() after login)
-            cookies = rawCookies;
-          } else {
-            // Convert browser's EditThisCookie format to cookie strings
-            // Format: "name=value; Domain=.twitter.com; Path=/; Secure; HttpOnly"
-            cookies = rawCookies
-              .filter(c => {
-                // Validate required fields exist
-                const name = c.key || c.name;
-                if (!name || !c.value) {
-                  console.log(`[Scraper] Skipping invalid cookie (missing name or value)`);
-                  return false;
-                }
-                return true;
-              })
-              .map(c => {
-                const name = c.key || c.name;
-                // Use raw value - don't URI-encode as it corrupts auth tokens
-                const value = c.value;
-                // Normalize x.com domain to twitter.com - the agent-twitter-client library
-                // makes requests to twitter.com internally, so x.com cookies won't match
-                let domain = c.domain || '.twitter.com';
-                if (domain === '.x.com' || domain === 'x.com') {
-                  domain = '.twitter.com';
-                }
-                const path = c.path || '/'; // Use provided path or default to '/'
-                
-                let cookieStr = `${name}=${value}; Domain=${domain}; Path=${path}`;
-                
-                if (c.secure === true) cookieStr += '; Secure';
-                if (c.httpOnly === true) cookieStr += '; HttpOnly';
-                if (c.sameSite) cookieStr += `; SameSite=${c.sameSite}`;
-                
-                // Handle expiration - support multiple formats
-                if (c.expirationDate && typeof c.expirationDate === 'number') {
-                  const expires = new Date(c.expirationDate * 1000).toUTCString();
-                  cookieStr += `; Expires=${expires}`;
-                } else if (c.expires) {
-                  if (typeof c.expires === 'number') {
-                    const expires = new Date(c.expires * 1000).toUTCString();
-                    cookieStr += `; Expires=${expires}`;
-                  } else if (typeof c.expires === 'string') {
-                    // Already an ISO/date string, convert to UTC format
-                    const expires = new Date(c.expires).toUTCString();
-                    if (expires !== 'Invalid Date') {
-                      cookieStr += `; Expires=${expires}`;
-                    }
-                  }
-                }
-                
-                // Debug: log first few chars of important cookies
-                if (name === 'auth_token' || name === 'ct0') {
-                  console.log(`[Scraper] Cookie ${name}: ${value.substring(0, 10)}... (len=${value.length})`);
-                }
-                
-                return cookieStr;
-              });
-          }
-          
-          console.log(`[Scraper] Restoring session from ${cookies.length} cookies for ${agent.name}...`);
-          // Debug: log cookie names being restored
-          const cookieNames = cookies.map(c => typeof c === 'string' ? c.split('=')[0] : 'invalid');
+          console.log(`[Scraper] Restoring session from ${processedCookies.length} cookies for ${agent.name}...`);
+          const cookieNames = processedCookies.map(c => c.key || c.name);
           console.log(`[Scraper] Cookie names: ${cookieNames.join(', ')}`);
           
-          // Validate that we have enough cookies - the scraper needs more than just auth_token and ct0
+          // Validate critical cookies exist
           const requiredCookies = ['auth_token', 'ct0'];
-          const recommendedCookies = ['kdt', 'twid', 'lang', 'guest_id'];
           const hasRequired = requiredCookies.every(req => cookieNames.includes(req));
-          const hasRecommended = recommendedCookies.filter(rec => cookieNames.includes(rec));
           
           if (!hasRequired) {
-            console.log(`[Scraper] WARNING: Missing required cookies (auth_token, ct0) for ${agent.name}`);
-          } else if (hasRecommended.length < 2) {
-            console.log(`[Scraper] WARNING: Only ${cookies.length} cookies provided for ${agent.name}. For best results, export ALL cookies from your browser, not just auth_token and ct0. The scraper needs additional cookies (kdt, twid, lang, guest_id, etc.) to work reliably.`);
+            console.log(`[Scraper] WARNING: Missing required cookies (auth_token, ct0) for ${agent.name}. Cookies may be expired or incomplete.`);
           }
           
-          await scraper.setCookies(cookies);
+          // Log auth token info for debugging
+          const authCookie = processedCookies.find(c => (c.key || c.name) === 'auth_token');
+          if (authCookie) {
+            console.log(`[Scraper] auth_token: ${authCookie.value.substring(0, 15)}... (len=${authCookie.value.length})`);
+          }
+          
+          // Try to set cookies - pass Cookie objects directly (more reliable than string format)
+          // agent-twitter-client accepts (string | Cookie)[] - using objects is more stable
+          await scraper.setCookies(processedCookies as any);
           
           // Try multiple methods to verify cookies are valid
           let isLoggedIn = false;
@@ -245,8 +221,14 @@ async function performScraperLogin(
             return { scraper };
           }
           
-          // Cookies don't have required fields - need fresh login
-          console.log(`[Scraper] Cookies missing required fields (auth_token, ct0) for ${agent.name}`);
+          // Cookies are marked as invalid - clear them to prevent reuse of stale cookies
+          console.log(`[Scraper] Cookies failed validation for ${agent.name} - clearing stale cookies to prevent future failures`);
+          try {
+            await storage.updateAgent(agentId, { twitterCookies: null as any });
+            console.log(`[Scraper] Cleared stale cookies for ${agent.name}`);
+          } catch (e) {
+            console.log(`[Scraper] Failed to clear stale cookies: ${e}`);
+          }
           
           // If no login credentials available, we can't proceed
           if (!hasLoginCredentials) {
@@ -573,8 +555,27 @@ export async function sendReplyViaScraper(
     return { success: true };
     
   } catch (error: any) {
-    console.error(`[Scraper] Error sending reply: ${error.message}`);
-    return { success: false, error: error.message };
+    const errorMsg = error.message || String(error);
+    
+    // Detect 401 Unauthorized errors - means cookies are stale
+    if (errorMsg.includes('401') || errorMsg.includes('Unauthorized') || 
+        errorMsg.includes('Could not authenticate')) {
+      console.error(`[Scraper] Detected 401 auth failure for reply to ${replyToTweetId}. Clearing cache and cookies.`);
+      
+      // Clear the scraper cache so next attempt will re-login/get fresh cookies
+      scraperCache.delete(agent.id);
+      
+      // Clear stale cookies from database
+      try {
+        await storage.updateAgent(agent.id, { twitterCookies: null as any });
+        console.log(`[Scraper] Cleared stale cookies after 401 error`);
+      } catch (e) {
+        console.log(`[Scraper] Failed to clear cookies: ${e}`);
+      }
+    }
+    
+    console.error(`[Scraper] Error sending reply: ${errorMsg}`);
+    return { success: false, error: errorMsg };
   }
 }
 
@@ -599,8 +600,28 @@ export async function sendTweetViaScraper(
     return { success: true };
     
   } catch (error: any) {
-    console.error(`[Scraper] Error posting tweet: ${error.message}`);
-    return { success: false, error: error.message };
+    const errorMsg = error.message || String(error);
+    
+    // Detect 401 Unauthorized errors - means cookies are stale or invalid
+    if (errorMsg.includes('401') || errorMsg.includes('Unauthorized') || 
+        errorMsg.includes('Could not authenticate') || errorMsg.includes('not permitted') ||
+        errorMsg.includes('code":32') || errorMsg.includes('code: 32')) {
+      console.error(`[Scraper] Detected auth failure while posting tweet. Clearing cache and cookies.`);
+      
+      // Clear the scraper cache so next attempt will re-login/get fresh cookies
+      scraperCache.delete(agent.id);
+      
+      // Clear stale cookies from database
+      try {
+        await storage.updateAgent(agent.id, { twitterCookies: null as any });
+        console.log(`[Scraper] Cleared stale cookies after auth error`);
+      } catch (e) {
+        console.log(`[Scraper] Failed to clear cookies: ${e}`);
+      }
+    }
+    
+    console.error(`[Scraper] Error posting tweet: ${errorMsg}`);
+    return { success: false, error: errorMsg };
   }
 }
 
