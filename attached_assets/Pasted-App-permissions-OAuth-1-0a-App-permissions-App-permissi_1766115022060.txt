@@ -1,0 +1,94 @@
+App permissions
+​
+OAuth 1.0a App permissions
+App permissions describe the access level for OAuth 1.0a application-user authentication. App permissions are configured per application within your X App settings.
+There are three levels of permission available:
+Read only
+Read and write
+Read, write and access Direct Messages
+An additional permission exists to request visibility of a user’s email address - this can be combined with any of the three levels listed above.
+If a permission level is changed, any user tokens already issued to that X app must be discarded and users must re-authorize the App in order for the token to inherit the updated permissions.
+A good practice is to request only the minimum level of access to a user’s account data that an application or service requires.
+​
+Read only
+This permission level permits read access to X resources, including (for example) a user’s Tweets, home timeline, and profile information. It does not allow access to read a user’s Direct Messages, and it does not allow to update any element or object.
+​
+Read and write
+This permission level permits read and write access to X resources. In addition to allowing read access, it also allow to post Tweets, follow users, or update elements of a user’s profile information. It also allow to hide replies on behalf of the authenticating user. This permission level does not allow any access to Direct Messages (including read, write, or delete).
+​
+Read, write and access Direct Messages
+This permission level includes access to all of the above and adds the ability to read, write and delete Direct Messages on behalf of a user.
+POST /2/dm_conversations/:dm_conversation_id/messages
+POST /2/dm_conversations/
+POST /2/dm_conversations/with/:participant_id/messages
+GET /2/dm_conversations/with/:user_id/dm_events
+GET /2/dm_conversations/:dm_conversation_id/dm_events
+GET /2/dm_events
+​
+Determining permissions
+All authenticated API requests return an x-access-level header in the HTTP response. The value of the header shows the current permission level in use. Possible values are read, read-write, and read-write-directmessages.
+​
+Callback URLs
+The OAuth 1.0a User Context and OAuth 2.0 Authorization Code with PKCE authentication methods enable developers to make requests on behalf of different X users that have worked through a specific sign-in flow. Currently, there are two flows that you can use to enable users to authorize your application:
+OAuth 2.0 authorization code flow with PKCE
+OAuth 1.0a 3-legged OAuth flow (and separately, the Sign in with X flow)
+As users work through these flows, they need a web page or location to be sent to after they have successfully logged in and provided authorization to the developer’s App. This follow-up webpage or location is called a callback URL.
+When setting up these flows for their potential users to work through, developers must pass a callback URL with their requests to the authentication endpoints that make up the flows mentioned earlier. For example, developers using OAuth 1.0a User Context must pass the callback_url parameter when making a request to the GET oauth/request_token endpoint. Similarly, developers using OAuth 2.0 Authorization Code with PKCE must pass the redirect_uri parameter with their request to the GET oauth2/authorize endpoint.
+In addition to using these parameters, the developer must also make sure that the callback URL has also been added to their App’s callback URL allowlist, which can be found on the developer portal’s App settings page.
+If set up properly, developers will be directed to the callback URL after successfully signing in to X as part of these flows.
+​
+Things to keep in mind
+When you are setting up your callback URLs, there are a few things that you should keep in mind:
+HTTP encode your query parameters
+Since you are passing the callback URL as a query parameter with the callback_url or redirect_uri parameters, please make sure that you HTTP encode the URL.
+Callback URL limits
+There is a hard limit of 10 callback URLs in the X Apps dashboard. Your callback URL should always be an exact match between your allow listed callback URL that you add to the Apps dashboard and the parameter you add in the authorization flow.
+If you wish to include request-specific data in the callback URL, you can use the state parameter to store data that will be included after the user is redirected. It can either encode the data in the state parameter itself or use the parameter as a session ID to store the state on the server.
+Don’t use localhost as a callback URL Instead of using localhost, please use a custom host locally or http(s)://127.0.0.1
+Custom protocol URLs If you would like to take advantage of mobile deep linking, you can utilize custom protocol URLs with a path and domain part, such as twitter://callback/path. However, we do have a list of disallowed protocols that you will need to avoid. You can review the list of disallowed protocols below.
+Disallowed protocols
+vbscript	ldap
+javascript	mailto
+vbs	mmst
+data	mmsu
+mocha	msbd
+keyword	rtsp
+livescript	mso-offdap
+ftp	snews
+file	news
+gopher	nntp
+acrobat	outlook
+callto	stssync
+daap	rlogin
+itpc	telnet
+itms	tn3270
+firefoxurl	shell
+hcp	sip
+​
+Error Example
+If you use a callback URL that hasn’t been properly added to your App’s settings in the developer portal, you will receive the following error message:
+OAuth 1.0a
+HTTP 403 - Forbidden
+
+{
+  "errors": [
+    {
+      "code":415,"message":"Callback URL not approved for this client application. Approved callback URLs can be adjusted in your application settings."
+    }
+  ]
+}
+OR
+<?xml version="1.0" encoding="UTF-8"?>
+<hash>
+<error>Callback URL not approved for this client application. Approved callback URLs can be adjusted in your application settings</error>
+<request>/oauth/request_token</request>
+</hash>
+OAuth 2.0
+HTTP 400
+
+{
+  "error": "invalid_request",
+  "error_description": "Value passed for the redirect uri did not match the uri of the authorization code."
+}
+Troubleshooting
+If you receive an error, please make sure that the callback URL that you are using in your authentication requests is HTTP encoded, and that it matches a callback URL that has been added to the allowlist for the App whose keys and tokens you are using in your request.
