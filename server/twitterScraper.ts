@@ -599,11 +599,16 @@ export async function sendTweetViaScraper(
   } catch (error: any) {
     const errorMsg = error.message || String(error);
     
-    // Detect 401 Unauthorized errors - means cookies are stale or invalid
-    if (errorMsg.includes('401') || errorMsg.includes('Unauthorized') || 
-        errorMsg.includes('Could not authenticate') || errorMsg.includes('not permitted') ||
-        errorMsg.includes('code":32') || errorMsg.includes('code: 32')) {
-      console.error(`[Scraper] Detected auth failure while posting tweet. Clearing cache and cookies.`);
+    // Distinguish between auth failures (should clear cookies) and permission errors (should NOT clear cookies)
+    const isAuthFailure = errorMsg.includes('401') || errorMsg.includes('Unauthorized') || 
+        errorMsg.includes('Could not authenticate') ||
+        errorMsg.includes('code":32') || errorMsg.includes('code: 32');
+    
+    // "not permitted" is an ACCOUNT restriction, not an auth failure - don't clear cookies!
+    const isPermissionError = errorMsg.includes('not permitted') || errorMsg.includes('forbidden');
+    
+    if (isAuthFailure) {
+      console.error(`[Scraper] Detected AUTH failure (401/credentials invalid). Clearing cache and cookies.`);
       
       // Clear the scraper cache so next attempt will re-login/get fresh cookies
       scraperCache.delete(agent.id);
@@ -615,6 +620,11 @@ export async function sendTweetViaScraper(
       } catch (e) {
         console.log(`[Scraper] Failed to clear cookies: ${e}`);
       }
+    } else if (isPermissionError) {
+      // Don't clear cookies for permission errors - account may have restrictions
+      console.error(`[Scraper] PERMISSION ERROR (not auth failure). Account may have restrictions.`);
+      console.error(`[Scraper] TIP: Check if Twitter account is marked as "Automated" in Settings → Account → Automation`);
+      console.error(`[Scraper] TIP: Some accounts have write restrictions. Try posting manually from the account first.`);
     }
     
     console.error(`[Scraper] Error posting tweet: ${errorMsg}`);
