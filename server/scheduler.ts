@@ -63,8 +63,10 @@ interface SchedulerState {
   postingLock: Map<string, boolean>; // Prevent concurrent posting attempts
 }
 
-// Rate limit backoff duration (15 minutes)
-const RATE_LIMIT_BACKOFF_MS = 15 * 60 * 1000;
+// Rate limit backoff settings
+const INITIAL_RATE_LIMIT_BACKOFF_MS = 15 * 60 * 1000; // 15 minutes
+const MAX_RATE_LIMIT_BACKOFF_MS = 24 * 60 * 60 * 1000; // 24 hours
+const backoffMultiplier = new Map<string, number>(); // Track multiplier per agent
 
 const state: SchedulerState = {
   isRunning: false,
@@ -80,6 +82,30 @@ const state: SchedulerState = {
   rateLimitBackoff: new Map(),
   postingLock: new Map(),
 };
+
+/**
+ * Get current backoff duration for an agent
+ */
+function getBackoffDuration(agentId: string): number {
+  const multiplier = backoffMultiplier.get(agentId) || 1;
+  return Math.min(INITIAL_RATE_LIMIT_BACKOFF_MS * multiplier, MAX_RATE_LIMIT_BACKOFF_MS);
+}
+
+/**
+ * Increment backoff multiplier for an agent
+ */
+function incrementBackoff(agentId: string): void {
+  const current = backoffMultiplier.get(agentId) || 1;
+  backoffMultiplier.set(agentId, current * 2);
+}
+
+/**
+ * Reset backoff multiplier for an agent
+ */
+function resetBackoff(agentId: string): void {
+  backoffMultiplier.delete(agentId);
+  state.rateLimitBackoff.delete(agentId);
+}
 
 /**
  * Track a newly posted tweet for comment detection
@@ -635,7 +661,7 @@ async function executePost(agent: Agent): Promise<void> {
       state.postsToday.set(postsKey, (state.postsToday.get(postsKey) || 0) + 1);
       
       // Clear any rate limit backoff on success - posting is working again
-      state.rateLimitBackoff.delete(agent.id);
+      resetBackoff(agent.id);
       
       // Track this tweet for comment detection (replies without @mention)
       if (result.tweetId) {
@@ -690,10 +716,17 @@ async function executePost(agent: Agent): Promise<void> {
       }
     } else {
       // Set rate limit backoff if rate limited
-      if (result.rateLimited) {
-        const backoffUntil = new Date(Date.now() + RATE_LIMIT_BACKOFF_MS);
+      if (result.rateLimited || (result.error && (result.error.includes("Rate limit") || result.error.includes("429")))) {
+        const duration = getBackoffDuration(agent.id);
+        const backoffUntil = new Date(Date.now() + duration);
         state.rateLimitBackoff.set(agent.id, backoffUntil);
-        console.log(`[Scheduler] Rate limited! Agent ${agent.name} in backoff until ${backoffUntil.toISOString()}`);
+        incrementBackoff(agent.id);
+        console.log(`[Scheduler] Rate limited! Agent ${agent.name} in backoff until ${backoffUntil.toISOString()} (Duration: ${duration/60000}m)`);
+      } else if (result.error && (result.error.includes("not permitted") || result.error.includes("permission") || result.errorCode === "AUTH_ERROR")) {
+        // Permission error usually means credentials issue
+        const backoffUntil = new Date(Date.now() + 30 * 60 * 1000); // 30 min for auth issues
+        state.rateLimitBackoff.set(agent.id, backoffUntil);
+        console.log(`[Scheduler] Permission error! Agent ${agent.name} in backoff until ${backoffUntil.toISOString()}`);
       }
       
       await logActivity({
@@ -739,11 +772,16 @@ function scheduleAgent(agent: Agent): void {
   }
   
   const intervalMs = getPostIntervalMs(agent);
-  console.log(`[Scheduler] Scheduling agent ${agent.name} with interval ${intervalMs / 1000}s`);
   
-  executePost(agent).catch(err => 
-    console.error(`[Scheduler] Initial post failed for ${agent.name}:`, err)
-  );
+  // Add initial random jitter (0-5 minutes) to avoid burst traffic
+  const jitterMs = Math.floor(Math.random() * 5 * 60 * 1000);
+  console.log(`[Scheduler] Scheduling agent ${agent.name} with interval ${intervalMs / 1000}s (initial jitter: ${jitterMs/1000}s)`);
+  
+  setTimeout(() => {
+    executePost(agent).catch(err => 
+      console.error(`[Scheduler] Initial post failed for ${agent.name}:`, err)
+    );
+  }, jitterMs);
   
   const timer = setInterval(async () => {
     try {
