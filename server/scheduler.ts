@@ -415,7 +415,13 @@ function canPostNow(agent: Agent): boolean {
   const backoffUntil = state.rateLimitBackoff.get(agent.id);
   if (backoffUntil && Date.now() < backoffUntil.getTime()) {
     const remainingMs = backoffUntil.getTime() - Date.now();
-    console.log(`[Scheduler] Agent ${agent.name} in rate limit backoff for ${Math.ceil(remainingMs / 60000)} more minutes`);
+    // Only log once every minute per agent to avoid spamming
+    if (!(state as any).lastBackoffLog) (state as any).lastBackoffLog = new Map();
+    const lastLogTime = (state as any).lastBackoffLog.get(agent.id);
+    if (!lastLogTime || (Date.now() - lastLogTime.getTime() > 60000)) {
+      console.log(`[Scheduler] Agent ${agent.name} in rate limit backoff for ${Math.ceil(remainingMs / 60000)} more minutes`);
+      (state as any).lastBackoffLog.set(agent.id, new Date());
+    }
     return false;
   }
   

@@ -109,41 +109,37 @@ async function performScraperLogin(
       try {
         const rawCookies = JSON.parse(agent.twitterCookies!);
         if (Array.isArray(rawCookies) && rawCookies.length > 0) {
+          // Import Cookie from tough-cookie
+          const { Cookie } = await import("tough-cookie");
+          
           // Process cookies: normalize domain and prepare for setCookies
           const processedCookies = rawCookies
             .filter(c => {
               // Validate required fields exist
               const name = c.key || c.name;
               if (!name || !c.value) {
-                console.log(`[Scraper] Skipping invalid cookie (missing name or value)`);
                 return false;
               }
               return true;
             })
             .map(c => {
               // Normalize domain: x.com -> twitter.com
-              // The agent-twitter-client library makes requests to twitter.com internally
               let domain = c.domain || '.twitter.com';
               if (domain === '.x.com' || domain === 'x.com') {
                 domain = '.twitter.com';
               }
               
-              // Preserve all cookie metadata for the Cookie object
-              return {
-                ...c,
+              // Create a proper Cookie object
+              return new Cookie({
                 key: c.key || c.name,
+                value: c.value,
                 domain: domain,
                 path: c.path || '/',
-                // Ensure critical dates are in right format
-                expirationDate: c.expirationDate || c.expires ? 
-                  (typeof c.expirationDate === 'number' ? c.expirationDate : 
-                   typeof c.expires === 'number' ? c.expires :
-                   c.expirationDate && typeof c.expirationDate === 'string' ?
-                     Math.floor(new Date(c.expirationDate).getTime() / 1000) :
-                   c.expires && typeof c.expires === 'string' ?
-                     Math.floor(new Date(c.expires).getTime() / 1000) : undefined)
-                  : undefined,
-              };
+                secure: c.secure ?? true,
+                httpOnly: c.httpOnly ?? true,
+                expires: c.expirationDate || c.expires ? 
+                  new Date((Number(c.expirationDate || c.expires)) * 1000) : undefined
+              } as any);
             });
           
           console.log(`[Scraper] Restoring session from ${processedCookies.length} cookies for ${agent.name}...`);
