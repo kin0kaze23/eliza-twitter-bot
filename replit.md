@@ -80,3 +80,53 @@ The bot uses a simplified credential flow similar to ElizaOS:
 
 ### Form Handling
 - **React Hook Form**: For form state management, integrated with Zod for validation.
+
+## Rate Limiting & Backoff Configuration
+
+### Hardcoded Values (server/scheduler.ts)
+| Setting | Value | Description |
+|---------|-------|-------------|
+| `INITIAL_RATE_LIMIT_BACKOFF_MS` | 30 minutes | Base backoff for rate limits |
+| `MAX_RATE_LIMIT_BACKOFF_MS` | 6 hours | Maximum backoff (prevents lockout) |
+| `PERMISSION_ERROR_BACKOFF_MS` | 1 hour | Backoff for "not permitted" errors |
+| `MIN_POSTING_INTERVAL_MS` | 30 minutes | Enforced minimum between posts |
+| `RECOMMENDED_POSTING_INTERVAL_MS` | 1 hour | Suggested interval |
+| `LOGIN_CACHE_DURATION` | 30 minutes | Scraper session cache (twitterScraper.ts) |
+| `MENTION_POLL_INTERVAL` | 3 minutes | How often to check for new mentions |
+
+### Database-Configurable Values (per agent)
+| Field | Current Default | Description |
+|-------|-----------------|-------------|
+| `post_frequency` | 1 | Number of time units between posts |
+| `post_interval` | "hours" | Time unit (minutes/hours) |
+| `max_posts_per_day` | 12 | Daily post limit (Twitter Free tier: 17) |
+| `reply_enabled` | true | Enable auto-replies to mentions |
+| `reply_rate` | 70 | % chance to respond to a mention |
+| `reply_delay` | 30 | Base delay (seconds) before replying |
+| `max_replies_per_hour` | 10 | Hourly reply limit |
+
+### Error Recovery Behavior
+- **Rate Limits (429)**: Exponential backoff with jitter, resets on success
+- **Permission Errors**: 1-hour backoff, does NOT clear cookies (account restriction, not auth failure)
+- **Auth Failures (401)**: Clears cached cookies, triggers re-login on next attempt
+- **Network Errors**: 3 retries with short delays
+
+### Dual Authentication Fallback
+1. **Posting**: API first → Scraper fallback if API fails
+2. **Replies**: API first → Scraper fallback if API fails
+3. **Mention Polling**: API first → Scraper fallback if API fails
+
+## Troubleshooting
+
+### "Not Permitted" Errors
+This indicates Twitter account restrictions, NOT authentication issues:
+1. Go to Twitter Settings → Account Information → Automation
+2. Check the box to mark account as "Automated"
+3. Wait 24-48 hours if recently flagged
+4. Ensure account is in good standing (no suspensions)
+
+### OAuth 401 Errors
+The OAuth credentials are mismatched or expired:
+1. Regenerate tokens in Twitter Developer Portal
+2. Update dashboard with new API Key, API Secret, Access Token, Access Token Secret
+3. Verify the app has Read+Write permissions
