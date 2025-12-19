@@ -167,6 +167,9 @@ export const agents = pgTable("agents", {
   lastMentionId: text("last_mention_id"), // Last processed mention tweet ID for pagination
   lastMentionCheckAt: timestamp("last_mention_check_at"), // When we last checked for mentions
   
+  // Post Scheduling Tracking - persist state across restarts to prevent duplicate posts
+  lastPostedAt: timestamp("last_posted_at"), // When the last successful post was made
+  
   // Metadata
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
