@@ -96,6 +96,23 @@ export function parsePriorityRule(rule: string): { conditions: { keyword: string
   return { conditions };
 }
 
+// Helper to convert priority string to number for comparison
+function priorityToNumber(priority: string): number {
+  switch (priority) {
+    case "high": return 3;
+    case "medium": return 2;
+    case "low": return 1;
+    default: return 2; // default to medium
+  }
+}
+
+// Helper to convert number to priority string
+function numberToPriority(num: number): string {
+  if (num >= 3) return "high";
+  if (num >= 2) return "medium";
+  return "low";
+}
+
 export async function applyPriorityRulesForAgent(agentId: string, rule: string): Promise<{ updated: number }> {
   let updated = 0;
   
@@ -111,20 +128,25 @@ export async function applyPriorityRulesForAgent(agentId: string, rule: string):
       const contentLower = (entry.content || "").toLowerCase();
       const titleLower = (entry.title || "").toLowerCase();
       
-      let newPriority = entry.priority;
+      // Convert current priority string to number for comparison
+      let currentPriorityNum = priorityToNumber(entry.priority);
+      let newPriorityNum = currentPriorityNum;
       
       for (const condition of conditions) {
         if (contentLower.includes(condition.keyword) || titleLower.includes(condition.keyword)) {
-          if (condition.priority > newPriority) {
-            newPriority = condition.priority;
+          // Map rule priority (1-10) to our scale: 1-3=low, 4-6=medium, 7-10=high
+          const mappedPriority = condition.priority >= 7 ? 3 : (condition.priority >= 4 ? 2 : 1);
+          if (mappedPriority > newPriorityNum) {
+            newPriorityNum = mappedPriority;
           }
         }
       }
       
-      if (newPriority !== entry.priority) {
+      const newPriorityStr = numberToPriority(newPriorityNum);
+      if (newPriorityStr !== entry.priority) {
         await db.update(knowledgeBase)
           .set({
-            priority: newPriority,
+            priority: newPriorityStr,
             updatedAt: new Date(),
           })
           .where(eq(knowledgeBase.id, entry.id));

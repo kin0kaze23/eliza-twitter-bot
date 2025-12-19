@@ -1029,8 +1029,34 @@ async function processMention(agent: Agent, mention: TwitterMention, mentionType
     // Generate the reply
     const replyText = await generateReply(agent, mention);
     
-    // Post the reply
-    const result = await replyToTweet(agent, replyText, mention.id);
+    // Post the reply - use API first, fall back to scraper (consistent with posting)
+    const hasApi = hasApiCredentials(agent);
+    const hasScraper = hasScraperCredentials(agent);
+    
+    let result: { success: boolean; tweetId?: string; error?: string };
+    
+    if (hasApi) {
+      result = await replyToTweet(agent, replyText, mention.id);
+      
+      // If API fails and scraper is available, try scraper as fallback
+      if (!result.success && hasScraper) {
+        console.log(`[MentionBot] API reply failed, trying scraper fallback`);
+        const scraperResult = await sendReplyViaScraper(agent, replyText, mention.id);
+        if (scraperResult.success) {
+          result = { success: true, tweetId: scraperResult.tweetId };
+        }
+      }
+    } else if (hasScraper) {
+      // No API credentials, use scraper directly
+      const scraperResult = await sendReplyViaScraper(agent, replyText, mention.id);
+      result = {
+        success: scraperResult.success,
+        tweetId: scraperResult.tweetId,
+        error: scraperResult.error,
+      };
+    } else {
+      result = { success: false, error: "No Twitter credentials available" };
+    }
     
     if (result.success && result.tweetId) {
       console.log(`[MentionBot] Successfully replied to mention ${mention.id} with tweet ${result.tweetId}`);
