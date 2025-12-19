@@ -474,7 +474,20 @@ function canPostNow(agent: Agent): boolean {
     return false;
   }
   
-  const lastPost = state.lastPostTime.get(agent.id);
+  // Check posting interval - use BOTH in-memory AND persisted lastPostedAt
+  // This ensures we respect the interval even after server restarts
+  const inMemoryLastPost = state.lastPostTime.get(agent.id);
+  // Normalize persisted timestamp to Date object (could be string from DB)
+  const persistedLastPostDate = agent.lastPostedAt ? new Date(agent.lastPostedAt) : null;
+  
+  // Use the most recent of the two timestamps
+  let lastPost: Date | null = null;
+  if (inMemoryLastPost && persistedLastPostDate) {
+    lastPost = inMemoryLastPost.getTime() > persistedLastPostDate.getTime() ? inMemoryLastPost : persistedLastPostDate;
+  } else {
+    lastPost = inMemoryLastPost || persistedLastPostDate;
+  }
+  
   if (lastPost) {
     const intervalMs = getPostIntervalMs(agent);
     const timeSinceLastPost = Date.now() - lastPost.getTime();
@@ -748,6 +761,18 @@ async function executePost(agent: Agent): Promise<void> {
       
       console.log(`[Scheduler] Posted successfully: ${result.tweetId}`);
       
+      // Update BOTH in-memory state AND persist to database
+      // This prevents duplicate posts within the same session AND after restarts
+      const now = new Date();
+      state.lastPostTime.set(agent.id, now);
+      
+      try {
+        await storage.updateAgent(agent.id, { lastPostedAt: now });
+        console.log(`[Scheduler] Persisted lastPostedAt for ${agent.name}`);
+      } catch (err) {
+        console.error(`[Scheduler] Failed to persist lastPostedAt:`, err);
+      }
+      
       if (agent.webhookEnabled && agent.webhookUrl) {
         sendPostCreatedWebhook(agent, cleanedContent, result.tweetId).catch((err) =>
           console.error("Webhook error:", err)
@@ -818,15 +843,41 @@ function scheduleAgent(agent: Agent): void {
   
   const intervalMs = getPostIntervalMs(agent);
   
-  // Add initial random jitter (0-5 minutes) to avoid burst traffic
-  const jitterMs = Math.floor(Math.random() * 5 * 60 * 1000);
-  console.log(`[Scheduler] Scheduling agent ${agent.name} with interval ${intervalMs / 1000}s (initial jitter: ${jitterMs/1000}s)`);
+  // Check if we should skip the initial post based on persisted lastPostedAt
+  // This prevents duplicate posts after server restarts
+  const persistedLastPost = agent.lastPostedAt;
+  let initialDelayMs = 0;
   
+  if (persistedLastPost) {
+    const timeSinceLastPost = Date.now() - new Date(persistedLastPost).getTime();
+    const remainingTime = intervalMs - timeSinceLastPost;
+    
+    if (remainingTime > 0) {
+      // Not enough time has passed since last post, wait for remaining interval
+      initialDelayMs = remainingTime + Math.floor(Math.random() * 60 * 1000); // Add 0-1 min jitter
+      console.log(`[Scheduler] Agent ${agent.name}: Last post was ${Math.round(timeSinceLastPost/60000)}m ago. Waiting ${Math.round(initialDelayMs/60000)}m before first post (interval: ${Math.round(intervalMs/60000)}m)`);
+    } else {
+      // Interval has elapsed, can post with small jitter
+      initialDelayMs = Math.floor(Math.random() * 5 * 60 * 1000); // 0-5 min jitter
+      console.log(`[Scheduler] Agent ${agent.name}: Interval elapsed since last post. First post in ${Math.round(initialDelayMs/1000)}s`);
+    }
+  } else {
+    // No previous post recorded, use small jitter for first post
+    initialDelayMs = Math.floor(Math.random() * 5 * 60 * 1000); // 0-5 min jitter
+    console.log(`[Scheduler] Agent ${agent.name}: No previous post found. First post in ${Math.round(initialDelayMs/1000)}s (interval: ${Math.round(intervalMs/60000)}m)`);
+  }
+  
+  // Hydrate in-memory state from persisted value if available
+  if (persistedLastPost) {
+    state.lastPostTime.set(agent.id, new Date(persistedLastPost));
+  }
+  
+  // Schedule initial post with calculated delay
   setTimeout(() => {
     executePost(agent).catch(err => 
       console.error(`[Scheduler] Initial post failed for ${agent.name}:`, err)
     );
-  }, jitterMs);
+  }, initialDelayMs);
   
   const timer = setInterval(async () => {
     try {
