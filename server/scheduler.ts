@@ -63,10 +63,13 @@ interface SchedulerState {
   postingLock: Map<string, boolean>; // Prevent concurrent posting attempts
 }
 
-// Rate limit backoff settings
-const INITIAL_RATE_LIMIT_BACKOFF_MS = 15 * 60 * 1000; // 15 minutes
-const MAX_RATE_LIMIT_BACKOFF_MS = 24 * 60 * 60 * 1000; // 24 hours
-const backoffMultiplier = new Map<string, number>(); // Track multiplier per agent
+// Rate limit backoff settings - conservative to ensure stability
+// Twitter Free tier: ~17 posts/24h = 1 post per 1.4 hours
+// Basic tier ($200/mo): 50 posts/24h = 1 post per ~30 minutes
+const INITIAL_RATE_LIMIT_BACKOFF_MS = 30 * 60 * 1000; // 30 minutes base backoff
+const MAX_RATE_LIMIT_BACKOFF_MS = 6 * 60 * 60 * 1000; // 6 hours max (prevents lockout)
+const PERMISSION_ERROR_BACKOFF_MS = 60 * 60 * 1000; // 1 hour for "not permitted" errors
+const consecutiveFailures = new Map<string, number>(); // Track failures per agent for exponential backoff
 
 const state: SchedulerState = {
   isRunning: false,
@@ -84,27 +87,41 @@ const state: SchedulerState = {
 };
 
 /**
- * Get current backoff duration for an agent
- */
-function getBackoffDuration(agentId: string): number {
-  const multiplier = backoffMultiplier.get(agentId) || 1;
-  return Math.min(INITIAL_RATE_LIMIT_BACKOFF_MS * multiplier, MAX_RATE_LIMIT_BACKOFF_MS);
-}
-
-/**
- * Increment backoff multiplier for an agent
- */
-function incrementBackoff(agentId: string): void {
-  const current = backoffMultiplier.get(agentId) || 1;
-  backoffMultiplier.set(agentId, current * 2);
-}
-
-/**
- * Reset backoff multiplier for an agent
+ * Reset all backoff state for an agent (call on successful post)
  */
 function resetBackoff(agentId: string): void {
-  backoffMultiplier.delete(agentId);
+  consecutiveFailures.delete(agentId);
   state.rateLimitBackoff.delete(agentId);
+  console.log(`[Scheduler] Reset backoff state for agent ${agentId} after successful post`);
+}
+
+/**
+ * Track consecutive failures for adaptive behavior
+ */
+function recordFailure(agentId: string): number {
+  const count = (consecutiveFailures.get(agentId) || 0) + 1;
+  consecutiveFailures.set(agentId, count);
+  return count;
+}
+
+/**
+ * Get adaptive backoff based on failure count
+ * Uses exponential backoff with jitter for stability
+ */
+function getAdaptiveBackoff(agentId: string, isRateLimit: boolean): number {
+  const failures = consecutiveFailures.get(agentId) || 1;
+  const baseBackoff = isRateLimit ? INITIAL_RATE_LIMIT_BACKOFF_MS : PERMISSION_ERROR_BACKOFF_MS;
+  
+  // Exponential backoff: base * 2^(failures-1), capped at max
+  const backoff = Math.min(
+    baseBackoff * Math.pow(2, failures - 1),
+    MAX_RATE_LIMIT_BACKOFF_MS
+  );
+  
+  // Add jitter (0-10% of backoff) to prevent synchronized retries
+  const jitter = Math.random() * 0.1 * backoff;
+  
+  return Math.floor(backoff + jitter);
 }
 
 /**
@@ -397,14 +414,30 @@ function isInQuietHours(agent: Agent): boolean {
   }
 }
 
+// Minimum safe posting intervals to avoid Twitter rate limits
+const MIN_POSTING_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes minimum between posts
+const RECOMMENDED_POSTING_INTERVAL_MS = 60 * 60 * 1000; // 1 hour recommended
+
 function getPostIntervalMs(agent: Agent): number {
   const frequency = agent.postFrequency || 2;
   const interval = agent.postInterval || "hours";
   
+  let calculatedInterval: number;
   if (interval === "minutes") {
-    return frequency * 60 * 1000;
+    calculatedInterval = frequency * 60 * 1000;
+  } else {
+    calculatedInterval = frequency * 60 * 60 * 1000;
   }
-  return frequency * 60 * 60 * 1000;
+  
+  // Enforce minimum interval to prevent rate limiting
+  // Twitter Free tier allows ~17 posts/24h (1 per 1.4 hours)
+  // To be safe, we enforce at least 30 minutes between posts
+  if (calculatedInterval < MIN_POSTING_INTERVAL_MS) {
+    console.log(`[Scheduler] Warning: Posting interval of ${calculatedInterval/60000}m is too aggressive. Enforcing minimum of ${MIN_POSTING_INTERVAL_MS/60000}m to prevent rate limits.`);
+    return MIN_POSTING_INTERVAL_MS;
+  }
+  
+  return calculatedInterval;
 }
 
 function canPostNow(agent: Agent): boolean {
@@ -721,18 +754,24 @@ async function executePost(agent: Agent): Promise<void> {
         );
       }
     } else {
-      // Set rate limit backoff if rate limited
-      if (result.rateLimited || (result.error && (result.error.includes("Rate limit") || result.error.includes("429")))) {
-        const duration = getBackoffDuration(agent.id);
+      // Track failure for adaptive backoff
+      const failureCount = recordFailure(agent.id);
+      
+      // Determine error type and apply appropriate backoff
+      const isRateLimit = Boolean(result.rateLimited) || Boolean(result.error && (result.error.includes("Rate limit") || result.error.includes("429")));
+      const isPermissionError = Boolean(result.error && (result.error.includes("not permitted") || result.error.includes("permission") || result.error.includes("32") || result.errorCode === "AUTH_ERROR"));
+      
+      if (isRateLimit || isPermissionError) {
+        const duration = getAdaptiveBackoff(agent.id, isRateLimit);
         const backoffUntil = new Date(Date.now() + duration);
         state.rateLimitBackoff.set(agent.id, backoffUntil);
-        incrementBackoff(agent.id);
-        console.log(`[Scheduler] Rate limited! Agent ${agent.name} in backoff until ${backoffUntil.toISOString()} (Duration: ${duration/60000}m)`);
-      } else if (result.error && (result.error.includes("not permitted") || result.error.includes("permission") || result.errorCode === "AUTH_ERROR")) {
-        // Permission error usually means credentials issue
-        const backoffUntil = new Date(Date.now() + 30 * 60 * 1000); // 30 min for auth issues
-        state.rateLimitBackoff.set(agent.id, backoffUntil);
-        console.log(`[Scheduler] Permission error! Agent ${agent.name} in backoff until ${backoffUntil.toISOString()}`);
+        
+        if (isRateLimit) {
+          console.log(`[Scheduler] Rate limited! Agent ${agent.name} in backoff until ${backoffUntil.toISOString()} (Duration: ${Math.ceil(duration/60000)}m, Failures: ${failureCount})`);
+        } else {
+          console.log(`[Scheduler] Permission error! Agent ${agent.name} in backoff until ${backoffUntil.toISOString()} (Duration: ${Math.ceil(duration/60000)}m, Failures: ${failureCount})`);
+          console.log(`[Scheduler] TIP: "Not permitted" errors usually mean stale cookies or account restrictions. Try exporting fresh cookies from x.com.`);
+        }
       }
       
       await logActivity({

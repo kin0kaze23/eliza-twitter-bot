@@ -143,19 +143,20 @@ async function performScraperLogin(
             });
           
           console.log(`[Scraper] Restoring session from ${processedCookies.length} cookies for ${agent.name}...`);
-          const cookieNames = processedCookies.map(c => c.key || c.name);
+          const cookieNames = processedCookies.map(c => c.key);
           console.log(`[Scraper] Cookie names: ${cookieNames.join(', ')}`);
           
           // Validate critical cookies exist
           const requiredCookies = ['auth_token', 'ct0'];
-          const hasRequired = requiredCookies.every(req => cookieNames.includes(req));
+          const cookieKeyStrings = cookieNames.map(k => String(k));
+          const hasRequired = requiredCookies.every(req => cookieKeyStrings.includes(req));
           
           if (!hasRequired) {
             console.log(`[Scraper] WARNING: Missing required cookies (auth_token, ct0) for ${agent.name}. Cookies may be expired or incomplete.`);
           }
           
           // Log auth token info for debugging
-          const authCookie = processedCookies.find(c => (c.key || c.name) === 'auth_token');
+          const authCookie = processedCookies.find(c => c.key === 'auth_token');
           if (authCookie) {
             console.log(`[Scraper] auth_token: ${authCookie.value.substring(0, 15)}... (len=${authCookie.value.length})`);
           }
@@ -195,8 +196,8 @@ async function performScraperLogin(
           // Trust the cookie structure if we have auth_token and ct0 - Twitter often blocks
           // API verification calls (isLoggedIn, me) but the cookies still work for scraping
           if (!isLoggedIn) {
-            const hasAuthToken = cookieNames.includes('auth_token');
-            const hasCt0 = cookieNames.includes('ct0');
+            const hasAuthToken = cookieKeyStrings.includes('auth_token');
+            const hasCt0 = cookieKeyStrings.includes('ct0');
             if (hasAuthToken && hasCt0) {
               console.log(`[Scraper] Required cookies present (auth_token, ct0) for ${agent.name}, trusting cookie structure`);
               console.log(`[Scraper] Note: API verification failed but cookies may still work for scraping operations`);
