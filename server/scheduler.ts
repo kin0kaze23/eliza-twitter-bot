@@ -621,6 +621,7 @@ async function logActivity(data: {
   errorMessage?: string;
   errorCode?: string;
   postedAt?: Date;
+  contentType?: string;
 }): Promise<void> {
   try {
     await db.insert(activityLogs).values(data as any);
@@ -757,6 +758,7 @@ async function executePost(agent: Agent): Promise<void> {
         modelName: agent.postModelName || agent.modelName,
         kbEntriesUsed: generated.kbIds,
         postedAt: new Date(),
+        contentType: contentTypeToLog,
       });
       
       console.log(`[Scheduler] Posted successfully: ${result.tweetId}`);
@@ -810,6 +812,7 @@ async function executePost(agent: Agent): Promise<void> {
         kbEntriesUsed: generated.kbIds,
         errorMessage: result.error,
         errorCode: result.errorCode,
+        contentType: contentTypeToLog,
       });
       
       console.error(`[Scheduler] Failed to post: ${result.error}`);
