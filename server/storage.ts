@@ -48,6 +48,7 @@ export interface IStorage {
   updateAgent(id: string, agent: Partial<InsertAgent>): Promise<Agent | undefined>;
   deleteAgent(id: string): Promise<boolean>;
   updateAgentStatus(id: string, status: string): Promise<Agent | undefined>;
+  acquirePostingLock(agentId: string, intervalMs: number): Promise<boolean>;
   
   // Knowledge Base
   getKnowledgeBaseEntries(agentId: string): Promise<KnowledgeBase[]>;
@@ -174,6 +175,27 @@ export class DbStorage implements IStorage {
       .where(eq(agents.id, id))
       .returning();
     return result[0];
+  }
+
+  async acquirePostingLock(agentId: string, intervalMs: number): Promise<boolean> {
+    const now = new Date();
+    const cutoffTime = new Date(now.getTime() - intervalMs);
+    
+    const result = await db
+      .update(agents)
+      .set({ 
+        lastPostAttemptAt: now,
+        updatedAt: now 
+      })
+      .where(
+        and(
+          eq(agents.id, agentId),
+          sql`(${agents.lastPostAttemptAt} IS NULL OR ${agents.lastPostAttemptAt} < ${cutoffTime})`
+        )
+      )
+      .returning();
+    
+    return result.length > 0;
   }
 
   // Knowledge Base
