@@ -89,6 +89,7 @@ export interface IStorage {
   // Activity Logs
   getActivityLogs(agentId?: string, limit?: number): Promise<ActivityLog[]>;
   getRecentActivityLogs(limit?: number): Promise<ActivityLog[]>;
+  getRecentSuccessfulPosts(agentId: string, limit?: number): Promise<ActivityLog[]>;
   createActivityLog(log: InsertActivityLog): Promise<ActivityLog>;
   
   // Bible Verse Tracking
@@ -549,6 +550,21 @@ export class DbStorage implements IStorage {
     return await db
       .select()
       .from(activityLogs)
+      .orderBy(desc(activityLogs.createdAt))
+      .limit(limit);
+  }
+
+  async getRecentSuccessfulPosts(agentId: string, limit: number = 5): Promise<ActivityLog[]> {
+    return await db
+      .select()
+      .from(activityLogs)
+      .where(
+        and(
+          eq(activityLogs.agentId, agentId),
+          eq(activityLogs.status, "success"),
+          eq(activityLogs.eventType, "post")
+        )
+      )
       .orderBy(desc(activityLogs.createdAt))
       .limit(limit);
   }
