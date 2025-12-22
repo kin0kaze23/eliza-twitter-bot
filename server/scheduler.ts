@@ -474,24 +474,26 @@ function canPostNow(agent: Agent): boolean {
     return false;
   }
   
-  // Check posting interval - use BOTH in-memory AND persisted lastPostedAt
-  // This ensures we respect the interval even after server restarts
+  // Check posting interval - use BOTH in-memory state AND persisted timestamps
+  // Now includes lastPostAttemptAt to prevent race conditions
   const inMemoryLastPost = state.lastPostTime.get(agent.id);
-  // Normalize persisted timestamp to Date object (could be string from DB)
   const persistedLastPostDate = agent.lastPostedAt ? new Date(agent.lastPostedAt) : null;
+  const persistedLastAttemptDate = agent.lastPostAttemptAt ? new Date(agent.lastPostAttemptAt) : null;
   
-  // Use the most recent of the two timestamps
-  let lastPost: Date | null = null;
-  if (inMemoryLastPost && persistedLastPostDate) {
-    lastPost = inMemoryLastPost.getTime() > persistedLastPostDate.getTime() ? inMemoryLastPost : persistedLastPostDate;
-  } else {
-    lastPost = inMemoryLastPost || persistedLastPostDate;
-  }
+  // Use the most recent of ALL timestamps (in-memory, lastPostedAt, lastPostAttemptAt)
+  const timestamps: Date[] = [];
+  if (inMemoryLastPost) timestamps.push(inMemoryLastPost);
+  if (persistedLastPostDate) timestamps.push(persistedLastPostDate);
+  if (persistedLastAttemptDate) timestamps.push(persistedLastAttemptDate);
   
-  if (lastPost) {
+  const lastActivity = timestamps.length > 0 
+    ? new Date(Math.max(...timestamps.map(t => t.getTime())))
+    : null;
+  
+  if (lastActivity) {
     const intervalMs = getPostIntervalMs(agent);
-    const timeSinceLastPost = Date.now() - lastPost.getTime();
-    if (timeSinceLastPost < intervalMs) {
+    const timeSinceLastActivity = Date.now() - lastActivity.getTime();
+    if (timeSinceLastActivity < intervalMs) {
       return false;
     }
   }
