@@ -1,4 +1,4 @@
-import type { Agent, KnowledgeBase, BibleVerseUsage, ContentTypeUsage } from "@shared/schema";
+import type { Agent, KnowledgeBase, BibleVerseUsage, ContentTypeUsage, ActivityLog } from "@shared/schema";
 
 // All 7 content types for rotation
 export const ALL_CONTENT_TYPES = [
@@ -17,6 +17,7 @@ export interface PromptAssemblyOptions {
   recentVerses?: BibleVerseUsage[]; // Recently used Bible verses to avoid
   recentContentTypes?: ContentTypeUsage[]; // Recently used content types to avoid
   selectedContentType?: ContentType; // Server-selected content type (for rotation)
+  recentPosts?: ActivityLog[]; // Recent posts for anti-repetition context
 }
 
 /**
@@ -335,6 +336,31 @@ export async function assemblePrompt(
       systemPrompt += "- Draw from timeless Scripture and spiritual wisdom instead of current events\n\n";
       componentsIncluded.push("kbFallback");
     }
+  }
+
+  // 4b. Recent Posts Context (Anti-Repetition) - Show AI what it recently posted
+  const recentPosts = options.recentPosts || [];
+  if (recentPosts.length > 0) {
+    systemPrompt += "## RECENT POSTS (DO NOT REPEAT)\n\n";
+    systemPrompt += "These are your most recent posts. You MUST create something DIFFERENT:\n";
+    systemPrompt += "- Different theme/meaning (not the same core message)\n";
+    systemPrompt += "- Different tone/posture (not the same emotional angle)\n";
+    systemPrompt += "- Different ending style (not the same conclusion pattern)\n";
+    systemPrompt += "- Different Scripture (if using verses)\n\n";
+    
+    for (let i = 0; i < recentPosts.length; i++) {
+      const post = recentPosts[i];
+      const contentType = post.contentType ? formatContentType(post.contentType) : "Unknown";
+      const postDate = post.postedAt ? new Date(post.postedAt).toLocaleDateString() : "Recent";
+      
+      systemPrompt += `### Post ${i + 1} (${contentType}, ${postDate}):\n`;
+      systemPrompt += `${post.content || "[No content]"}\n\n`;
+    }
+    
+    systemPrompt += "---\n";
+    systemPrompt += "Now create something FRESH with a different message, theme, and approach.\n\n";
+    
+    componentsIncluded.push("recentPostContext");
   }
 
   // 5. Bible Verse Guidelines with Historical Context Requirement
