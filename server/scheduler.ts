@@ -650,7 +650,19 @@ async function executePost(agent: Agent): Promise<void> {
     return;
   }
   
-  // Acquire posting lock to prevent duplicate posts
+  // CRITICAL: Acquire ATOMIC database lock BEFORE doing anything else
+  // This prevents race conditions where multiple scheduler ticks start posting simultaneously
+  const intervalMs = getPostIntervalMs(agent);
+  const lockAcquired = await storage.acquirePostingLock(agent.id, intervalMs);
+  
+  if (!lockAcquired) {
+    console.log(`[Scheduler] Could not acquire posting lock for ${agent.name} - another process may be posting or interval not elapsed`);
+    return;
+  }
+  
+  console.log(`[Scheduler] Acquired posting lock for ${agent.name}`);
+  
+  // Acquire in-memory posting lock to prevent duplicate posts within same process
   state.postingLock.set(agent.id, true);
   
   try {
