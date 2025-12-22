@@ -511,6 +511,17 @@ async function generateTweetContent(agent: Agent): Promise<{ content: string; kb
     const contentTypeWindow = (agent as any).contentTypeWindow || 7;
     const recentContentTypes = await storage.getRecentContentTypeUsages(agent.id, contentTypeWindow);
     
+    // Get recent successful posts for anti-repetition context injection
+    const recentPostContextEnabled = (agent as any).recentPostContextEnabled !== false; // Default true
+    const recentPostContextCount = (agent as any).recentPostContextCount || 5;
+    const recentPosts = recentPostContextEnabled 
+      ? await storage.getRecentSuccessfulPosts(agent.id, recentPostContextCount)
+      : [];
+    
+    if (recentPosts.length > 0) {
+      console.log(`[SCHEDULER] Recent post context: Including ${recentPosts.length} recent posts for anti-repetition`);
+    }
+    
     // SERVER-SIDE CONTENT TYPE SELECTION (critical for proper rotation)
     const hasKnowledgeBase = knowledgeEntries.length > 0;
     const rotationPolicy = ((agent as any).contentTypeReusePolicy || "rotate_all") as "rotate_all" | "avoid_last" | "allow";
@@ -527,6 +538,7 @@ async function generateTweetContent(agent: Agent): Promise<{ content: string; kb
       recentVerses,
       recentContentTypes,
       selectedContentType, // CRITICAL: Pass server-selected type
+      recentPosts, // NEW: Recent posts for anti-repetition context
     });
     
     // Simplified prompt - content type is already selected server-side
