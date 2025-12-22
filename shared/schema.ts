@@ -163,6 +163,10 @@ export const agents = pgTable("agents", {
   contentTypeReusePolicy: text("content_type_reuse_policy").default("rotate_all"), // allow, avoid_last, rotate_all
   contentTypeWindow: integer("content_type_window").default(7), // number of posts to look back
   
+  // Recent Post Context Injection - show AI recent posts to avoid repetition
+  recentPostContextEnabled: boolean("recent_post_context_enabled").default(true),
+  recentPostContextCount: integer("recent_post_context_count").default(5), // number of recent posts to include in prompt
+  
   // Mention Polling Tracking - persist state across restarts
   lastMentionId: text("last_mention_id"), // Last processed mention tweet ID for pagination
   lastMentionCheckAt: timestamp("last_mention_check_at"), // When we last checked for mentions
