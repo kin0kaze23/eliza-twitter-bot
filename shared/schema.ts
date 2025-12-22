@@ -173,6 +173,7 @@ export const agents = pgTable("agents", {
   
   // Post Scheduling Tracking - persist state across restarts to prevent duplicate posts
   lastPostedAt: timestamp("last_posted_at"), // When the last successful post was made
+  lastPostAttemptAt: timestamp("last_post_attempt_at"), // When the last post ATTEMPT started (prevents race conditions)
   
   // Metadata
   createdAt: timestamp("created_at").defaultNow().notNull(),
