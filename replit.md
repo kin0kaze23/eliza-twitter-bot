@@ -104,6 +104,8 @@ The bot uses a simplified credential flow similar to ElizaOS:
 | `reply_rate` | 70 | % chance to respond to a mention |
 | `reply_delay` | 30 | Base delay (seconds) before replying |
 | `max_replies_per_hour` | 10 | Hourly reply limit |
+| `recent_post_context_enabled` | true | Show AI recent posts for anti-repetition |
+| `recent_post_context_count` | 5 | Number of recent posts to show AI |
 
 ### Error Recovery Behavior
 - **Rate Limits (429)**: Exponential backoff with jitter, resets on success
