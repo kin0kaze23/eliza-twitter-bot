@@ -107,6 +107,13 @@ The bot uses a simplified credential flow similar to ElizaOS:
 | `recent_post_context_enabled` | true | Show AI recent posts for anti-repetition |
 | `recent_post_context_count` | 5 | Number of recent posts to show AI |
 
+### Atomic Posting Lock (Prevents Double Posts)
+The scheduler uses an atomic database lock to prevent race conditions:
+- `lastPostAttemptAt` column tracks when posting STARTED (not finished)
+- `acquirePostingLock()` performs atomic UPDATE that only succeeds if interval has elapsed
+- `shouldTriggerPost()` checks both `lastPostAttemptAt` and `lastPostedAt`
+- Prevents multiple scheduler ticks from entering posting flow simultaneously
+
 ### Error Recovery Behavior
 - **Rate Limits (429)**: Exponential backoff with jitter, resets on success
 - **Permission Errors**: 1-hour backoff, does NOT clear cookies (account restriction, not auth failure)
