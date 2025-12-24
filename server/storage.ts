@@ -92,6 +92,16 @@ export interface IStorage {
   getRecentActivityLogs(limit?: number): Promise<ActivityLog[]>;
   getRecentSuccessfulPosts(agentId: string, limit?: number): Promise<ActivityLog[]>;
   createActivityLog(log: InsertActivityLog): Promise<ActivityLog>;
+  getPostingHealthStats(agentId: string, hours?: number): Promise<{
+    totalPosts: number;
+    successfulPosts: number;
+    failedPosts: number;
+    successRate: number;
+    lastSuccessfulPost: Date | null;
+    lastFailedPost: Date | null;
+    timeSinceLastPost: number | null;
+    recentErrors: string[];
+  }>;
   
   // Bible Verse Tracking
   getRecentVerseUsages(agentId: string, limit?: number): Promise<BibleVerseUsage[]>;
@@ -589,6 +599,53 @@ export class DbStorage implements IStorage {
       )
       .orderBy(desc(activityLogs.createdAt))
       .limit(limit);
+  }
+
+  async getPostingHealthStats(agentId: string, hours: number = 24): Promise<{
+    totalPosts: number;
+    successfulPosts: number;
+    failedPosts: number;
+    successRate: number;
+    lastSuccessfulPost: Date | null;
+    lastFailedPost: Date | null;
+    timeSinceLastPost: number | null;
+    recentErrors: string[];
+  }> {
+    const cutoffTime = new Date(Date.now() - hours * 60 * 60 * 1000);
+    
+    const posts = await db
+      .select()
+      .from(activityLogs)
+      .where(
+        and(
+          eq(activityLogs.agentId, agentId),
+          eq(activityLogs.eventType, "post"),
+          sql`${activityLogs.createdAt} >= ${cutoffTime}`
+        )
+      )
+      .orderBy(desc(activityLogs.createdAt));
+    
+    const successfulPosts = posts.filter(p => p.status === "success");
+    const failedPosts = posts.filter(p => p.status === "failed");
+    
+    const lastSuccessful = successfulPosts[0]?.createdAt || null;
+    const lastFailed = failedPosts[0]?.createdAt || null;
+    
+    const recentErrors = failedPosts
+      .slice(0, 5)
+      .map(p => p.errorMessage || "Unknown error")
+      .filter(e => e !== "Unknown error");
+    
+    return {
+      totalPosts: posts.length,
+      successfulPosts: successfulPosts.length,
+      failedPosts: failedPosts.length,
+      successRate: posts.length > 0 ? (successfulPosts.length / posts.length) * 100 : 0,
+      lastSuccessfulPost: lastSuccessful,
+      lastFailedPost: lastFailed,
+      timeSinceLastPost: lastSuccessful ? Date.now() - new Date(lastSuccessful).getTime() : null,
+      recentErrors,
+    };
   }
 
   async createActivityLog(log: InsertActivityLog): Promise<ActivityLog> {

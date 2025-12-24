@@ -1451,6 +1451,134 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // AGENT HEALTH MONITORING ENDPOINTS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Get comprehensive agent health status (credentials + posting)
+  app.get("/api/agents/:agentId/health", async (req, res) => {
+    try {
+      const { agentId } = req.params;
+      const agent = await storage.getAgent(agentId);
+      
+      if (!agent) {
+        return res.status(404).json({ error: "Agent not found" });
+      }
+
+      // Check credential status
+      const hasApiCreds = !!(agent.twitterApiKey && agent.twitterApiSecret && 
+                           agent.twitterAccessToken && agent.twitterAccessSecret);
+      const hasScraperCreds = !!(agent.twitterUsername && agent.twitterPassword);
+      const hasCookies = !!(agent.twitterCookies && agent.twitterCookies.trim() !== '');
+
+      // Get posting health stats (last 24 hours)
+      const postingStats = await storage.getPostingHealthStats(agentId, 24);
+
+      // Calculate posting interval
+      const postFrequency = agent.postFrequency || 1;
+      const postInterval = agent.postInterval || "hours";
+      const intervalMs = postInterval === "minutes" 
+        ? postFrequency * 60 * 1000 
+        : postFrequency * 60 * 60 * 1000;
+
+      // Determine if posting is stalled
+      const expectedPostTime = intervalMs * 2; // 2x interval = stalled
+      const isPostingStalled = postingStats.timeSinceLastPost !== null && 
+                               postingStats.timeSinceLastPost > expectedPostTime &&
+                               agent.status === "deployed" &&
+                               agent.postingEnabled;
+
+      // Determine overall health status
+      let healthStatus: "healthy" | "warning" | "critical" = "healthy";
+      const issues: string[] = [];
+
+      if (!hasApiCreds && !hasScraperCreds && !hasCookies) {
+        healthStatus = "critical";
+        issues.push("No Twitter credentials configured");
+      }
+
+      if (agent.status !== "deployed") {
+        healthStatus = healthStatus === "critical" ? "critical" : "warning";
+        issues.push(`Agent status is "${agent.status}" - not actively posting`);
+      }
+
+      if (!agent.postingEnabled) {
+        healthStatus = healthStatus === "critical" ? "critical" : "warning";
+        issues.push("Posting is disabled");
+      }
+
+      if (isPostingStalled) {
+        healthStatus = "critical";
+        issues.push(`Posting stalled - no successful post in ${Math.round((postingStats.timeSinceLastPost || 0) / 3600000)}+ hours`);
+      }
+
+      if (postingStats.failedPosts > 0 && postingStats.successRate < 50) {
+        healthStatus = healthStatus === "critical" ? "critical" : "warning";
+        issues.push(`High failure rate: ${postingStats.failedPosts} failed posts (${Math.round(postingStats.successRate)}% success rate)`);
+      }
+
+      res.json({
+        agentId,
+        agentName: agent.name,
+        status: agent.status,
+        healthStatus,
+        issues,
+        credentials: {
+          hasApiCredentials: hasApiCreds,
+          hasScraperCredentials: hasScraperCreds,
+          hasCookies,
+          canPost: hasApiCreds || hasCookies || hasScraperCreds,
+        },
+        posting: {
+          enabled: agent.postingEnabled,
+          frequency: `${postFrequency} ${postInterval}`,
+          intervalMs,
+          ...postingStats,
+          isStalled: isPostingStalled,
+          lastPostedAt: agent.lastPostedAt,
+          lastPostAttemptAt: agent.lastPostAttemptAt,
+        },
+        replies: {
+          enabled: agent.replyEnabled,
+          rate: agent.replyRate,
+          maxPerHour: agent.maxRepliesPerHour,
+        },
+        checkedAt: new Date().toISOString(),
+      });
+
+    } catch (error: any) {
+      console.error("Error getting agent health:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get posting health stats only
+  app.get("/api/agents/:agentId/health/posting", async (req, res) => {
+    try {
+      const { agentId } = req.params;
+      const hours = parseInt(req.query.hours as string) || 24;
+      
+      const agent = await storage.getAgent(agentId);
+      if (!agent) {
+        return res.status(404).json({ error: "Agent not found" });
+      }
+
+      const stats = await storage.getPostingHealthStats(agentId, hours);
+      
+      res.json({
+        agentId,
+        agentName: agent.name,
+        hours,
+        ...stats,
+        lastPostedAt: agent.lastPostedAt,
+        lastPostAttemptAt: agent.lastPostAttemptAt,
+      });
+
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Test AI Model API key and fetch available models
   app.post("/api/agents/:agentId/test/model", async (req, res) => {
     try {
