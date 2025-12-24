@@ -13,9 +13,12 @@ import {
   WifiOff,
   Activity,
   TrendingUp,
-  TrendingDown
+  TrendingDown,
+  RotateCcw
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { useMutation } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 
 interface AgentHealthData {
   agentId: string;
@@ -113,6 +116,7 @@ function formatDuration(ms: number): string {
 }
 
 export function AgentHealthDashboard({ agentId }: AgentHealthDashboardProps) {
+  const { toast } = useToast();
   const { data: health, isLoading, error, refetch } = useQuery<AgentHealthData>({
     queryKey: ["/api/agents", agentId, "health"],
     queryFn: async () => {
@@ -121,6 +125,28 @@ export function AgentHealthDashboard({ agentId }: AgentHealthDashboardProps) {
       return res.json();
     },
     refetchInterval: 30000,
+  });
+
+  const { mutate: recoverAgent, isPending: isRecovering } = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/agents/${agentId}/recover`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed to recover agent");
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Agent Recovered",
+        description: "All failure counters reset. Agent will retry posting with fresh authentication.",
+      });
+      refetch();
+    },
+    onError: () => {
+      toast({
+        title: "Recovery Failed",
+        description: "Unable to recover agent. Check error logs.",
+        variant: "destructive",
+      });
+    },
   });
 
   if (isLoading) {
@@ -184,16 +210,38 @@ export function AgentHealthDashboard({ agentId }: AgentHealthDashboardProps) {
       </CardHeader>
       <CardContent className="space-y-4">
         {health.issues.length > 0 && (
-          <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
-            <p className="text-sm font-medium text-destructive mb-2">Issues Detected:</p>
-            <ul className="text-sm text-destructive/80 space-y-1">
-              {health.issues.map((issue, i) => (
-                <li key={i} className="flex items-start gap-2">
-                  <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                  {issue}
-                </li>
-              ))}
-            </ul>
+          <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3 space-y-3">
+            <div>
+              <p className="text-sm font-medium text-destructive mb-2">Issues Detected:</p>
+              <ul className="text-sm text-destructive/80 space-y-1">
+                {health.issues.map((issue, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                    {issue}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            
+            {health.healthStatus === "critical" && (
+              <div className="pt-2 border-t border-destructive/20">
+                <p className="text-xs text-destructive/80 mb-2">
+                  {health.posting.failedPosts > 3 
+                    ? "High failure rate detected. Check Twitter Developer Portal for API permissions."
+                    : "Agent recovery needed. Click the button to reset failure counters and retry."}
+                </p>
+                <Button
+                  size="sm"
+                  onClick={() => recoverAgent()}
+                  disabled={isRecovering}
+                  className="w-full"
+                  data-testid="button-recover-agent"
+                >
+                  <RotateCcw className="h-3 w-3 mr-1" />
+                  {isRecovering ? "Recovering..." : "Recover Agent"}
+                </Button>
+              </div>
+            )}
           </div>
         )}
 

@@ -377,6 +377,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Agent recovery: Reset failure counters and circuit breaker
+  app.post("/api/agents/:id/recover", async (req, res) => {
+    try {
+      const agent = await storage.getAgent(req.params.id);
+      if (!agent) {
+        return res.status(404).json({ error: "Agent not found" });
+      }
+      
+      // Clear cached session cookies to force fresh authentication
+      await storage.updateAgent(req.params.id, {
+        twitterCookies: null,
+      });
+      
+      // Reset all failure counters and circuit breaker state
+      await storage.recoverAgent(req.params.id);
+      
+      res.json({
+        message: "Agent recovered successfully",
+        action: "All failure counters and circuit breaker state have been reset. Session cookies cleared. Agent will attempt fresh authentication on next post.",
+      });
+    } catch (error) {
+      console.error("Error recovering agent:", error);
+      res.status(500).json({ error: "Failed to recover agent" });
+    }
+  });
+
   // ============= KNOWLEDGE BASE ============= //
 
   // Get knowledge base entries for an agent

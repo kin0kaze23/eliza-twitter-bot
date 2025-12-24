@@ -1114,6 +1114,29 @@ export class DbStorage implements IStorage {
     
     await this.saveSchedulerState(agentId, updates);
   }
+  
+  // Recovery: Reset all failure counters and circuit breaker state
+  async recoverAgent(agentId: string): Promise<void> {
+    // Reset scheduler state completely
+    await this.saveSchedulerState(agentId, {
+      apiFailureCount: 0,
+      scraperFailureCount: 0,
+      apiBackoffUntil: null,
+      scraperBackoffUntil: null,
+      rateLimitBackoffUntil: null,
+      consecutiveFailures: 0,
+    });
+    
+    // Clear session cookies to force re-authentication
+    const agent = await this.getAgent(agentId);
+    if (agent) {
+      await this.updateAgent(agentId, {
+        twitterCookies: null,
+      });
+    }
+    
+    console.log(`[Recovery] Agent ${agentId} recovered - all failure counters reset`);
+  }
 }
 
 export const storage = new DbStorage();
