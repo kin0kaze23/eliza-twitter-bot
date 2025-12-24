@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentActivity } from "@shared/schema";
 import { useState } from "react";
 import { BarChart, Activity, TrendingUp, Zap, AlertCircle, Database, Calendar } from "lucide-react";
+import { AgentHealthDashboard } from "@/components/agent-health-dashboard";
 
 const DATE_RANGES = {
   today: "Today",
@@ -142,6 +143,8 @@ export default function Monitoring() {
 
       {selectedAgentId && (
         <>
+          <AgentHealthDashboard agentId={selectedAgentId} />
+          
           {selectedAgent && (
             <Card>
               <CardHeader>
