@@ -601,7 +601,12 @@ export const schedulerState = pgTable("scheduler_state", {
   preferredAuthMethod: text("preferred_auth_method").default("api"), // 'api' or 'scraper'
   apiFailureCount: integer("api_failure_count").default(0).notNull(),
   scraperFailureCount: integer("scraper_failure_count").default(0).notNull(),
+  apiBackoffUntil: timestamp("api_backoff_until"),
+  scraperBackoffUntil: timestamp("scraper_backoff_until"),
   circuitBreakerTrippedAt: timestamp("circuit_breaker_tripped_at"),
+  
+  // Diversity tracking
+  lastDiversityCheck: timestamp("last_diversity_check"),
   
   // Timestamps
   createdAt: timestamp("created_at").defaultNow().notNull(),

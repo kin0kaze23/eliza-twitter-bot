@@ -75,7 +75,8 @@ const consecutiveFailures = new Map<string, number>(); // Track failures per age
 const SAFE_MODE_FAILURE_THRESHOLD = 5;
 
 // Diversity alert thresholds - auto-pause if content becomes too repetitive
-const DIVERSITY_ALERT_THRESHOLD = 40;
+const DIVERSITY_WARNING_THRESHOLD = 60; // Warn when diversity drops below 60%
+const DIVERSITY_PAUSE_THRESHOLD = 40; // Auto-pause when diversity drops below 40%
 const DIVERSITY_CHECK_INTERVAL_MS = 30 * 60 * 1000; // Check every 30 minutes
 const lastDiversityCheck = new Map<string, Date>();
 
@@ -134,6 +135,12 @@ async function loadSchedulerState(agentId: string): Promise<void> {
       console.log(`[Scheduler] Restored ${tweets.length} tracked tweets for agent ${agentId}`);
     }
     
+    // Restore last diversity check timestamp
+    if (dbState.lastDiversityCheck) {
+      lastDiversityCheck.set(agentId, new Date(dbState.lastDiversityCheck));
+      console.log(`[Scheduler] Restored diversity check timestamp for agent ${agentId}`);
+    }
+    
     console.log(`[Scheduler] Loaded persisted state for agent ${agentId}`);
   } catch (error) {
     console.error(`[Scheduler] Error loading state for agent ${agentId}:`, error);
@@ -150,6 +157,7 @@ async function saveSchedulerState(agentId: string): Promise<void> {
     
     const replyData = state.repliesThisHour.get(agentId);
     const recentTweets = state.recentBotTweets.get(agentId) || [];
+    const diversityCheck = lastDiversityCheck.get(agentId);
     
     await storage.saveSchedulerState(agentId, {
       lastPostTime: state.lastPostTime.get(agentId) || null,
@@ -164,6 +172,7 @@ async function saveSchedulerState(agentId: string): Promise<void> {
         postedAt: t.postedAt.toISOString(),
         lastReplyId: t.lastReplyId,
       })),
+      lastDiversityCheck: diversityCheck || null,
     });
   } catch (error) {
     console.error(`[Scheduler] Error saving state for agent ${agentId}:`, error);
@@ -198,34 +207,35 @@ async function checkDiversityAlerts(agent: Agent): Promise<boolean> {
     const maxTypes = 7; // Total content types available
     const diversityScore = Math.round((uniqueTypes / maxTypes) * 100);
     
-    if (diversityScore < DIVERSITY_ALERT_THRESHOLD) {
-      console.log(`[Scheduler] DIVERSITY ALERT: Agent ${agent.name} has diversity score of ${diversityScore}% (threshold: ${DIVERSITY_ALERT_THRESHOLD}%)`);
+    // Auto-pause at 40% threshold (most severe)
+    if (diversityScore < DIVERSITY_PAUSE_THRESHOLD) {
+      console.log(`[Scheduler] AUTO-PAUSING agent ${agent.name} due to critically low diversity (${diversityScore}%)`);
+      await storage.updateAgentStatus(agent.id, "paused");
       
-      // Log the alert
+      await logActivity({
+        agentId: agent.id,
+        eventType: "safe_mode",
+        status: "paused",
+        content: `Agent auto-paused due to critically low content diversity (${diversityScore}%)`,
+        errorMessage: `Only ${uniqueTypes} of ${maxTypes} content types used in recent posts`,
+        errorCode: "DIVERSITY_PAUSE",
+      });
+      
+      return false; // Stop posting
+    }
+    
+    // Warn at 60% threshold
+    if (diversityScore < DIVERSITY_WARNING_THRESHOLD) {
+      console.log(`[Scheduler] DIVERSITY WARNING: Agent ${agent.name} has diversity score of ${diversityScore}% (threshold: ${DIVERSITY_WARNING_THRESHOLD}%)`);
+      
       await logActivity({
         agentId: agent.id,
         eventType: "error",
         status: "failed",
-        content: `DIVERSITY ALERT: Content diversity dropped to ${diversityScore}%`,
+        content: `DIVERSITY WARNING: Content diversity dropped to ${diversityScore}%`,
         errorMessage: `Only ${uniqueTypes} of ${maxTypes} content types used in recent posts`,
         errorCode: "LOW_DIVERSITY",
       });
-      
-      // Auto-pause if very low
-      if (diversityScore < 25) {
-        console.log(`[Scheduler] AUTO-PAUSING agent ${agent.name} due to critically low diversity (${diversityScore}%)`);
-        await storage.updateAgentStatus(agent.id, "paused");
-        
-        await logActivity({
-          agentId: agent.id,
-          eventType: "safe_mode",
-          status: "failed",
-          content: `Agent auto-paused due to critically low content diversity (${diversityScore}%)`,
-          errorCode: "DIVERSITY_PAUSE",
-        });
-        
-        return false; // Stop posting
-      }
     }
     
     return true; // Continue posting
@@ -875,32 +885,80 @@ async function executePost(agent: Agent): Promise<void> {
     
     console.log(`[Scheduler] Posting to Twitter for agent: ${agent.name}`);
     
-    // Try API first if available, otherwise use scraper
-    let result: { success: boolean; tweetId?: string; error?: string; errorCode?: string; rateLimited?: boolean };
+    // Get circuit breaker state to check which methods are in backoff
+    const circuitBreaker = await storage.getCircuitBreakerState(agent.id);
+    const apiInBackoff = circuitBreaker?.apiBackoffUntil && new Date(circuitBreaker.apiBackoffUntil) > new Date();
+    const scraperInBackoff = circuitBreaker?.scraperBackoffUntil && new Date(circuitBreaker.scraperBackoffUntil) > new Date();
     
-    if (hasApi) {
+    // Determine which methods to try based on credentials AND circuit breaker state
+    const useApi = hasApi && !apiInBackoff;
+    const useScraper = hasScraper && !scraperInBackoff;
+    
+    if (apiInBackoff) {
+      console.log(`[Scheduler] API method in circuit breaker backoff until ${circuitBreaker?.apiBackoffUntil}`);
+    }
+    if (scraperInBackoff) {
+      console.log(`[Scheduler] Scraper method in circuit breaker backoff until ${circuitBreaker?.scraperBackoffUntil}`);
+    }
+    
+    // Try posting with circuit breaker-aware method selection
+    let result: { success: boolean; tweetId?: string; error?: string; errorCode?: string; rateLimited?: boolean };
+    let methodUsed: 'api' | 'scraper' | null = null;
+    
+    if (useApi) {
       // Use official Twitter API
+      methodUsed = 'api';
       result = await postTweet(agent, cleanedContent);
       
-      // If API fails and scraper is available, try scraper as fallback
-      if (!result.success && hasScraper) {
+      // Record circuit breaker success/failure
+      if (result.success) {
+        await storage.recordCircuitBreakerSuccess(agent.id, 'api');
+      } else {
+        await storage.recordCircuitBreakerFailure(agent.id, 'api');
+      }
+      
+      // If API fails and scraper is available (not in backoff), try scraper as fallback
+      if (!result.success && useScraper) {
         console.log(`[Scheduler] API failed, trying scraper fallback for ${agent.name}`);
+        methodUsed = 'scraper';
         const scraperResult = await sendTweetViaScraper(agent, cleanedContent);
+        
+        // Record circuit breaker result for scraper
         if (scraperResult.success) {
+          await storage.recordCircuitBreakerSuccess(agent.id, 'scraper');
           result = {
             success: true,
             tweetId: scraperResult.tweetId,
           };
+        } else {
+          await storage.recordCircuitBreakerFailure(agent.id, 'scraper');
         }
       }
-    } else {
-      // No API credentials, use scraper
+    } else if (useScraper) {
+      // API unavailable or in backoff, use scraper
+      methodUsed = 'scraper';
       const scraperResult = await sendTweetViaScraper(agent, cleanedContent);
+      
+      // Record circuit breaker result
+      if (scraperResult.success) {
+        await storage.recordCircuitBreakerSuccess(agent.id, 'scraper');
+      } else {
+        await storage.recordCircuitBreakerFailure(agent.id, 'scraper');
+      }
+      
       result = {
         success: scraperResult.success,
         tweetId: scraperResult.tweetId,
         error: scraperResult.error,
         errorCode: scraperResult.error ? 'SCRAPER_ERROR' : undefined,
+      };
+    } else {
+      // Both methods in backoff or unavailable
+      console.log(`[Scheduler] All posting methods unavailable or in backoff for ${agent.name}`);
+      result = {
+        success: false,
+        error: 'All posting methods in circuit breaker backoff',
+        errorCode: 'ALL_METHODS_IN_BACKOFF',
       };
     }
     
@@ -1019,6 +1077,13 @@ async function executePost(agent: Agent): Promise<void> {
       });
       
       console.error(`[Scheduler] Failed to post: ${result.error}`);
+      
+      // Save state after failure to persist backoff and failure counters
+      try {
+        await saveSchedulerState(agent.id);
+      } catch (err) {
+        console.error(`[Scheduler] Failed to save state after failure:`, err);
+      }
       
       // SAFE MODE: Auto-pause agent after too many consecutive auth/permission failures
       const isAuthFailure = Boolean(
@@ -1334,30 +1399,66 @@ async function processMention(agent: Agent, mention: TwitterMention, mentionType
     const replyText = await generateReply(agent, mention);
     
     // Post the reply - use API first, fall back to scraper (consistent with posting)
+    // Check circuit breaker state to honor backoff windows
     const hasApi = hasApiCredentials(agent);
     const hasScraper = hasScraperCredentials(agent);
     
+    const circuitBreaker = await storage.getCircuitBreakerState(agent.id);
+    const apiInBackoff = circuitBreaker?.apiBackoffUntil && new Date(circuitBreaker.apiBackoffUntil) > new Date();
+    const scraperInBackoff = circuitBreaker?.scraperBackoffUntil && new Date(circuitBreaker.scraperBackoffUntil) > new Date();
+    
+    const useApi = hasApi && !apiInBackoff;
+    const useScraper = hasScraper && !scraperInBackoff;
+    
+    if (apiInBackoff) {
+      console.log(`[MentionBot] API in circuit breaker backoff, skipping API`);
+    }
+    if (scraperInBackoff) {
+      console.log(`[MentionBot] Scraper in circuit breaker backoff, skipping scraper`);
+    }
+    
     let result: { success: boolean; tweetId?: string; error?: string };
     
-    if (hasApi) {
+    if (useApi) {
       result = await replyToTweet(agent, replyText, mention.id);
       
-      // If API fails and scraper is available, try scraper as fallback
-      if (!result.success && hasScraper) {
+      // Record circuit breaker result
+      if (result.success) {
+        await storage.recordCircuitBreakerSuccess(agent.id, 'api');
+      } else {
+        await storage.recordCircuitBreakerFailure(agent.id, 'api');
+      }
+      
+      // If API fails and scraper is available (not in backoff), try scraper as fallback
+      if (!result.success && useScraper) {
         console.log(`[MentionBot] API reply failed, trying scraper fallback`);
         const scraperResult = await sendReplyViaScraper(agent, replyText, mention.id);
         if (scraperResult.success) {
+          await storage.recordCircuitBreakerSuccess(agent.id, 'scraper');
           result = { success: true, tweetId: scraperResult.tweetId };
+        } else {
+          await storage.recordCircuitBreakerFailure(agent.id, 'scraper');
         }
       }
-    } else if (hasScraper) {
-      // No API credentials, use scraper directly
+    } else if (useScraper) {
+      // No API credentials or API in backoff, use scraper
       const scraperResult = await sendReplyViaScraper(agent, replyText, mention.id);
+      
+      // Record circuit breaker result
+      if (scraperResult.success) {
+        await storage.recordCircuitBreakerSuccess(agent.id, 'scraper');
+      } else {
+        await storage.recordCircuitBreakerFailure(agent.id, 'scraper');
+      }
+      
       result = {
         success: scraperResult.success,
         tweetId: scraperResult.tweetId,
         error: scraperResult.error,
       };
+    } else if (!useApi && !useScraper && (hasApi || hasScraper)) {
+      // Both methods in backoff
+      result = { success: false, error: "All methods in circuit breaker backoff" };
     } else {
       result = { success: false, error: "No Twitter credentials available" };
     }

@@ -133,6 +133,38 @@ The scheduler automatically pauses agents after repeated authentication failures
 - **Failure Reset**: Consecutive failure counter resets when agent is stopped or restarted
 - **Logged Events**: `safe_mode` eventType with `SAFE_MODE_TRIGGERED` errorCode in activity logs
 
+### Scheduler State Persistence
+The scheduler persists its state to survive server restarts:
+- **Database Table**: `scheduler_state` stores posting history, rate limit backoff, circuit breaker state, and recent tweets
+- **Saved On**: Successful posts, failed posts, and agent stop
+- **Restored On**: Agent startup via `loadSchedulerState()`
+- **Fields Persisted**:
+  - `lastPostTime`, `postsToday`, `postsResetDate`
+  - `rateLimitBackoffUntil`, `consecutiveFailures`
+  - `repliesThisHour`, `repliesHourStart`
+  - `recentBotTweets` (JSON array for comment detection)
+  - `apiBackoffUntil`, `scraperBackoffUntil` (circuit breaker)
+  - `lastDiversityCheck`
+
+### Circuit Breaker System
+Automatically switches between API and scraper methods after repeated failures:
+- **Failure Threshold**: 3 consecutive failures triggers 30-minute backoff
+- **Method Selection**: Checks `apiBackoffUntil`/`scraperBackoffUntil` before selecting auth method
+- **Success Reset**: Resets failure count and backoff on successful operation
+- **Coverage**: Both posting and reply flows use circuit breaker protection
+- **Storage Methods**: 
+  - `getCircuitBreakerState()` - Returns current backoff windows
+  - `recordCircuitBreakerFailure()` - Increments failures, sets backoff after threshold
+  - `recordCircuitBreakerSuccess()` - Resets counters on success
+
+### Diversity Auto-Alerts
+Monitors content diversity and auto-pauses agents when content becomes repetitive:
+- **Warning Threshold**: 60% - Logs warning when diversity drops below 60%
+- **Pause Threshold**: 40% - Auto-pauses agent when diversity drops below 40%
+- **Check Interval**: Every 30 minutes to avoid database overhead
+- **Metric**: Percentage of unique content types used in recent 50 posts
+- **Persistence**: `lastDiversityCheck` timestamp survives restarts
+
 ### Health Monitoring System
 Real-time agent health monitoring via API and UI dashboard:
 - **API Endpoint**: `GET /api/agents/:agentId/health` returns comprehensive health data

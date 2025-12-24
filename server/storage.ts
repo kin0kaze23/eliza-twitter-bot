@@ -914,6 +914,9 @@ export class DbStorage implements IStorage {
     if (updates.apiFailureCount !== undefined) updateObj.apiFailureCount = updates.apiFailureCount;
     if (updates.scraperFailureCount !== undefined) updateObj.scraperFailureCount = updates.scraperFailureCount;
     if (updates.circuitBreakerTrippedAt !== undefined) updateObj.circuitBreakerTrippedAt = updates.circuitBreakerTrippedAt;
+    if (updates.apiBackoffUntil !== undefined) updateObj.apiBackoffUntil = updates.apiBackoffUntil;
+    if (updates.scraperBackoffUntil !== undefined) updateObj.scraperBackoffUntil = updates.scraperBackoffUntil;
+    if (updates.lastDiversityCheck !== undefined) updateObj.lastDiversityCheck = updates.lastDiversityCheck;
     
     if (existing) {
       const result = await db
@@ -940,6 +943,9 @@ export class DbStorage implements IStorage {
         apiFailureCount: updates.apiFailureCount ?? 0,
         scraperFailureCount: updates.scraperFailureCount ?? 0,
         circuitBreakerTrippedAt: updates.circuitBreakerTrippedAt ?? null,
+        apiBackoffUntil: updates.apiBackoffUntil ?? null,
+        scraperBackoffUntil: updates.scraperBackoffUntil ?? null,
+        lastDiversityCheck: updates.lastDiversityCheck ?? null,
       })
       .returning();
     return result[0];
@@ -1009,6 +1015,71 @@ export class DbStorage implements IStorage {
   async getPreferredAuthMethod(agentId: string): Promise<'api' | 'scraper'> {
     const state = await this.getSchedulerState(agentId);
     return (state?.preferredAuthMethod as 'api' | 'scraper') || 'api';
+  }
+  
+  // Circuit breaker methods for scheduler integration
+  async getCircuitBreakerState(agentId: string): Promise<{
+    apiBackoffUntil: Date | null;
+    scraperBackoffUntil: Date | null;
+    apiFailureCount: number;
+    scraperFailureCount: number;
+    preferredMethod: 'api' | 'scraper';
+  } | null> {
+    const state = await this.getSchedulerState(agentId);
+    if (!state) return null;
+    
+    return {
+      apiBackoffUntil: state.apiBackoffUntil,
+      scraperBackoffUntil: state.scraperBackoffUntil,
+      apiFailureCount: state.apiFailureCount,
+      scraperFailureCount: state.scraperFailureCount,
+      preferredMethod: (state.preferredAuthMethod as 'api' | 'scraper') || 'api',
+    };
+  }
+  
+  async recordCircuitBreakerFailure(agentId: string, method: 'api' | 'scraper'): Promise<void> {
+    const FAILURE_THRESHOLD = 3;
+    const BACKOFF_DURATION_MS = 30 * 60 * 1000; // 30 minutes
+    
+    const state = await this.getSchedulerState(agentId);
+    const now = new Date();
+    
+    let updates: Partial<InsertSchedulerState> = {};
+    
+    if (method === 'api') {
+      const newCount = (state?.apiFailureCount || 0) + 1;
+      updates.apiFailureCount = newCount;
+      
+      // Trip circuit breaker after threshold
+      if (newCount >= FAILURE_THRESHOLD) {
+        updates.apiBackoffUntil = new Date(now.getTime() + BACKOFF_DURATION_MS);
+        console.log(`[CircuitBreaker] API method in backoff for ${agentId} until ${updates.apiBackoffUntil.toISOString()}`);
+      }
+    } else {
+      const newCount = (state?.scraperFailureCount || 0) + 1;
+      updates.scraperFailureCount = newCount;
+      
+      if (newCount >= FAILURE_THRESHOLD) {
+        updates.scraperBackoffUntil = new Date(now.getTime() + BACKOFF_DURATION_MS);
+        console.log(`[CircuitBreaker] Scraper method in backoff for ${agentId} until ${updates.scraperBackoffUntil.toISOString()}`);
+      }
+    }
+    
+    await this.saveSchedulerState(agentId, updates);
+  }
+  
+  async recordCircuitBreakerSuccess(agentId: string, method: 'api' | 'scraper'): Promise<void> {
+    let updates: Partial<InsertSchedulerState> = {};
+    
+    if (method === 'api') {
+      updates.apiFailureCount = 0;
+      updates.apiBackoffUntil = null;
+    } else {
+      updates.scraperFailureCount = 0;
+      updates.scraperBackoffUntil = null;
+    }
+    
+    await this.saveSchedulerState(agentId, updates);
   }
 }
 
