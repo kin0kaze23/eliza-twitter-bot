@@ -13,6 +13,7 @@ import { sendPostCreatedWebhook, sendPostFailedWebhook } from "./webhook";
 import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
 import { requireAuth, verifyPassword, hashPassword } from "./auth";
 import { verifyScraperCredentials, validateSessionCookies, sendTweetViaScraper } from "./twitterScraper";
+import { startAgentKbRefresh, stopAgentKbRefresh, refreshKnowledgeBaseForAgent } from "./kbRefresh";
 
 /**
  * Strip content type labels and decorative elements from generated content
@@ -221,6 +222,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
+      
+      // Handle KB auto-refresh service updates
+      const kbAutoRefreshChanged = req.body.kbAutoRefreshEnabled !== undefined || req.body.kbAutoRefreshIntervalHours !== undefined;
+      if (kbAutoRefreshChanged) {
+        if (agent.kbAutoRefreshEnabled && agent.kbAutoRefreshIntervalHours) {
+          console.log(`[KB Refresh] Starting/restarting KB refresh for agent ${agent.id}`);
+          startAgentKbRefresh(agent);
+        } else {
+          console.log(`[KB Refresh] Stopping KB refresh for agent ${agent.id}`);
+          stopAgentKbRefresh(agent.id);
+        }
+      }
+      
       res.json(agent);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -329,10 +343,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
+      
+      // Restart KB refresh when agent is deployed/activated
+      if (status === "deployed" && agent.kbAutoRefreshEnabled && agent.kbAutoRefreshIntervalHours) {
+        console.log(`[KB Refresh] Restarting KB refresh for deployed agent ${agent.id}`);
+        startAgentKbRefresh(agent);
+      }
+      
       res.json(agent);
     } catch (error) {
       console.error("Error updating agent status:", error);
       res.status(500).json({ error: "Failed to update agent status" });
+    }
+  });
+
+  // Manual KB refresh endpoint
+  app.post("/api/agents/:id/refresh-kb", async (req, res) => {
+    try {
+      const agent = await storage.getAgent(req.params.id);
+      if (!agent) {
+        return res.status(404).json({ error: "Agent not found" });
+      }
+      
+      const result = await refreshKnowledgeBaseForAgent(req.params.id);
+      res.json({
+        message: "Knowledge base refresh completed",
+        refreshed: result.refreshed,
+        errors: result.errors,
+      });
+    } catch (error) {
+      console.error("Error refreshing KB:", error);
+      res.status(500).json({ error: "Failed to refresh knowledge base" });
     }
   });
 
