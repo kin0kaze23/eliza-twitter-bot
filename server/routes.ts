@@ -1516,6 +1516,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         healthStatus = healthStatus === "critical" ? "critical" : "warning";
         issues.push(`High failure rate: ${postingStats.failedPosts} failed posts (${Math.round(postingStats.successRate)}% success rate)`);
       }
+      
+      // Check for safe mode activation (agent paused due to repeated auth failures)
+      let safeModeActivated = false;
+      let safeModeReason = "";
+      if (agent.status === "paused") {
+        // Check recent activity logs for safe_mode event
+        const recentLogs = await storage.getActivityLogs(agentId, 10);
+        const safeModeLog = recentLogs.find(log => log.eventType === "safe_mode");
+        if (safeModeLog) {
+          safeModeActivated = true;
+          safeModeReason = safeModeLog.errorMessage || "Agent auto-paused due to repeated authentication failures";
+          healthStatus = "critical";
+          issues.unshift(`SAFE MODE: ${safeModeReason}`);
+        }
+      }
 
       res.json({
         agentId,
@@ -1523,6 +1538,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: agent.status,
         healthStatus,
         issues,
+        safeModeActivated,
+        safeModeReason,
         credentials: {
           hasApiCredentials: hasApiCreds,
           hasScraperCredentials: hasScraperCreds,

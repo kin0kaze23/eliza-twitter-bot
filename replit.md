@@ -125,6 +125,23 @@ The scheduler uses an atomic database lock to prevent race conditions:
 2. **Replies**: API first → Scraper fallback if API fails
 3. **Mention Polling**: API first → Scraper fallback if API fails
 
+### Safe Mode Auto-Pause
+The scheduler automatically pauses agents after repeated authentication failures to prevent wasted API calls and potential account issues:
+- **Threshold**: 5 consecutive auth failures triggers safe mode
+- **Behavior**: Agent status changed to "paused", scheduler stops posting attempts
+- **Recovery**: User must fix credentials and manually redeploy the agent
+- **Failure Reset**: Consecutive failure counter resets when agent is stopped or restarted
+- **Logged Events**: `safe_mode` eventType with `SAFE_MODE_TRIGGERED` errorCode in activity logs
+
+### Health Monitoring System
+Real-time agent health monitoring via API and UI dashboard:
+- **API Endpoint**: `GET /api/agents/:agentId/health` returns comprehensive health data
+- **Credential Status**: Shows API credentials, session cookies, scraper login availability
+- **Posting Stats**: 24-hour success/failure counts, success rate percentage
+- **Stall Detection**: Alerts when posting has stopped unexpectedly (2x posting interval)
+- **Safe Mode Indicator**: Shows when agent was auto-paused due to auth failures
+- **UI Component**: `AgentHealthDashboard` component on Monitoring page with auto-refresh (30s)
+
 ## Troubleshooting
 
 ### "Not Permitted" Errors

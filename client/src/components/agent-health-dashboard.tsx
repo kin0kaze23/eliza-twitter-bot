@@ -23,6 +23,8 @@ interface AgentHealthData {
   status: string;
   healthStatus: "healthy" | "warning" | "critical";
   issues: string[];
+  safeModeActivated?: boolean;
+  safeModeReason?: string;
   credentials: {
     hasApiCredentials: boolean;
     hasScraperCredentials: boolean;
@@ -164,6 +166,12 @@ export function AgentHealthDashboard({ agentId }: AgentHealthDashboardProps) {
             <CardTitle className="flex items-center gap-2" data-testid="text-health-title">
               Agent Health
               <HealthStatusBadge status={health.healthStatus} />
+              {health.safeModeActivated && (
+                <Badge variant="destructive" className="gap-1">
+                  <AlertTriangle className="h-3 w-3" />
+                  Safe Mode
+                </Badge>
+              )}
             </CardTitle>
             <CardDescription>
               Real-time monitoring for {health.agentName}

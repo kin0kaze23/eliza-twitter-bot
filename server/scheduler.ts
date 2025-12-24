@@ -71,6 +71,9 @@ const MAX_RATE_LIMIT_BACKOFF_MS = 6 * 60 * 60 * 1000; // 6 hours max (prevents l
 const PERMISSION_ERROR_BACKOFF_MS = 60 * 60 * 1000; // 1 hour for "not permitted" errors
 const consecutiveFailures = new Map<string, number>(); // Track failures per agent for exponential backoff
 
+// Safe mode threshold - auto-pause agent after this many consecutive auth failures
+const SAFE_MODE_FAILURE_THRESHOLD = 5;
+
 const state: SchedulerState = {
   isRunning: false,
   activeAgents: new Map(),
@@ -624,8 +627,8 @@ OUTPUT: Write ONLY the tweet content, nothing else.`;
 
 async function logActivity(data: {
   agentId: string;
-  eventType: "post" | "reply" | "mention" | "error" | "scheduled";
-  status: "success" | "failed" | "rate_limited" | "pending";
+  eventType: "post" | "reply" | "mention" | "error" | "scheduled" | "safe_mode";
+  status: "success" | "failed" | "rate_limited" | "pending" | "paused";
   tweetId?: string;
   content?: string;
   characterCount?: number;
@@ -843,6 +846,42 @@ async function executePost(agent: Agent): Promise<void> {
       
       console.error(`[Scheduler] Failed to post: ${result.error}`);
       
+      // SAFE MODE: Auto-pause agent after too many consecutive auth/permission failures
+      const isAuthFailure = Boolean(
+        result.errorCode === "AUTH_FAILED" || 
+        result.errorCode === "AUTH_ERROR" ||
+        (result.error && (
+          result.error.includes("AUTH_FAILED") || 
+          result.error.includes("not permitted") ||
+          result.error.includes("Unauthorized") ||
+          result.error.includes("401")
+        ))
+      );
+      
+      if (isAuthFailure && failureCount >= SAFE_MODE_FAILURE_THRESHOLD) {
+        console.log(`[Scheduler] SAFE MODE: Agent ${agent.name} hit ${failureCount} consecutive auth failures. Auto-pausing to prevent further issues.`);
+        
+        try {
+          await storage.updateAgent(agent.id, { status: "paused" });
+          
+          // Stop the scheduler for this agent
+          stopAgent(agent.id);
+          
+          // Log the safe mode activation
+          await logActivity({
+            agentId: agent.id,
+            eventType: "safe_mode",
+            status: "paused",
+            errorMessage: `Agent auto-paused after ${failureCount} consecutive authentication failures. Last error: ${result.error}`,
+            errorCode: "SAFE_MODE_TRIGGERED",
+          });
+          
+          console.log(`[Scheduler] SAFE MODE: Agent ${agent.name} has been paused. User must fix credentials and manually redeploy.`);
+        } catch (safeModeErr) {
+          console.error(`[Scheduler] Failed to activate safe mode for ${agent.name}:`, safeModeErr);
+        }
+      }
+      
       if (agent.webhookEnabled && agent.webhookUrl) {
         sendPostFailedWebhook(agent, result.error || "Unknown error", cleanedContent).catch((err) =>
           console.error("Webhook error:", err)
@@ -947,6 +986,11 @@ export function stopAgent(agentId: string): void {
   }
   // Also stop mention polling
   stopMentionPolling(agentId);
+  
+  // Reset failure tracking when agent is stopped (allows clean restart)
+  consecutiveFailures.delete(agentId);
+  state.rateLimitBackoff.delete(agentId);
+  console.log(`[Scheduler] Cleared failure tracking for agent ${agentId}`);
 }
 
 // ============= MENTION POLLING SYSTEM ============= //
