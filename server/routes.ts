@@ -1596,6 +1596,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get content diversity stats for an agent
+  app.get("/api/agents/:agentId/content-diversity", async (req, res) => {
+    try {
+      const { agentId } = req.params;
+      const days = parseInt(req.query.days as string) || 7;
+      
+      const agent = await storage.getAgent(agentId);
+      if (!agent) {
+        return res.status(404).json({ error: "Agent not found" });
+      }
+
+      // Get content type usage stats
+      const contentTypeStats = await storage.getContentTypeRotationStatus(agentId);
+      
+      // Get recent verse usages
+      const verseWindow = (agent as any).verseReuseWindow || 30;
+      const recentVerses = await storage.getRecentVerseUsages(agentId, verseWindow);
+      
+      // Get recent posts with their content types and verses from activity logs
+      const recentPosts = await storage.getActivityLogs(agentId, 20);
+      const postsWithContent = recentPosts
+        .filter(log => log.eventType === 'post' && log.status === 'success')
+        .map(log => ({
+          tweetId: log.tweetId,
+          contentType: log.contentType,
+          bibleVerse: log.bibleVerse,
+          postedAt: log.postedAt || log.createdAt,
+        }));
+
+      // Calculate diversity scores
+      const uniqueContentTypes = new Set(postsWithContent.map(p => p.contentType).filter(Boolean));
+      const uniqueVerses = new Set(postsWithContent.map(p => p.bibleVerse).filter(Boolean));
+      const totalPosts = postsWithContent.length;
+      
+      const contentTypeDiversityScore = totalPosts > 0 
+        ? Math.round((uniqueContentTypes.size / Math.min(totalPosts, 7)) * 100) 
+        : 0;
+      
+      const verseDiversityScore = totalPosts > 0 && recentVerses.length > 0
+        ? Math.round((uniqueVerses.size / Math.max(recentVerses.length, 1)) * 100)
+        : 100; // 100% if no verses used (not repetitive)
+
+      res.json({
+        agentId,
+        agentName: agent.name,
+        contentTypes: {
+          recentTypes: contentTypeStats.recentTypes,
+          unusedTypes: contentTypeStats.unusedTypes,
+          allUsages: contentTypeStats.allUsages.slice(0, 10),
+          diversityScore: contentTypeDiversityScore,
+        },
+        verses: {
+          recentVerses: recentVerses.slice(0, 10).map(v => ({
+            verseRef: v.verseRef,
+            usageCount: v.usageCount,
+            lastUsedAt: v.lastUsedAt,
+          })),
+          uniqueVersesCount: recentVerses.length,
+          diversityScore: verseDiversityScore,
+        },
+        recentPosts: postsWithContent.slice(0, 10),
+        overallDiversityScore: Math.round((contentTypeDiversityScore + verseDiversityScore) / 2),
+        checkedAt: new Date().toISOString(),
+      });
+
+    } catch (error: any) {
+      console.error("Error getting content diversity stats:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Test AI Model API key and fetch available models
   app.post("/api/agents/:agentId/test/model", async (req, res) => {
     try {

@@ -639,6 +639,7 @@ async function logActivity(data: {
   errorCode?: string;
   postedAt?: Date;
   contentType?: string;
+  bibleVerse?: string;
 }): Promise<void> {
   try {
     await db.insert(activityLogs).values(data as any);
@@ -751,9 +752,11 @@ async function executePost(agent: Agent): Promise<void> {
       }
       
       // Extract and log Bible verses from the tweet (if verse tracking enabled)
+      let detectedVersesForLog: string[] = [];
       if (result.tweetId && agent.verseTrackingEnabled !== false) {
         const { extractVerses } = await import("./verseExtractor");
         const detectedVerses = extractVerses(cleanedContent);
+        detectedVersesForLog = detectedVerses.map(v => v.verseRef);
         for (const verse of detectedVerses) {
           await storage.logVerseUsage(
             agent.id,
@@ -766,7 +769,7 @@ async function executePost(agent: Agent): Promise<void> {
           );
         }
         if (detectedVerses.length > 0) {
-          console.log(`[Scheduler] Logged ${detectedVerses.length} verse(s): ${detectedVerses.map(v => v.verseRef).join(", ")}`);
+          console.log(`[Scheduler] Logged ${detectedVerses.length} verse(s): ${detectedVersesForLog.join(", ")}`);
         }
       }
       
@@ -788,6 +791,7 @@ async function executePost(agent: Agent): Promise<void> {
         kbEntriesUsed: generated.kbIds,
         postedAt: new Date(),
         contentType: contentTypeToLog,
+        bibleVerse: detectedVersesForLog.length > 0 ? detectedVersesForLog.join(", ") : undefined,
       });
       
       console.log(`[Scheduler] Posted successfully: ${result.tweetId}`);
