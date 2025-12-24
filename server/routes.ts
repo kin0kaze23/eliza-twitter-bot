@@ -1608,7 +1608,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Get content type usage stats
-      const contentTypeStats = await storage.getContentTypeRotationStatus(agentId);
+      const allContentTypes = [
+        "EVENT_BASED", "VERSE_REFLECTION", "DEEP_QUESTION", 
+        "WISDOM_BITE", "CULTURAL_INSIGHT", "ENCOURAGEMENT", "ETERNITY_ANCHOR"
+      ];
+      const contentTypeUsages = await storage.getRecentContentTypeUsages(agentId, 50);
+      const recentTypes = contentTypeUsages.slice(0, 7).map(u => u.contentType);
+      const usedTypesSet = new Set(contentTypeUsages.map(u => u.contentType));
+      const unusedTypes = allContentTypes.filter(t => !usedTypesSet.has(t));
       
       // Get recent verse usages
       const verseWindow = (agent as any).verseReuseWindow || 30;
@@ -1642,9 +1649,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         agentId,
         agentName: agent.name,
         contentTypes: {
-          recentTypes: contentTypeStats.recentTypes,
-          unusedTypes: contentTypeStats.unusedTypes,
-          allUsages: contentTypeStats.allUsages.slice(0, 10),
+          recentTypes,
+          unusedTypes,
+          allUsages: contentTypeUsages.slice(0, 10),
           diversityScore: contentTypeDiversityScore,
         },
         verses: {

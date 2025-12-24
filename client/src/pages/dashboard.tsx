@@ -38,6 +38,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 import type { Agent, ActivityLog } from "@shared/schema";
 import { AgentHealthDashboard } from "@/components/agent-health-dashboard";
+import { ContentDiversityStats } from "@/components/content-diversity-stats";
 
 type SchedulerStatus = {
   isRunning: boolean;
@@ -370,6 +371,9 @@ export default function Dashboard() {
 
       {/* Agent Health Dashboard */}
       <AgentHealthDashboard agentId={agent.id} />
+
+      {/* Content Diversity Stats */}
+      <ContentDiversityStats agentId={agent.id} />
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
