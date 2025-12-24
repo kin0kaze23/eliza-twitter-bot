@@ -165,6 +165,17 @@ Monitors content diversity and auto-pauses agents when content becomes repetitiv
 - **Metric**: Percentage of unique content types used in recent 50 posts
 - **Persistence**: `lastDiversityCheck` timestamp survives restarts
 
+### Priority Mode (Event-Based Content Prioritization)
+Automatically prioritizes EVENT_BASED content when fresh news exists in Knowledge Base:
+- **Enabled**: `eventPriorityModeEnabled` (default: false) - Must also have `newsCommentary` enabled
+- **Freshness Window**: `eventPriorityFreshnessMinutes` (default: 360 = 6 hours) - News added within this time triggers priority
+- **Minimum Priority**: `eventPriorityMinPriority` (default: "medium") - Only news at this priority level or higher triggers
+- **Fallback Policy**: `eventPriorityFallbackPolicy` (default: "respect_rotation")
+  - `respect_rotation`: Prevents consecutive EVENT_BASED posts (checks last 2 posts)
+  - `allow_consecutive`: Allows back-to-back event posts when fresh news exists
+- **Helper**: `storage.getFreshKnowledgeEntries(agentId, freshnessMinutes, minPriority)` queries approved, active news entries
+- **Scheduler Integration**: Priority Mode logic runs before content type rotation in `generateTweetContent()`
+
 ### Health Monitoring System
 Real-time agent health monitoring via API and UI dashboard:
 - **API Endpoint**: `GET /api/agents/:agentId/health` returns comprehensive health data
