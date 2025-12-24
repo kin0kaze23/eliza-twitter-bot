@@ -701,9 +701,51 @@ async function generateTweetContent(agent: Agent): Promise<{ content: string; kb
     // SERVER-SIDE CONTENT TYPE SELECTION (critical for proper rotation)
     const hasKnowledgeBase = knowledgeEntries.length > 0;
     const rotationPolicy = ((agent as any).contentTypeReusePolicy || "rotate_all") as "rotate_all" | "avoid_last" | "allow";
-    const selectedContentType = selectNextContentType(recentContentTypes, hasKnowledgeBase, rotationPolicy);
     
-    console.log(`[SCHEDULER] Content type rotation: Selected "${formatContentType(selectedContentType)}" for agent ${agent.id}`);
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PRIORITY MODE: Prioritize EVENT_BASED when fresh news exists
+    // ═══════════════════════════════════════════════════════════════════════════
+    let selectedContentType: ContentType;
+    let priorityModeUsed = false;
+    
+    const eventPriorityModeEnabled = (agent as any).eventPriorityModeEnabled === true;
+    const newsCommentaryEnabled = (agent as any).newsCommentary !== false; // Default true
+    
+    if (eventPriorityModeEnabled && newsCommentaryEnabled) {
+      const freshnessMinutes = (agent as any).eventPriorityFreshnessMinutes || 360; // 6 hours default
+      const minPriority = (agent as any).eventPriorityMinPriority || "medium";
+      const fallbackPolicy = (agent as any).eventPriorityFallbackPolicy || "respect_rotation";
+      
+      // Check for fresh news entries
+      const freshNewsEntries = await storage.getFreshKnowledgeEntries(agent.id, freshnessMinutes, minPriority);
+      
+      if (freshNewsEntries.length > 0) {
+        // Check diversity safeguard: avoid EVENT_BASED if used in last 2 posts
+        const recentTypeNames = recentContentTypes.slice(0, 2).map(ct => ct.contentType);
+        const eventBasedRecentlyUsed = recentTypeNames.includes("EVENT_BASED");
+        
+        // Allow consecutive EVENT_BASED if fallback policy is "allow_consecutive"
+        const allowConsecutive = fallbackPolicy === "allow_consecutive";
+        
+        if (!eventBasedRecentlyUsed || allowConsecutive) {
+          selectedContentType = "EVENT_BASED";
+          priorityModeUsed = true;
+          console.log(`[SCHEDULER] Priority Mode: Found ${freshNewsEntries.length} fresh news entries (within ${freshnessMinutes}min, priority >= ${minPriority})`);
+          console.log(`[SCHEDULER] Priority Mode: Overriding rotation to EVENT_BASED for agent ${agent.id}`);
+        } else {
+          console.log(`[SCHEDULER] Priority Mode: Fresh news exists but EVENT_BASED used recently, respecting diversity`);
+          selectedContentType = selectNextContentType(recentContentTypes, hasKnowledgeBase, rotationPolicy);
+        }
+      } else {
+        console.log(`[SCHEDULER] Priority Mode: No fresh news entries found, using normal rotation`);
+        selectedContentType = selectNextContentType(recentContentTypes, hasKnowledgeBase, rotationPolicy);
+      }
+    } else {
+      selectedContentType = selectNextContentType(recentContentTypes, hasKnowledgeBase, rotationPolicy);
+    }
+    
+    const modeLabel = priorityModeUsed ? " (Priority Mode)" : "";
+    console.log(`[SCHEDULER] Content type selection: "${formatContentType(selectedContentType)}"${modeLabel} for agent ${agent.id}`);
     
     const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
       includeKnowledge: true,
