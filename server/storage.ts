@@ -21,6 +21,8 @@ import {
   type InsertContentTypeUsage,
   type ProcessedMention,
   type InsertProcessedMention,
+  type SchedulerState,
+  type InsertSchedulerState,
   users,
   agents,
   knowledgeBase,
@@ -31,6 +33,7 @@ import {
   bibleVerseUsages,
   contentTypeUsages,
   processedMentions,
+  schedulerState,
 } from "@shared/schema";
 import { eq, desc, and, sql, inArray, isNull } from "drizzle-orm";
 
@@ -120,6 +123,13 @@ export interface IStorage {
   markMentionResponded(id: string, responseTweetId: string, responseText: string): Promise<ProcessedMention | undefined>;
   markMentionFailed(id: string, errorMessage: string): Promise<ProcessedMention | undefined>;
   getRecentMentions(agentId: string, limit?: number): Promise<ProcessedMention[]>;
+  
+  // Scheduler State Persistence
+  getSchedulerState(agentId: string): Promise<SchedulerState | undefined>;
+  saveSchedulerState(agentId: string, state: Partial<InsertSchedulerState>): Promise<SchedulerState>;
+  resetSchedulerState(agentId: string): Promise<void>;
+  updateCircuitBreaker(agentId: string, method: 'api' | 'scraper', success: boolean): Promise<SchedulerState>;
+  getPreferredAuthMethod(agentId: string): Promise<'api' | 'scraper'>;
 }
 
 export class DbStorage implements IStorage {
@@ -876,6 +886,128 @@ export class DbStorage implements IStorage {
       .where(eq(processedMentions.agentId, agentId))
       .orderBy(desc(processedMentions.mentionedAt))
       .limit(limit);
+  }
+
+  // Scheduler State Persistence
+  async getSchedulerState(agentId: string): Promise<SchedulerState | undefined> {
+    const result = await db
+      .select()
+      .from(schedulerState)
+      .where(eq(schedulerState.agentId, agentId));
+    return result[0];
+  }
+
+  async saveSchedulerState(agentId: string, updates: Partial<InsertSchedulerState>): Promise<SchedulerState> {
+    const existing = await this.getSchedulerState(agentId);
+    
+    if (existing) {
+      const result = await db
+        .update(schedulerState)
+        .set({
+          lastPostTime: updates.lastPostTime,
+          postsToday: updates.postsToday,
+          postsResetDate: updates.postsResetDate,
+          rateLimitBackoffUntil: updates.rateLimitBackoffUntil,
+          consecutiveFailures: updates.consecutiveFailures,
+          repliesThisHour: updates.repliesThisHour,
+          repliesHourStart: updates.repliesHourStart,
+          recentBotTweets: updates.recentBotTweets,
+          preferredAuthMethod: updates.preferredAuthMethod,
+          apiFailureCount: updates.apiFailureCount,
+          scraperFailureCount: updates.scraperFailureCount,
+          circuitBreakerTrippedAt: updates.circuitBreakerTrippedAt,
+          updatedAt: new Date(),
+        })
+        .where(eq(schedulerState.agentId, agentId))
+        .returning();
+      return result[0];
+    }
+    
+    const result = await db
+      .insert(schedulerState)
+      .values({
+        agentId,
+        lastPostTime: updates.lastPostTime ?? null,
+        postsToday: updates.postsToday ?? 0,
+        postsResetDate: updates.postsResetDate ?? null,
+        rateLimitBackoffUntil: updates.rateLimitBackoffUntil ?? null,
+        consecutiveFailures: updates.consecutiveFailures ?? 0,
+        repliesThisHour: updates.repliesThisHour ?? 0,
+        repliesHourStart: updates.repliesHourStart ?? null,
+        recentBotTweets: updates.recentBotTweets ?? [],
+        preferredAuthMethod: updates.preferredAuthMethod ?? 'api',
+        apiFailureCount: updates.apiFailureCount ?? 0,
+        scraperFailureCount: updates.scraperFailureCount ?? 0,
+        circuitBreakerTrippedAt: updates.circuitBreakerTrippedAt ?? null,
+      })
+      .returning();
+    return result[0];
+  }
+
+  async resetSchedulerState(agentId: string): Promise<void> {
+    await db
+      .delete(schedulerState)
+      .where(eq(schedulerState.agentId, agentId));
+  }
+
+  async updateCircuitBreaker(agentId: string, method: 'api' | 'scraper', success: boolean): Promise<SchedulerState> {
+    const existing = await this.getSchedulerState(agentId);
+    const now = new Date();
+    
+    // Circuit breaker constants
+    const FAILURE_THRESHOLD = 3; // Switch after 3 consecutive failures
+    const RECOVERY_PERIOD_MS = 30 * 60 * 1000; // 30 min before trying failed method again
+    
+    let updates: Partial<InsertSchedulerState> = {};
+    
+    if (method === 'api') {
+      if (success) {
+        updates.apiFailureCount = 0;
+      } else {
+        const newCount = (existing?.apiFailureCount || 0) + 1;
+        updates.apiFailureCount = newCount;
+        
+        // Switch to scraper if API is failing too much
+        if (newCount >= FAILURE_THRESHOLD) {
+          updates.preferredAuthMethod = 'scraper';
+          updates.circuitBreakerTrippedAt = now;
+          console.log(`[CircuitBreaker] Switching agent ${agentId} to scraper after ${newCount} API failures`);
+        }
+      }
+    } else {
+      if (success) {
+        updates.scraperFailureCount = 0;
+      } else {
+        const newCount = (existing?.scraperFailureCount || 0) + 1;
+        updates.scraperFailureCount = newCount;
+        
+        // Switch to API if scraper is failing too much
+        if (newCount >= FAILURE_THRESHOLD) {
+          updates.preferredAuthMethod = 'api';
+          updates.circuitBreakerTrippedAt = now;
+          console.log(`[CircuitBreaker] Switching agent ${agentId} to API after ${newCount} scraper failures`);
+        }
+      }
+    }
+    
+    // Check if we should try recovering the failed method
+    if (existing?.circuitBreakerTrippedAt) {
+      const timeSinceTrip = now.getTime() - new Date(existing.circuitBreakerTrippedAt).getTime();
+      if (timeSinceTrip > RECOVERY_PERIOD_MS) {
+        // Reset failure counts to allow retry
+        updates.apiFailureCount = 0;
+        updates.scraperFailureCount = 0;
+        updates.circuitBreakerTrippedAt = null;
+        console.log(`[CircuitBreaker] Recovery period elapsed for agent ${agentId}, resetting counts`);
+      }
+    }
+    
+    return this.saveSchedulerState(agentId, updates);
+  }
+
+  async getPreferredAuthMethod(agentId: string): Promise<'api' | 'scraper'> {
+    const state = await this.getSchedulerState(agentId);
+    return (state?.preferredAuthMethod as 'api' | 'scraper') || 'api';
   }
 }
 

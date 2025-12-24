@@ -571,3 +571,54 @@ export interface MentionTrackingState {
   lastCheckTime?: string; // ISO timestamp of last check
   recentTweetIds?: string[]; // IDs of recent bot tweets to check for replies
 }
+
+// Scheduler State Persistence - survive server restarts
+export const schedulerState = pgTable("scheduler_state", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: varchar("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  
+  // Posting state
+  lastPostTime: timestamp("last_post_time"),
+  postsToday: integer("posts_today").default(0).notNull(),
+  postsResetDate: text("posts_reset_date"), // Date string (YYYY-MM-DD) when posts counter was last reset
+  
+  // Rate limiting state
+  rateLimitBackoffUntil: timestamp("rate_limit_backoff_until"),
+  consecutiveFailures: integer("consecutive_failures").default(0).notNull(),
+  
+  // Reply tracking
+  repliesThisHour: integer("replies_this_hour").default(0).notNull(),
+  repliesHourStart: timestamp("replies_hour_start"),
+  
+  // Recent bot tweets (JSON array for comment detection)
+  recentBotTweets: jsonb("recent_bot_tweets").$type<Array<{
+    tweetId: string;
+    postedAt: string;
+    lastReplyId?: string;
+  }>>().default(sql`'[]'`),
+  
+  // Circuit breaker state
+  preferredAuthMethod: text("preferred_auth_method").default("api"), // 'api' or 'scraper'
+  apiFailureCount: integer("api_failure_count").default(0).notNull(),
+  scraperFailureCount: integer("scraper_failure_count").default(0).notNull(),
+  circuitBreakerTrippedAt: timestamp("circuit_breaker_tripped_at"),
+  
+  // Timestamps
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  uniqueAgent: unique("unique_scheduler_agent").on(table.agentId),
+}));
+
+export const insertSchedulerStateSchema = createInsertSchema(schedulerState).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertSchedulerState = z.infer<typeof insertSchedulerStateSchema>;
+export type SchedulerState = typeof schedulerState.$inferSelect;
+
+// Diversity alert thresholds
+export const DIVERSITY_ALERT_THRESHOLD = 40; // Auto-pause if diversity score drops below this
+export const DIVERSITY_WARNING_THRESHOLD = 60; // Warn if below this
