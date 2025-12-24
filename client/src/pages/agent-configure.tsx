@@ -405,6 +405,11 @@ export default function AgentConfigure() {
     contentTypeTrackingEnabled: true,
     contentTypeReusePolicy: "rotate_all",
     contentTypeWindow: "7",
+    // Priority Mode - prioritize EVENT_BASED when fresh news exists
+    eventPriorityModeEnabled: false,
+    eventPriorityFreshnessMinutes: "360",
+    eventPriorityMinPriority: "medium",
+    eventPriorityFallbackPolicy: "respect_rotation",
   });
 
   // Knowledge Base Settings
@@ -817,6 +822,11 @@ export default function AgentConfigure() {
         contentTypeTrackingEnabled: behavior.contentTypeTrackingEnabled,
         contentTypeReusePolicy: behavior.contentTypeReusePolicy,
         contentTypeWindow: parseInt(behavior.contentTypeWindow) || 7,
+        // Priority Mode
+        eventPriorityModeEnabled: behavior.eventPriorityModeEnabled,
+        eventPriorityFreshnessMinutes: parseInt(behavior.eventPriorityFreshnessMinutes) || 360,
+        eventPriorityMinPriority: behavior.eventPriorityMinPriority,
+        eventPriorityFallbackPolicy: behavior.eventPriorityFallbackPolicy,
         // Knowledge Base Settings
         kbMaxEntries: parseInt(kbSettings.maxEntries) || 10,
         kbReusePolicy: kbSettings.reusePolicy,
@@ -1029,6 +1039,11 @@ export default function AgentConfigure() {
       contentTypeTrackingEnabled: (agent as any).contentTypeTrackingEnabled ?? true,
       contentTypeReusePolicy: (agent as any).contentTypeReusePolicy || "rotate_all",
       contentTypeWindow: ((agent as any).contentTypeWindow || 7).toString(),
+      // Priority Mode
+      eventPriorityModeEnabled: (agent as any).eventPriorityModeEnabled ?? false,
+      eventPriorityFreshnessMinutes: ((agent as any).eventPriorityFreshnessMinutes || 360).toString(),
+      eventPriorityMinPriority: (agent as any).eventPriorityMinPriority || "medium",
+      eventPriorityFallbackPolicy: (agent as any).eventPriorityFallbackPolicy || "respect_rotation",
     });
     
     // Load KB settings
@@ -2556,6 +2571,112 @@ export default function AgentConfigure() {
                       </p>
                     </div>
                   </div>
+                )}
+              </div>
+              
+              {/* Priority Mode - Event-Based Content Priority */}
+              <div className="space-y-4 p-4 rounded-lg bg-amber-500/5 border border-amber-500/20">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label className="flex items-center gap-2">
+                      <Zap className="h-4 w-4 text-amber-500" />
+                      Priority Mode
+                      <Badge variant="secondary" className="text-xs">NEW</Badge>
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      When fresh news exists in Knowledge Base, prioritize Event-Based posts over rotation
+                    </p>
+                  </div>
+                  <Switch
+                    checked={behavior.eventPriorityModeEnabled}
+                    onCheckedChange={(v) => setBehavior({ ...behavior, eventPriorityModeEnabled: v })}
+                    disabled={!behavior.newsCommentary}
+                    data-testid="switch-priority-mode"
+                  />
+                </div>
+
+                {!behavior.newsCommentary && (
+                  <Alert className="bg-muted/50">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription className="text-xs">
+                      Enable "News Commentary" above to use Priority Mode
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {behavior.eventPriorityModeEnabled && behavior.newsCommentary && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pl-6 pt-2 border-l-2 border-amber-500/30">
+                    <div className="space-y-2">
+                      <Label>Freshness Window</Label>
+                      <Select
+                        value={behavior.eventPriorityFreshnessMinutes}
+                        onValueChange={(v) => setBehavior({ ...behavior, eventPriorityFreshnessMinutes: v })}
+                      >
+                        <SelectTrigger data-testid="select-freshness-window">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="60">1 hour</SelectItem>
+                          <SelectItem value="120">2 hours</SelectItem>
+                          <SelectItem value="180">3 hours</SelectItem>
+                          <SelectItem value="360">6 hours</SelectItem>
+                          <SelectItem value="720">12 hours</SelectItem>
+                          <SelectItem value="1440">24 hours</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        News added within this time triggers priority
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Minimum Priority</Label>
+                      <Select
+                        value={behavior.eventPriorityMinPriority}
+                        onValueChange={(v) => setBehavior({ ...behavior, eventPriorityMinPriority: v })}
+                      >
+                        <SelectTrigger data-testid="select-min-priority">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="high">High only</SelectItem>
+                          <SelectItem value="medium">Medium and above</SelectItem>
+                          <SelectItem value="low">All priorities</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Minimum KB priority to trigger priority mode
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Diversity Safeguard</Label>
+                      <Select
+                        value={behavior.eventPriorityFallbackPolicy}
+                        onValueChange={(v) => setBehavior({ ...behavior, eventPriorityFallbackPolicy: v })}
+                      >
+                        <SelectTrigger data-testid="select-fallback-policy">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="respect_rotation">Respect rotation</SelectItem>
+                          <SelectItem value="allow_consecutive">Allow consecutive</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        How to handle back-to-back event posts
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {behavior.eventPriorityModeEnabled && behavior.newsCommentary && (
+                  <Alert className="bg-amber-500/5 border-amber-500/20">
+                    <Zap className="h-4 w-4 text-amber-500" />
+                    <AlertDescription className="text-xs text-muted-foreground">
+                      <strong>How it works:</strong> When fresh news exists (within the freshness window), the system will select EVENT_BASED content type instead of normal rotation. This ensures timely news gets posted quickly. The diversity safeguard prevents excessive consecutive event posts.
+                    </AlertDescription>
+                  </Alert>
                 )}
               </div>
               
