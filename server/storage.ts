@@ -900,24 +900,25 @@ export class DbStorage implements IStorage {
   async saveSchedulerState(agentId: string, updates: Partial<InsertSchedulerState>): Promise<SchedulerState> {
     const existing = await this.getSchedulerState(agentId);
     
+    // Build update object with only defined values
+    const updateObj: Record<string, unknown> = { updatedAt: new Date() };
+    if (updates.lastPostTime !== undefined) updateObj.lastPostTime = updates.lastPostTime;
+    if (updates.postsToday !== undefined) updateObj.postsToday = updates.postsToday;
+    if (updates.postsResetDate !== undefined) updateObj.postsResetDate = updates.postsResetDate;
+    if (updates.rateLimitBackoffUntil !== undefined) updateObj.rateLimitBackoffUntil = updates.rateLimitBackoffUntil;
+    if (updates.consecutiveFailures !== undefined) updateObj.consecutiveFailures = updates.consecutiveFailures;
+    if (updates.repliesThisHour !== undefined) updateObj.repliesThisHour = updates.repliesThisHour;
+    if (updates.repliesHourStart !== undefined) updateObj.repliesHourStart = updates.repliesHourStart;
+    if (updates.recentBotTweets !== undefined) updateObj.recentBotTweets = updates.recentBotTweets;
+    if (updates.preferredAuthMethod !== undefined) updateObj.preferredAuthMethod = updates.preferredAuthMethod;
+    if (updates.apiFailureCount !== undefined) updateObj.apiFailureCount = updates.apiFailureCount;
+    if (updates.scraperFailureCount !== undefined) updateObj.scraperFailureCount = updates.scraperFailureCount;
+    if (updates.circuitBreakerTrippedAt !== undefined) updateObj.circuitBreakerTrippedAt = updates.circuitBreakerTrippedAt;
+    
     if (existing) {
       const result = await db
         .update(schedulerState)
-        .set({
-          lastPostTime: updates.lastPostTime,
-          postsToday: updates.postsToday,
-          postsResetDate: updates.postsResetDate,
-          rateLimitBackoffUntil: updates.rateLimitBackoffUntil,
-          consecutiveFailures: updates.consecutiveFailures,
-          repliesThisHour: updates.repliesThisHour,
-          repliesHourStart: updates.repliesHourStart,
-          recentBotTweets: updates.recentBotTweets,
-          preferredAuthMethod: updates.preferredAuthMethod,
-          apiFailureCount: updates.apiFailureCount,
-          scraperFailureCount: updates.scraperFailureCount,
-          circuitBreakerTrippedAt: updates.circuitBreakerTrippedAt,
-          updatedAt: new Date(),
-        })
+        .set(updateObj)
         .where(eq(schedulerState.agentId, agentId))
         .returning();
       return result[0];
@@ -934,7 +935,7 @@ export class DbStorage implements IStorage {
         consecutiveFailures: updates.consecutiveFailures ?? 0,
         repliesThisHour: updates.repliesThisHour ?? 0,
         repliesHourStart: updates.repliesHourStart ?? null,
-        recentBotTweets: updates.recentBotTweets ?? [],
+        recentBotTweets: (updates.recentBotTweets ?? []) as Array<{tweetId: string; postedAt: string; lastReplyId?: string}>,
         preferredAuthMethod: updates.preferredAuthMethod ?? 'api',
         apiFailureCount: updates.apiFailureCount ?? 0,
         scraperFailureCount: updates.scraperFailureCount ?? 0,

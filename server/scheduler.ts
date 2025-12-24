@@ -74,6 +74,167 @@ const consecutiveFailures = new Map<string, number>(); // Track failures per age
 // Safe mode threshold - auto-pause agent after this many consecutive auth failures
 const SAFE_MODE_FAILURE_THRESHOLD = 5;
 
+// Diversity alert thresholds - auto-pause if content becomes too repetitive
+const DIVERSITY_ALERT_THRESHOLD = 40;
+const DIVERSITY_CHECK_INTERVAL_MS = 30 * 60 * 1000; // Check every 30 minutes
+const lastDiversityCheck = new Map<string, Date>();
+
+/**
+ * Load scheduler state from database on agent startup
+ */
+async function loadSchedulerState(agentId: string): Promise<void> {
+  try {
+    const dbState = await storage.getSchedulerState(agentId);
+    if (!dbState) {
+      console.log(`[Scheduler] No persisted state for agent ${agentId}, starting fresh`);
+      return;
+    }
+    
+    // Restore last post time
+    if (dbState.lastPostTime) {
+      state.lastPostTime.set(agentId, new Date(dbState.lastPostTime));
+    }
+    
+    // Restore posts today count (check if same day)
+    const today = new Date().toISOString().split("T")[0];
+    if (dbState.postsResetDate === today && dbState.postsToday > 0) {
+      const postsKey = `${agentId}_${today}`;
+      state.postsToday.set(postsKey, dbState.postsToday);
+    }
+    
+    // Restore rate limit backoff
+    if (dbState.rateLimitBackoffUntil && new Date(dbState.rateLimitBackoffUntil).getTime() > Date.now()) {
+      state.rateLimitBackoff.set(agentId, new Date(dbState.rateLimitBackoffUntil));
+    }
+    
+    // Restore consecutive failures
+    if (dbState.consecutiveFailures > 0) {
+      consecutiveFailures.set(agentId, dbState.consecutiveFailures);
+    }
+    
+    // Restore replies this hour
+    if (dbState.repliesHourStart) {
+      const hourStart = new Date(dbState.repliesHourStart);
+      const currentHourStart = new Date();
+      currentHourStart.setMinutes(0, 0, 0);
+      
+      if (hourStart.getTime() === currentHourStart.getTime()) {
+        state.repliesThisHour.set(agentId, { count: dbState.repliesThisHour, hourStart });
+      }
+    }
+    
+    // Restore recent bot tweets
+    if (dbState.recentBotTweets && Array.isArray(dbState.recentBotTweets) && dbState.recentBotTweets.length > 0) {
+      const tweets = dbState.recentBotTweets.map(t => ({
+        tweetId: t.tweetId,
+        postedAt: new Date(t.postedAt),
+        lastReplyId: t.lastReplyId,
+      }));
+      state.recentBotTweets.set(agentId, tweets);
+      console.log(`[Scheduler] Restored ${tweets.length} tracked tweets for agent ${agentId}`);
+    }
+    
+    console.log(`[Scheduler] Loaded persisted state for agent ${agentId}`);
+  } catch (error) {
+    console.error(`[Scheduler] Error loading state for agent ${agentId}:`, error);
+  }
+}
+
+/**
+ * Save scheduler state to database for persistence
+ */
+async function saveSchedulerState(agentId: string): Promise<void> {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const postsKey = `${agentId}_${today}`;
+    
+    const replyData = state.repliesThisHour.get(agentId);
+    const recentTweets = state.recentBotTweets.get(agentId) || [];
+    
+    await storage.saveSchedulerState(agentId, {
+      lastPostTime: state.lastPostTime.get(agentId) || null,
+      postsToday: state.postsToday.get(postsKey) || 0,
+      postsResetDate: today,
+      rateLimitBackoffUntil: state.rateLimitBackoff.get(agentId) || null,
+      consecutiveFailures: consecutiveFailures.get(agentId) || 0,
+      repliesThisHour: replyData?.count || 0,
+      repliesHourStart: replyData?.hourStart || null,
+      recentBotTweets: recentTweets.map(t => ({
+        tweetId: t.tweetId,
+        postedAt: t.postedAt.toISOString(),
+        lastReplyId: t.lastReplyId,
+      })),
+    });
+  } catch (error) {
+    console.error(`[Scheduler] Error saving state for agent ${agentId}:`, error);
+  }
+}
+
+/**
+ * Check content diversity and auto-pause if too repetitive
+ */
+async function checkDiversityAlerts(agent: Agent): Promise<boolean> {
+  const now = new Date();
+  const lastCheck = lastDiversityCheck.get(agent.id);
+  
+  // Only check periodically to avoid overhead
+  if (lastCheck && (now.getTime() - lastCheck.getTime()) < DIVERSITY_CHECK_INTERVAL_MS) {
+    return true; // Skip check, continue posting
+  }
+  
+  lastDiversityCheck.set(agent.id, now);
+  
+  try {
+    // Get recent content type usages
+    const contentTypeUsages = await storage.getRecentContentTypeUsages(agent.id, 50);
+    const totalPosts = contentTypeUsages.reduce((sum, u) => sum + u.usageCount, 0);
+    
+    if (totalPosts < 5) {
+      return true; // Not enough posts to evaluate diversity
+    }
+    
+    // Calculate diversity score
+    const uniqueTypes = new Set(contentTypeUsages.map(u => u.contentType)).size;
+    const maxTypes = 7; // Total content types available
+    const diversityScore = Math.round((uniqueTypes / maxTypes) * 100);
+    
+    if (diversityScore < DIVERSITY_ALERT_THRESHOLD) {
+      console.log(`[Scheduler] DIVERSITY ALERT: Agent ${agent.name} has diversity score of ${diversityScore}% (threshold: ${DIVERSITY_ALERT_THRESHOLD}%)`);
+      
+      // Log the alert
+      await logActivity({
+        agentId: agent.id,
+        eventType: "error",
+        status: "failed",
+        content: `DIVERSITY ALERT: Content diversity dropped to ${diversityScore}%`,
+        errorMessage: `Only ${uniqueTypes} of ${maxTypes} content types used in recent posts`,
+        errorCode: "LOW_DIVERSITY",
+      });
+      
+      // Auto-pause if very low
+      if (diversityScore < 25) {
+        console.log(`[Scheduler] AUTO-PAUSING agent ${agent.name} due to critically low diversity (${diversityScore}%)`);
+        await storage.updateAgentStatus(agent.id, "paused");
+        
+        await logActivity({
+          agentId: agent.id,
+          eventType: "safe_mode",
+          status: "failed",
+          content: `Agent auto-paused due to critically low content diversity (${diversityScore}%)`,
+          errorCode: "DIVERSITY_PAUSE",
+        });
+        
+        return false; // Stop posting
+      }
+    }
+    
+    return true; // Continue posting
+  } catch (error) {
+    console.error(`[Scheduler] Error checking diversity for agent ${agent.id}:`, error);
+    return true; // Continue on error
+  }
+}
+
 const state: SchedulerState = {
   isRunning: false,
   activeAgents: new Map(),
@@ -654,6 +815,13 @@ async function executePost(agent: Agent): Promise<void> {
     return;
   }
   
+  // Check content diversity - auto-pause if too repetitive
+  const diversityOk = await checkDiversityAlerts(agent);
+  if (!diversityOk) {
+    console.log(`[Scheduler] Skipping post for ${agent.name} due to diversity concerns`);
+    return;
+  }
+  
   // CRITICAL: Acquire ATOMIC database lock BEFORE doing anything else
   // This prevents race conditions where multiple scheduler ticks start posting simultaneously
   const intervalMs = getPostIntervalMs(agent);
@@ -803,9 +971,11 @@ async function executePost(agent: Agent): Promise<void> {
       
       try {
         await storage.updateAgent(agent.id, { lastPostedAt: now });
-        console.log(`[Scheduler] Persisted lastPostedAt for ${agent.name}`);
+        // Also save full scheduler state for restart recovery
+        await saveSchedulerState(agent.id);
+        console.log(`[Scheduler] Persisted state for ${agent.name}`);
       } catch (err) {
-        console.error(`[Scheduler] Failed to persist lastPostedAt:`, err);
+        console.error(`[Scheduler] Failed to persist state:`, err);
       }
       
       if (agent.webhookEnabled && agent.webhookUrl) {
@@ -967,7 +1137,10 @@ function scheduleAgent(agent: Agent): void {
   state.activeAgents.set(agent.id, timer);
 }
 
-export function startAgent(agent: Agent): void {
+export async function startAgent(agent: Agent): Promise<void> {
+  // Load persisted scheduler state first
+  await loadSchedulerState(agent.id);
+  
   if (!agent.postingEnabled) {
     console.log(`[Scheduler] Agent ${agent.name} has posting disabled`);
   } else {
@@ -981,7 +1154,10 @@ export function startAgent(agent: Agent): void {
   }
 }
 
-export function stopAgent(agentId: string): void {
+export async function stopAgent(agentId: string): Promise<void> {
+  // Save state before stopping
+  await saveSchedulerState(agentId);
+  
   const timer = state.activeAgents.get(agentId);
   if (timer) {
     clearInterval(timer);
