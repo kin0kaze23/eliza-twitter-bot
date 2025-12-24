@@ -37,6 +37,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 import type { Agent, ActivityLog } from "@shared/schema";
+import { AgentHealthDashboard } from "@/components/agent-health-dashboard";
 
 type SchedulerStatus = {
   isRunning: boolean;
@@ -366,6 +367,9 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Agent Health Dashboard */}
+      <AgentHealthDashboard agentId={agent.id} />
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
