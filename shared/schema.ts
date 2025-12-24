@@ -146,6 +146,12 @@ export const agents = pgTable("agents", {
   kbPriorityRule: text("kb_priority_rule"), // Rule text like "if content contains 'breaking' then priority 10"
   kbPriorityRuleLastAppliedAt: timestamp("kb_priority_rule_last_applied_at"),
   
+  // Event Priority Mode - prioritize EVENT_BASED content when fresh news exists
+  eventPriorityModeEnabled: boolean("event_priority_mode_enabled").default(false),
+  eventPriorityFreshnessMinutes: integer("event_priority_freshness_minutes").default(360), // 6 hours default
+  eventPriorityFallbackPolicy: text("event_priority_fallback_policy").default("respect_rotation"), // respect_rotation, allow_consecutive
+  eventPriorityMinPriority: text("event_priority_min_priority").default("medium"), // low, medium, high - minimum priority for fresh news
+  
   // ═══════════════════════════════════════════════════════════════════════════
   // CONTENT FRESHNESS SETTINGS (Unified Anti-Repetition Config)
   // ═══════════════════════════════════════════════════════════════════════════

@@ -60,6 +60,7 @@ export interface IStorage {
   getActiveKnowledgeBase(agentId: string): Promise<KnowledgeBase[]>;
   getPendingKnowledgeBase(agentId: string): Promise<KnowledgeBase[]>;
   getApprovedKnowledgeBase(agentId: string): Promise<KnowledgeBase[]>;
+  getFreshKnowledgeEntries(agentId: string, freshnessMinutes: number, minPriority?: string): Promise<KnowledgeBase[]>;
   createKnowledgeBaseEntry(entry: InsertKnowledgeBase): Promise<KnowledgeBase>;
   updateKnowledgeBaseEntry(id: string, entry: Partial<InsertKnowledgeBase>): Promise<KnowledgeBase | undefined>;
   updateKnowledgeBasePriority(id: string, newPriority: string): Promise<KnowledgeBase | undefined>;
@@ -356,6 +357,38 @@ export class DbStorage implements IStorage {
       .from(knowledgeBase)
       .where(and(eq(knowledgeBase.agentId, agentId), eq(knowledgeBase.status, "approved")))
       .orderBy(desc(priorityOrder), desc(knowledgeBase.createdAt));
+  }
+
+  async getFreshKnowledgeEntries(agentId: string, freshnessMinutes: number, minPriority?: string): Promise<KnowledgeBase[]> {
+    const cutoffTime = new Date(Date.now() - freshnessMinutes * 60 * 1000);
+    
+    // Build priority filter based on minPriority
+    let priorityFilter;
+    if (minPriority === "high") {
+      priorityFilter = sql`${knowledgeBase.priority} = 'high'`;
+    } else if (minPriority === "medium") {
+      priorityFilter = sql`${knowledgeBase.priority} IN ('high', 'medium')`;
+    } else {
+      priorityFilter = sql`1=1`; // Allow all priorities (low, medium, high)
+    }
+    
+    const priorityOrder = sql`CASE WHEN ${knowledgeBase.priority} = 'high' THEN 3 WHEN ${knowledgeBase.priority} = 'medium' THEN 2 ELSE 1 END`;
+    
+    return await db
+      .select()
+      .from(knowledgeBase)
+      .where(
+        and(
+          eq(knowledgeBase.agentId, agentId),
+          eq(knowledgeBase.status, "approved"),
+          eq(knowledgeBase.active, true),
+          eq(knowledgeBase.category, "news"), // Only news category for event-based content
+          sql`${knowledgeBase.createdAt} > ${cutoffTime}`,
+          priorityFilter
+        )
+      )
+      .orderBy(desc(priorityOrder), desc(knowledgeBase.createdAt))
+      .limit(20);
   }
 
   async batchApproveKnowledgeBase(agentId: string, ids: string[], approvedBy?: string): Promise<number> {
