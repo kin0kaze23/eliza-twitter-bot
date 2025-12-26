@@ -1,7 +1,7 @@
 import { storage, db } from "./storage";
-import { knowledgeBase, agents } from "@shared/schema";
-import { eq } from "drizzle-orm";
-import type { Agent, KnowledgeBase } from "@shared/schema";
+import { knowledgeBase, agents, customApis as customApisTable } from "@shared/schema";
+import { eq, inArray } from "drizzle-orm";
+import type { Agent, KnowledgeBase, CustomApi } from "@shared/schema";
 
 interface RefreshState {
   isRunning: boolean;
@@ -15,22 +15,74 @@ const state: RefreshState = {
   priorityTimers: new Map(),
 };
 
+// Helper to build full URL with query params and construct headers with auth
+function buildApiRequest(api: CustomApi): { url: string; headers: Record<string, string> } {
+  // Build URL with query params
+  let url = api.baseUrl;
+  const queryParams = api.queryParams as Record<string, any> || {};
+  
+  if (Object.keys(queryParams).length > 0) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(queryParams)) {
+      // Convert value to string first
+      let stringValue = String(value);
+      
+      // Resolve env vars in query params (e.g., {{API_KEY}} -> actual value)
+      const envMatch = stringValue.match(/\{\{(\w+)\}\}/);
+      if (envMatch) {
+        stringValue = process.env[envMatch[1]] || stringValue;
+      }
+      params.append(key, stringValue);
+    }
+    url = url.includes('?') ? `${url}&${params.toString()}` : `${url}?${params.toString()}`;
+  }
+  
+  // Build headers with auth
+  const headers: Record<string, string> = { ...(api.headers as Record<string, string> || {}) };
+  
+  if (api.authType && api.authType !== 'none') {
+    const apiKey = api.authKeyEnvVar ? process.env[api.authKeyEnvVar] : undefined;
+    
+    if (apiKey) {
+      switch (api.authType) {
+        case 'bearer':
+          headers['Authorization'] = `Bearer ${apiKey}`;
+          break;
+        case 'api_key':
+          const headerName = api.authHeaderName || 'X-API-Key';
+          headers[headerName] = apiKey;
+          break;
+        case 'basic':
+          headers['Authorization'] = `Basic ${Buffer.from(apiKey).toString('base64')}`;
+          break;
+      }
+    }
+  }
+  
+  return { url, headers };
+}
+
 export async function refreshKnowledgeBaseForAgent(agentId: string): Promise<{ refreshed: number; errors: string[] }> {
   const errors: string[] = [];
   let refreshed = 0;
+  const refreshedApiIds = new Set<string>();
   
   try {
     const kbEntries = await storage.getActiveKnowledgeBase(agentId);
     const customApis = await storage.getAllCustomApis();
+    
+    console.log(`[KB Refresh] Processing ${kbEntries.length} KB entries for agent ${agentId}`);
     
     for (const entry of kbEntries) {
       if (entry.source !== "manual" && entry.sourceId) {
         const api = customApis.find(a => a.id === entry.sourceId);
         if (api && api.enabled) {
           try {
-            const response = await fetch(api.baseUrl, {
+            const { url, headers } = buildApiRequest(api);
+            console.log(`[KB Refresh] Fetching from API: ${api.name} (${url})`);
+            const response = await fetch(url, {
               method: api.method || "GET",
-              headers: api.headers as Record<string, string> || {},
+              headers,
             });
             
             if (response.ok) {
@@ -39,7 +91,8 @@ export async function refreshKnowledgeBaseForAgent(agentId: string): Promise<{ r
               
               if (api.contentPath) {
                 try {
-                  const jsonpath = await import("jsonpath");
+                  const jsonpathModule = await import("jsonpath");
+                  const jsonpath = jsonpathModule.default || jsonpathModule;
                   const result = jsonpath.query(data, api.contentPath);
                   if (result && result.length > 0) {
                     newContent = typeof result[0] === "string" ? result[0] : JSON.stringify(result[0]);
@@ -54,24 +107,48 @@ export async function refreshKnowledgeBaseForAgent(agentId: string): Promise<{ r
                   .set({
                     content: newContent,
                     lastRefreshedAt: new Date(),
+                    lastFetchedAt: new Date(),
                     updatedAt: new Date(),
                   })
                   .where(eq(knowledgeBase.id, entry.id));
                 refreshed++;
+                console.log(`[KB Refresh] Updated KB entry: ${entry.title}`);
               }
+              
+              refreshedApiIds.add(api.id);
+            } else {
+              console.error(`[KB Refresh] API ${api.name} returned ${response.status}`);
+              errors.push(`API ${api.name} returned status ${response.status}`);
             }
           } catch (e: any) {
+            console.error(`[KB Refresh] Failed to refresh ${entry.title}:`, e.message);
             errors.push(`Failed to refresh ${entry.title}: ${e.message}`);
           }
         }
       }
     }
     
+    if (refreshedApiIds.size > 0) {
+      const apiIdsArray = Array.from(refreshedApiIds);
+      console.log(`[KB Refresh] Updating lastRefreshedAt for ${apiIdsArray.length} APIs`);
+      for (const apiId of apiIdsArray) {
+        await db.update(customApisTable)
+          .set({ 
+            lastRefreshedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(customApisTable.id, apiId));
+      }
+    }
+    
     await db.update(agents)
       .set({ kbLastAutoRefreshedAt: new Date() })
       .where(eq(agents.id, agentId));
+    
+    console.log(`[KB Refresh] Completed: ${refreshed} entries updated, ${refreshedApiIds.size} APIs refreshed`);
       
   } catch (error: any) {
+    console.error(`[KB Refresh] Agent refresh error:`, error);
     errors.push(`Agent refresh error: ${error.message}`);
   }
   
@@ -165,7 +242,7 @@ export async function applyPriorityRulesForAgent(agentId: string, rule: string):
   return { updated };
 }
 
-function scheduleAgentRefresh(agent: Agent): void {
+async function scheduleAgentRefresh(agent: Agent): Promise<void> {
   if (state.refreshTimers.has(agent.id)) {
     clearInterval(state.refreshTimers.get(agent.id)!);
   }
@@ -176,6 +253,26 @@ function scheduleAgentRefresh(agent: Agent): void {
   
   const intervalMs = agent.kbAutoRefreshIntervalHours * 60 * 60 * 1000;
   console.log(`[KB Refresh] Scheduling agent ${agent.name} with interval ${agent.kbAutoRefreshIntervalHours}h`);
+  
+  // Check if we need an immediate refresh (last refresh was longer than interval ago)
+  const lastRefresh = agent.kbLastAutoRefreshedAt;
+  const needsImmediateRefresh = !lastRefresh || 
+    (Date.now() - new Date(lastRefresh).getTime() > intervalMs);
+  
+  if (needsImmediateRefresh) {
+    console.log(`[KB Refresh] Triggering immediate refresh for ${agent.name} (last refresh: ${lastRefresh ? new Date(lastRefresh).toISOString() : 'never'})`);
+    try {
+      const result = await refreshKnowledgeBaseForAgent(agent.id);
+      console.log(`[KB Refresh] Immediate refresh completed: ${result.refreshed} entries updated`);
+      
+      if (agent.kbPriorityRuleEnabled && agent.kbPriorityRule) {
+        const priorityResult = await applyPriorityRulesForAgent(agent.id, agent.kbPriorityRule);
+        console.log(`[KB Refresh] Updated ${priorityResult.updated} priorities for ${agent.name}`);
+      }
+    } catch (error) {
+      console.error(`[KB Refresh] Immediate refresh failed for ${agent.name}:`, error);
+    }
+  }
   
   const timer = setInterval(async () => {
     try {
@@ -198,9 +295,9 @@ function scheduleAgentRefresh(agent: Agent): void {
   state.refreshTimers.set(agent.id, timer);
 }
 
-export function startAgentKbRefresh(agent: Agent): void {
+export async function startAgentKbRefresh(agent: Agent): Promise<void> {
   if (agent.kbAutoRefreshEnabled) {
-    scheduleAgentRefresh(agent);
+    await scheduleAgentRefresh(agent);
   }
 }
 
@@ -225,7 +322,7 @@ export async function initializeKbRefreshService(): Promise<void> {
     console.log(`[KB Refresh] Found ${refreshAgents.length} agents with auto-refresh enabled`);
     
     for (const agent of refreshAgents) {
-      scheduleAgentRefresh(agent);
+      await scheduleAgentRefresh(agent);
     }
   } catch (error) {
     console.error("[KB Refresh] Failed to initialize:", error);
