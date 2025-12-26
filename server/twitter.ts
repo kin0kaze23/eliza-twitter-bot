@@ -132,9 +132,15 @@ export async function postTweet(agent: Agent, content: string): Promise<TwitterP
           let userFriendlyError = errorDetail;
           let hint = "";
           
-          if (errorDetail.includes("not permitted") || errorDetail.includes("permission")) {
+          // Check for specific Twitter error codes first
+          const twitterCode = errorData.errors?.[0]?.code;
+          
+          if (twitterCode === 185 || errorDetail.includes("daily limit")) {
+            userFriendlyError = "Twitter 24-hour daily posting limit reached";
+            hint = "You have reached the maximum number of tweets allowed in 24 hours (Twitter Free/Basic tier limit). The system will pause automatically and retry when the limit resets.";
+          } else if (errorDetail.includes("not permitted") || errorDetail.includes("permission")) {
             userFriendlyError = "You are not permitted to perform this action";
-            hint = "Your Twitter app may not have write permissions. Go to Twitter Developer Portal → Your App → Settings → App permissions → Enable 'Read and Write'. Then regenerate your Access Token and Secret.";
+            hint = "This error often occurs when your app is set to Read-Only or when user-level daily limits are hit. Verify 'Read and Write' permissions in Developer Portal AND ensure your account isn't locked.";
           } else if (errorDetail.includes("suspended") || errorDetail.includes("locked")) {
             userFriendlyError = "Twitter account is suspended or locked";
             hint = "Check your Twitter account status at twitter.com";
@@ -143,7 +149,7 @@ export async function postTweet(agent: Agent, content: string): Promise<TwitterP
             hint = "Twitter doesn't allow posting the exact same content twice. The system will try a different post next time.";
           }
           
-          console.error(`[Twitter] 403 Error: ${errorDetail}${hint ? ` | Hint: ${hint}` : ""}`);
+          console.error(`[Twitter] 403 Error (Code: ${twitterCode}): ${errorDetail}${hint ? ` | Hint: ${hint}` : ""}`);
           
           return {
             success: false,

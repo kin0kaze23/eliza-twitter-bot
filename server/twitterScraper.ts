@@ -593,6 +593,12 @@ export async function sendTweetViaScraper(
     // Send the tweet (no replyToTweetId means it's a new tweet)
     const response = await scraper.sendTweet(tweetText);
     
+    // Scraper often doesn't throw on error, check if we're still logged in after
+    const stillLoggedIn = await scraper.isLoggedIn();
+    if (!stillLoggedIn) {
+      throw new Error("SCRAPER_SESSION_LOST: Session became invalid during tweet attempt");
+    }
+
     console.log(`[Scraper] Tweet posted successfully for ${agent.name}`);
     return { success: true };
     

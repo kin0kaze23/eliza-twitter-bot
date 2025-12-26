@@ -292,6 +292,11 @@ function getAdaptiveBackoff(agentId: string, isRateLimit: boolean): number {
     MAX_RATE_LIMIT_BACKOFF_MS
   );
   
+  // If it's a daily limit error (403 with daily limit message), use a much longer backoff
+  if (isRateLimit && failures > 2) {
+    return Math.max(backoff, 4 * 60 * 60 * 1000); // Minimum 4 hours for suspected daily limits
+  }
+  
   // Add jitter (0-10% of backoff) to prevent synchronized retries
   const jitter = Math.random() * 0.1 * backoff;
   
@@ -1088,7 +1093,7 @@ async function executePost(agent: Agent): Promise<void> {
       const failureCount = recordFailure(agent.id);
       
       // Determine error type and apply appropriate backoff
-      const isRateLimit = Boolean(result.rateLimited) || Boolean(result.error && (result.error.includes("Rate limit") || result.error.includes("429")));
+      const isRateLimit = Boolean(result.rateLimited) || Boolean(result.error && (result.error.includes("Rate limit") || result.error.includes("429") || result.error.includes("limit")));
       const isPermissionError = Boolean(result.error && (result.error.includes("not permitted") || result.error.includes("permission") || result.error.includes("32") || result.errorCode === "AUTH_ERROR"));
       
       if (isRateLimit || isPermissionError) {
@@ -1097,7 +1102,7 @@ async function executePost(agent: Agent): Promise<void> {
         state.rateLimitBackoff.set(agent.id, backoffUntil);
         
         if (isRateLimit) {
-          console.log(`[Scheduler] Rate limited! Agent ${agent.name} in backoff until ${backoffUntil.toISOString()} (Duration: ${Math.ceil(duration/60000)}m, Failures: ${failureCount})`);
+          console.log(`[Scheduler] Rate limited or Daily limit! Agent ${agent.name} in backoff until ${backoffUntil.toISOString()} (Duration: ${Math.ceil(duration/60000)}m, Failures: ${failureCount})`);
         } else {
           console.log(`[Scheduler] Permission error! Agent ${agent.name} in backoff until ${backoffUntil.toISOString()} (Duration: ${Math.ceil(duration/60000)}m, Failures: ${failureCount})`);
           console.log(`[Scheduler] TIP: "Not permitted" errors usually mean stale cookies or account restrictions. Try exporting fresh cookies from x.com.`);
