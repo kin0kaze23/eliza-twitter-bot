@@ -199,7 +199,7 @@ export const insertAgentSchema = createInsertSchema(agents).omit({
   modelName: z.string().optional(),
   twitterOAuthClientId: z.string().optional(),
   twitterOAuthClientSecret: z.string().optional(),
-  maxPostsPerDay: z.union([z.string(), z.number()]).optional(),
+  maxPostsPerDay: z.coerce.number().int().min(1).max(100).optional(),
 });
 
 export type InsertAgent = z.infer<typeof insertAgentSchema>;
