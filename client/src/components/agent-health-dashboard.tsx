@@ -223,12 +223,13 @@ export function AgentHealthDashboard({ agentId }: AgentHealthDashboardProps) {
               </ul>
             </div>
             
-            {health.healthStatus === "critical" && (
+            {/* Show recover button if there are issues, not just critical */}
+            {health.issues.length > 0 && (
               <div className="pt-2 border-t border-destructive/20">
                 <p className="text-xs text-destructive/80 mb-2">
                   {health.posting.failedPosts > 3 
                     ? "High failure rate detected. Check Twitter Developer Portal for API permissions."
-                    : "Agent recovery needed. Click the button to reset failure counters and retry."}
+                    : "Agent recovery reset failure counters and clears stale sessions."}
                 </p>
                 <Button
                   size="sm"
