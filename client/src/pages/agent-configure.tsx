@@ -2298,13 +2298,21 @@ export default function AgentConfigure() {
 
               <div className="space-y-2">
                 <Label htmlFor="max-posts">Max Posts Per Day</Label>
-                <Input
-                  id="max-posts"
-                  type="number"
-                  value={behavior.maxPostsPerDay}
-                  onChange={(e) => setBehavior({ ...behavior, maxPostsPerDay: e.target.value })}
-                  disabled={!behavior.postingEnabled}
-                />
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="max-posts"
+                    type="number"
+                    value={behavior.maxPostsPerDay}
+                    onChange={(e) => setBehavior({ ...behavior, maxPostsPerDay: e.target.value })}
+                    disabled={!behavior.postingEnabled}
+                    className="w-24"
+                    data-testid="input-max-posts-per-day"
+                  />
+                  <span className="text-sm text-muted-foreground">posts/day</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Twitter Free: 17/day limit.
+                </p>
               </div>
 
               <div className="space-y-2">

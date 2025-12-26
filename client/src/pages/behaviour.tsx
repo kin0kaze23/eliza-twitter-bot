@@ -14,20 +14,24 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Save } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import type { Agent } from "@shared/schema";
 
 export default function Behaviour() {
   const { toast } = useToast();
-  
+
   // Posting Schedule
   const [postFrequency, setPostFrequency] = useState("2");
   const [postInterval, setPostInterval] = useState("hours");
+  const [maxPostsPerDay, setMaxPostsPerDay] = useState("12");
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(false);
   const [quietHoursStart, setQuietHoursStart] = useState("22:00");
   const [quietHoursEnd, setQuietHoursEnd] = useState("08:00");
   const [timezone, setTimezone] = useState("UTC");
-  
+
   // Reply Behavior
   const [autoReply, setAutoReply] = useState(true);
   const [replyRate, setReplyRate] = useState([70]);
@@ -36,7 +40,7 @@ export default function Behaviour() {
   const [onlyReplyToVerified, setOnlyReplyToVerified] = useState(false);
   const [replyToKeywords, setReplyToKeywords] = useState("bitcoin, crypto, defi, blockchain");
   const [ignoreKeywords, setIgnoreKeywords] = useState("spam, scam, airdrop");
-  
+
   // Content Modules
   const [modules, setModules] = useState({
     devotional: false,
@@ -49,43 +53,115 @@ export default function Behaviour() {
     technicalAnalysis: false,
     sentiment: true,
   });
-  
+
   // Action Triggers
   const [priceChangeThreshold, setPriceChangeThreshold] = useState([5]);
   const [volumeChangeThreshold, setVolumeChangeThreshold] = useState([50]);
   const [autoTweetOnNews, setAutoTweetOnNews] = useState(true);
   const [minNewsSentiment, setMinNewsSentiment] = useState([0.6]);
-  
+
   // Engagement Rules
   const [likeRandomPosts, setLikeRandomPosts] = useState(false);
   const [likeRate, setLikeRate] = useState([20]);
   const [retweetThreshold, setRetweetThreshold] = useState([0.8]);
   const [followBackEnabled, setFollowBackEnabled] = useState(false);
 
+  const { data: agents } = useQuery<Agent[]>({
+    queryKey: ["/api/agents"],
+  });
+  const agent = agents?.[0];
+  const agentId = agent?.id;
+
+  useEffect(() => {
+    if (agent) {
+      setPostFrequency(agent.postFrequency?.toString() || "2");
+      setPostInterval(agent.postInterval || "hours");
+      setMaxPostsPerDay(agent.maxPostsPerDay?.toString() || "12");
+      setQuietHoursEnabled(agent.quietHoursEnabled || false);
+      setQuietHoursStart(agent.quietHoursStart || "22:00");
+      setQuietHoursEnd(agent.quietHoursEnd || "08:00");
+      setTimezone(agent.timezone || "UTC");
+      
+      setAutoReply(agent.replyEnabled || false);
+      setReplyRate([agent.replyRate || 70]);
+      setReplyDelay([agent.replyDelay || 30]);
+      setMaxRepliesPerHour(agent.maxRepliesPerHour?.toString() || "10");
+      setOnlyReplyToVerified(agent.onlyReplyVerified || false);
+      setReplyToKeywords(agent.replyKeywords || "");
+      setIgnoreKeywords(agent.ignoreKeywords || "");
+      
+      setModules({
+        devotional: false,
+        cryptoCommentary: agent.cryptoCommentary || false,
+        newsCommentary: agent.newsCommentary || false,
+        memeMode: agent.memes || false,
+        bibleVerse: false,
+        threads: agent.threads || false,
+        marketAnalysis: agent.marketAnalysis || false,
+        technicalAnalysis: agent.technicalAnalysis || false,
+        sentiment: true,
+      });
+    }
+  }, [agent]);
+
   const toggleModule = (key: keyof typeof modules) => {
     setModules((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   const handleSave = () => {
+    if (!agentId) return;
+
     const config = {
-      posting: { postFrequency, postInterval, quietHours: { enabled: quietHoursEnabled, start: quietHoursStart, end: quietHoursEnd }, timezone },
-      replies: { autoReply, replyRate: replyRate[0], replyDelay: replyDelay[0], maxRepliesPerHour, onlyReplyToVerified, replyToKeywords, ignoreKeywords },
-      modules,
-      triggers: { priceChangeThreshold: priceChangeThreshold[0], volumeChangeThreshold: volumeChangeThreshold[0], autoTweetOnNews, minNewsSentiment: minNewsSentiment[0] },
-      engagement: { likeRandomPosts, likeRate: likeRate[0], retweetThreshold: retweetThreshold[0], followBackEnabled }
+      postingEnabled: true,
+      postFrequency: parseInt(postFrequency),
+      postInterval,
+      maxPostsPerDay: parseInt(maxPostsPerDay),
+      quietHoursEnabled,
+      quietHoursStart,
+      quietHoursEnd,
+      timezone,
+      replyEnabled: autoReply,
+      replyRate: replyRate[0],
+      replyDelay: replyDelay[0],
+      maxRepliesPerHour: parseInt(maxRepliesPerHour),
+      onlyReplyVerified: onlyReplyToVerified,
+      replyKeywords: replyToKeywords,
+      ignoreKeywords: ignoreKeywords,
+      cryptoCommentary: modules.cryptoCommentary,
+      marketAnalysis: modules.marketAnalysis,
+      newsCommentary: modules.newsCommentary,
+      technicalAnalysis: modules.technicalAnalysis,
+      threads: modules.threads,
+      memes: modules.memeMode,
     };
-    console.log("Saving behaviour config:", config);
-    toast({
-      title: "Behaviour saved",
-      description: "Agent behaviour and schedule have been updated successfully.",
-    });
+    
+    apiRequest("PATCH", `/api/agents/${agentId}`, config)
+      .then(() => {
+        toast({
+          title: "Behaviour saved",
+          description: "Agent behaviour and schedule have been updated successfully.",
+        });
+      })
+      .catch((error) => {
+        toast({
+          title: "Error",
+          description: "Failed to save configuration: " + error.message,
+          variant: "destructive",
+        });
+      });
   };
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold" data-testid="text-page-title">Behaviour & Schedule</h1>
-        <p className="text-sm text-muted-foreground">Configure posting schedule, reply behavior, and content modules</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold" data-testid="text-page-title">Behaviour & Schedule</h1>
+          <p className="text-sm text-muted-foreground">Configure posting schedule, reply behavior, and content modules</p>
+        </div>
+        <Button onClick={handleSave} className="gap-2">
+          <Save className="h-4 w-4" />
+          Save Changes
+        </Button>
       </div>
 
       <Tabs defaultValue="posting" className="space-y-6">
@@ -104,33 +180,55 @@ export default function Behaviour() {
               <CardDescription>Control when and how often the agent posts</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="space-y-2">
-                <Label htmlFor="frequency">Post Frequency</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="frequency"
-                    type="number"
-                    value={postFrequency}
-                    onChange={(e) => setPostFrequency(e.target.value)}
-                    min="1"
-                    max="24"
-                    className="w-24"
-                    data-testid="input-post-frequency"
-                  />
-                  <Select value={postInterval} onValueChange={setPostInterval}>
-                    <SelectTrigger className="w-32" data-testid="select-interval">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="minutes">Minutes</SelectItem>
-                      <SelectItem value="hours">Hours</SelectItem>
-                      <SelectItem value="days">Days</SelectItem>
-                    </SelectContent>
-                  </Select>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label htmlFor="frequency">Post Frequency</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="frequency"
+                      type="number"
+                      value={postFrequency}
+                      onChange={(e) => setPostFrequency(e.target.value)}
+                      min="1"
+                      max="24"
+                      className="w-24"
+                      data-testid="input-post-frequency"
+                    />
+                    <Select value={postInterval} onValueChange={setPostInterval}>
+                      <SelectTrigger className="w-32" data-testid="select-interval">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="minutes">Minutes</SelectItem>
+                        <SelectItem value="hours">Hours</SelectItem>
+                        <SelectItem value="days">Days</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Agent will post every {postFrequency} {postInterval}
+                  </p>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Agent will post every {postFrequency} {postInterval}
-                </p>
+
+                <div className="space-y-2">
+                  <Label htmlFor="max-posts-per-day">Daily Post Limit</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="max-posts-per-day"
+                      type="number"
+                      value={maxPostsPerDay}
+                      onChange={(e) => setMaxPostsPerDay(e.target.value)}
+                      min="1"
+                      max="100"
+                      className="w-24"
+                      data-testid="input-max-posts-per-day"
+                    />
+                    <span className="text-sm text-muted-foreground">posts/day</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Twitter Free: 17/day limit.
+                  </p>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -151,7 +249,7 @@ export default function Behaviour() {
                 </Select>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between pt-4">
                 <div className="space-y-0.5">
                   <Label htmlFor="quiet-hours">Quiet Hours</Label>
                   <p className="text-xs text-muted-foreground">Pause posting during specified hours</p>
@@ -538,13 +636,12 @@ export default function Behaviour() {
                   disabled={!likeRandomPosts}
                   data-testid="slider-like-rate"
                 />
-                <p className="text-xs text-muted-foreground">Percentage of relevant posts to like</p>
               </div>
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label>Retweet Quality Threshold</Label>
-                  <span className="text-sm text-muted-foreground">{retweetThreshold[0].toFixed(2)}</span>
+                  <Label>Retweet Threshold</Label>
+                  <span className="text-sm text-muted-foreground">{retweetThreshold[0]}</span>
                 </div>
                 <Slider
                   value={retweetThreshold}
@@ -554,13 +651,13 @@ export default function Behaviour() {
                   step={0.05}
                   data-testid="slider-retweet-threshold"
                 />
-                <p className="text-xs text-muted-foreground">Only retweet high-quality content above this score</p>
+                <p className="text-xs text-muted-foreground">Minimum sentiment/relevance score to retweet</p>
               </div>
 
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label htmlFor="follow-back">Follow Back</Label>
-                  <p className="text-xs text-muted-foreground">Automatically follow back relevant accounts</p>
+                  <Label htmlFor="follow-back">Auto-Follow Back</Label>
+                  <p className="text-xs text-muted-foreground">Follow back accounts that follow the agent</p>
                 </div>
                 <Switch
                   id="follow-back"
@@ -573,13 +670,6 @@ export default function Behaviour() {
           </Card>
         </TabsContent>
       </Tabs>
-
-      <div className="flex justify-end">
-        <Button onClick={handleSave} data-testid="button-save-behaviour">
-          <Save className="mr-2 h-4 w-4" />
-          Save All Configuration
-        </Button>
-      </div>
     </div>
   );
 }
