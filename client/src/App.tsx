@@ -23,6 +23,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Dashboard} />
       <Route path="/configure" component={AgentConfigure} />
+      <Route path="/agent/:id/configure" component={AgentConfigure} />
       <Route path="/knowledge-base" component={KnowledgeBase} />
       <Route path="/activity" component={Activity} />
       <Route path="/api-management" component={APIManagement} />

@@ -12,18 +12,18 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { 
-  Activity, 
-  MessageSquare, 
-  Zap, 
-  AlertCircle, 
-  Play, 
-  Square, 
-  RefreshCw, 
-  ExternalLink, 
-  Clock, 
-  CheckCircle2, 
-  XCircle, 
+import {
+  Activity,
+  MessageSquare,
+  Zap,
+  AlertCircle,
+  Play,
+  Square,
+  RefreshCw,
+  ExternalLink,
+  Clock,
+  CheckCircle2,
+  XCircle,
   Plus,
   Bot,
   Settings,
@@ -139,8 +139,8 @@ export default function Dashboard() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/activity-logs", agent?.id] });
-      toast({ 
-        title: "Post Generated", 
+      toast({
+        title: "Post Generated",
         description: data.tweetId ? "Tweet posted successfully!" : "Content generated (dry run mode).",
       });
     },
@@ -176,7 +176,7 @@ export default function Dashboard() {
     const date = typeof dateStr === "string" ? new Date(dateStr) : dateStr;
     const now = new Date();
     const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-    
+
     if (seconds < 60) return "Just now";
     if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
     if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
@@ -303,7 +303,7 @@ export default function Dashboard() {
           <Button variant="outline" size="sm" onClick={() => refetchLogs()} data-testid="button-refresh">
             <RefreshCw className="h-4 w-4" />
           </Button>
-          <Link href="/configure">
+          <Link href={`/agent/${agent.id}/configure`}>
             <Button variant="outline" size="sm" data-testid="button-configure">
               <Settings className="h-4 w-4 mr-2" />
               Configure

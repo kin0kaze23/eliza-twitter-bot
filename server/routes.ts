@@ -12,6 +12,7 @@ import { assemblePrompt, buildMessagesArray, selectNextContentType, formatConten
 import { sendPostCreatedWebhook, sendPostFailedWebhook } from "./webhook";
 import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
 import { requireAuth, verifyPassword, hashPassword } from "./auth";
+import { startAgent, stopAgent, getSchedulerStatus, isAgentRunning, getAgentStatus, getLatestNewsContext, runNewsMonitor } from "./scheduler";
 import { verifyScraperCredentials, validateSessionCookies, sendTweetViaScraper } from "./twitterScraper";
 import { startAgentKbRefresh, stopAgentKbRefresh, refreshKnowledgeBaseForAgent } from "./kbRefresh";
 
@@ -57,7 +58,7 @@ function cleanSpecialCharacters(content: string): string {
  */
 function detectContentType(content: string): string | null {
   const upperContent = content.toUpperCase();
-  
+
   // Check for explicit labels (most reliable)
   if (upperContent.includes("[EVENT-BASED]") || upperContent.includes("[EVENT_BASED]")) return "EVENT_BASED";
   if (upperContent.includes("[VERSE REFLECTION]") || upperContent.includes("[VERSE_REFLECTION]")) return "VERSE_REFLECTION";
@@ -66,13 +67,34 @@ function detectContentType(content: string): string | null {
   if (upperContent.includes("[CULTURAL INSIGHT]") || upperContent.includes("[CULTURAL_INSIGHT]")) return "CULTURAL_INSIGHT";
   if (upperContent.includes("[ENCOURAGEMENT]")) return "ENCOURAGEMENT";
   if (upperContent.includes("[ETERNITY ANCHOR]") || upperContent.includes("[ETERNITY_ANCHOR]")) return "ETERNITY_ANCHOR";
-  
+
   return null;
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // ============= HEALTH CHECK ============= //
+
+  // Health check endpoint for Railway/monitoring
+  app.get("/api/health", async (_req, res) => {
+    try {
+      // Quick DB connectivity check
+      await db.execute(sql`SELECT 1`);
+      res.json({
+        status: "healthy",
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime()
+      });
+    } catch (error) {
+      res.status(503).json({
+        status: "unhealthy",
+        error: "Database connection failed",
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
+
   // ============= AUTHENTICATION ============= //
-  
+
   // Check auth status
   app.get("/api/auth/status", (req, res) => {
     if (req.session && req.session.userId) {
@@ -81,7 +103,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ authenticated: false });
     }
   });
-  
+
   // Login
   app.post("/api/auth/login", async (req, res) => {
     try {
@@ -89,17 +111,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!username || !password) {
         return res.status(400).json({ error: "Username and password are required" });
       }
-      
+
       const user = await storage.getUserByUsername(username);
       if (!user) {
         return res.status(401).json({ error: "Invalid credentials" });
       }
-      
+
       const isValid = await verifyPassword(password, user.password);
       if (!isValid) {
         return res.status(401).json({ error: "Invalid credentials" });
       }
-      
+
       req.session.userId = user.id;
       req.session.username = user.username;
       res.json({ success: true, username: user.username });
@@ -108,7 +130,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: "Login failed" });
     }
   });
-  
+
   // Logout
   app.post("/api/auth/logout", (req, res) => {
     req.session.destroy((err) => {
@@ -118,32 +140,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true });
     });
   });
-  
+
   // Check auth status (returns minimal info, safe for unauthenticated calls)
   // Note: This route is intentionally public to allow the frontend to check auth state
-  
+
   // Update credentials (protected)
   app.patch("/api/auth/credentials", requireAuth, async (req, res) => {
     try {
       const { currentPassword, newPassword, newUsername } = req.body;
-      
+
       if (!req.session.userId) {
         return res.status(401).json({ error: "Not authenticated" });
       }
-      
+
       const user = await storage.getUser(req.session.userId);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
-      
+
       // Verify current password
       const isValid = await verifyPassword(currentPassword, user.password);
       if (!isValid) {
         return res.status(401).json({ error: "Current password is incorrect" });
       }
-      
+
       const updates: { username?: string; password?: string } = {};
-      
+
       if (newUsername && newUsername !== user.username) {
         const existingUser = await storage.getUserByUsername(newUsername);
         if (existingUser) {
@@ -151,27 +173,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         updates.username = newUsername;
       }
-      
+
       if (newPassword) {
         updates.password = await hashPassword(newPassword);
       }
-      
+
       if (Object.keys(updates).length > 0) {
         await storage.updateUser(user.id, updates);
         if (updates.username) {
           req.session.username = updates.username;
         }
       }
-      
+
       res.json({ success: true, message: "Credentials updated successfully" });
     } catch (error) {
       console.error("Update credentials error:", error);
       res.status(500).json({ error: "Failed to update credentials" });
     }
   });
-  
+
   // ============= AGENTS ============= //
-  
+
   // Get all agents
   app.get("/api/agents", async (req, res) => {
     try {
@@ -222,7 +244,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
-      
+
       // Handle KB auto-refresh service updates
       const kbAutoRefreshChanged = req.body.kbAutoRefreshEnabled !== undefined || req.body.kbAutoRefreshIntervalHours !== undefined;
       if (kbAutoRefreshChanged) {
@@ -234,7 +256,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           stopAgentKbRefresh(agent.id);
         }
       }
-      
+
       res.json(agent);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -270,12 +292,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Get knowledge base for context
       const knowledgeEntries = await storage.getActiveKnowledgeBase(req.params.id);
-      
+
       // Get recent verses and content types for full context
       const verseWindow = agent.verseReuseWindow || 10;
       const recentVerses = await storage.getRecentVerseUsages(req.params.id, verseWindow);
       const recentContentTypes = await storage.getRecentContentTypeUsages(req.params.id, 7);
-      
+
       // Assemble the full system prompt
       const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
         includeKnowledge: true,
@@ -286,11 +308,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         recentVerses,
         recentContentTypes,
       });
-      
+
       // Extract sections from the system prompt for labeling
       const sections: { name: string; content: string; category: string }[] = [];
       const systemPrompt = assembledPrompt.systemPrompt;
-      
+
       // Identify key sections by looking for patterns
       if (systemPrompt.includes("CHARACTER PERSONALITY")) {
         sections.push({ name: "Personality", content: "", category: "voice" });
@@ -316,7 +338,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (systemPrompt.includes("HISTORICAL CONTEXT")) {
         sections.push({ name: "Historical Context", content: "", category: "rules" });
       }
-      
+
       res.json({
         systemPrompt: assembledPrompt.systemPrompt,
         userPrompt: agent.personalityPrompt || "",
@@ -343,13 +365,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
-      
+
       // Restart KB refresh when agent is deployed/activated
       if (status === "deployed" && agent.kbAutoRefreshEnabled && agent.kbAutoRefreshIntervalHours) {
         console.log(`[KB Refresh] Restarting KB refresh for deployed agent ${agent.id}`);
         startAgentKbRefresh(agent);
       }
-      
+
       res.json(agent);
     } catch (error) {
       console.error("Error updating agent status:", error);
@@ -364,7 +386,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
-      
+
       const result = await refreshKnowledgeBaseForAgent(req.params.id);
       res.json({
         message: "Knowledge base refresh completed",
@@ -384,15 +406,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
-      
+
       // Clear cached session cookies to force fresh authentication
       await storage.updateAgent(req.params.id, {
         twitterCookies: null,
       });
-      
+
       // Reset all failure counters and circuit breaker state
       await storage.recoverAgent(req.params.id);
-      
+
       res.json({
         message: "Agent recovered successfully",
         action: "All failure counters and circuit breaker state have been reset. Session cookies cleared. Agent will attempt fresh authentication on next post.",
@@ -423,7 +445,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...req.body,
         agentId: req.params.agentId,
       });
-      const entry = await storage.createKnowledgeBaseEntry(validatedData);
+      const entry = await storage.createKnowledgeBaseEntry({
+        ...validatedData,
+        status: "approved", // Auto-approve all new entries
+        active: true,
+      });
       res.status(201).json(entry);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -442,15 +468,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!existingEntry) {
         return res.status(404).json({ error: "Knowledge entry not found" });
       }
-      
+
       // Only allow editing of manually added entries
       if (existingEntry.source !== "manual") {
-        return res.status(403).json({ 
-          error: "Cannot edit this entry", 
+        return res.status(403).json({
+          error: "Cannot edit this entry",
           message: "Only manually added entries can be edited. API-extracted entries are managed by the AI filter prompt."
         });
       }
-      
+
       const partialSchema = insertKnowledgeBaseSchema.partial().omit({ agentId: true });
       const validatedData = partialSchema.parse(req.body);
       const entry = await storage.updateKnowledgeBaseEntry(req.params.id, validatedData);
@@ -468,11 +494,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/knowledge/:id/priority", async (req, res) => {
     try {
       const { priority } = req.body;
-      
+
       if (!priority || !["high", "medium", "low"].includes(priority)) {
         return res.status(400).json({ error: "Invalid priority. Must be high, medium, or low." });
       }
-      
+
       const entry = await storage.updateKnowledgeBasePriority(req.params.id, priority);
       if (!entry) {
         return res.status(404).json({ error: "Knowledge entry not found" });
@@ -554,9 +580,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const count = await storage.batchApproveKnowledgeBase(agentId, ids, approvedBy);
-      
+
       if (count === 0) {
-        return res.status(404).json({ 
+        return res.status(404).json({
           error: "No entries were approved. Ensure they are pending and belong to this agent.",
           approvedCount: 0
         });
@@ -584,9 +610,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const count = await storage.batchArchiveKnowledgeBase(agentId, ids);
-      
+
       if (count === 0) {
-        return res.status(404).json({ 
+        return res.status(404).json({
           error: "No entries were archived. Ensure they belong to this agent and are not already archived.",
           archivedCount: 0
         });
@@ -624,7 +650,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (deactivatedCount === 0) {
-        return res.status(404).json({ 
+        return res.status(404).json({
           error: "No entries were deactivated.",
           deactivatedCount: 0
         });
@@ -661,7 +687,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (deletedCount === 0) {
-        return res.status(404).json({ 
+        return res.status(404).json({
           error: "No entries were deleted.",
           deletedCount: 0
         });
@@ -793,23 +819,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const now = new Date();
       const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
       const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-      
+
       const stats = {
         total: mentions.length,
         responded: mentions.filter(m => m.responded).length,
         unresponded: mentions.filter(m => !m.responded).length,
         failed: mentions.filter(m => !m.responded && m.errorMessage).length,
-        repliesLastHour: mentions.filter(m => 
+        repliesLastHour: mentions.filter(m =>
           m.responded && m.processedAt && new Date(m.processedAt) > hourAgo
         ).length,
-        repliesLast24h: mentions.filter(m => 
+        repliesLast24h: mentions.filter(m =>
           m.responded && m.processedAt && new Date(m.processedAt) > dayAgo
         ).length,
         avgRetryCount: mentions.filter(m => m.retryCount > 0).length > 0
           ? mentions.reduce((sum, m) => sum + m.retryCount, 0) / mentions.filter(m => m.retryCount > 0).length
           : 0,
       };
-      
+
       res.json(stats);
     } catch (error) {
       console.error("Error fetching mention stats:", error);
@@ -945,7 +971,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const response = await fetch(url.toString(), fetchOptions);
 
       const responseText = await response.text();
-      
+
       let responseData;
       try {
         responseData = JSON.parse(responseText);
@@ -965,18 +991,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const jpModule = await import("jsonpath");
           const jp = jpModule.default || jpModule;
           extractedData = jp.query(responseData, api.jsonPath);
-          
+
           // Extract title and content from first item if paths provided
           if (extractedData.length > 0 && (api.titlePath || api.contentPath)) {
             const firstItem = extractedData[0];
-            
+
             if (api.titlePath) {
               const titles = jp.query(firstItem, api.titlePath);
               if (titles.length > 0) {
                 extractedTitle = String(titles[0]);
               }
             }
-            
+
             if (api.contentPath) {
               const contents = jp.query(firstItem, api.contentPath);
               if (contents.length > 0) {
@@ -1013,7 +1039,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       console.error("Error testing custom API:", error);
-      
+
       // Update test status as failed
       try {
         if (req.params.id) {
@@ -1026,7 +1052,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (updateError) {
         console.error("Failed to update test status:", updateError);
       }
-      
+
       res.status(500).json({
         success: false,
         error: error.message || "Failed to test custom API",
@@ -1041,31 +1067,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { agentId } = req.params;
       const { message, conversationHistory, includeKnowledge = true } = req.body;
-      
+
       if (!message) {
         return res.status(400).json({ error: "Message is required" });
       }
-      
+
       // Get agent configuration
       const agent = await storage.getAgent(agentId);
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
-      
+
       // Determine API key to use
       let apiKey = agent.modelApiKey || process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY;
       if (!apiKey) {
-        return res.status(400).json({ 
-          error: "No API key configured", 
-          details: "Please add OPENAI_API_KEY or ANTHROPIC_API_KEY to your Replit secrets, or configure a model API key in the agent settings." 
+        return res.status(400).json({
+          error: "No API key configured",
+          details: "Please add OPENAI_API_KEY or ANTHROPIC_API_KEY to your Replit secrets, or configure a model API key in the agent settings."
         });
       }
-      
+
       // Get active knowledge base entries for this agent
-      const knowledgeEntries = includeKnowledge 
+      const knowledgeEntries = includeKnowledge
         ? await storage.getActiveKnowledgeBase(agentId)
         : [];
-      
+
       // Use CONVERSATIONAL prompt (not auto-post prompt) for natural dialogue
       const conversationPrompt = await assembleConversationPrompt(agent, knowledgeEntries, {
         includeKnowledge,
@@ -1073,28 +1099,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         maxKbEntries: 15,
         maxKbTokens: 1500,
       });
-      
+
       console.log(`[ConversationTest] Using conversational prompt with components: ${conversationPrompt.metadata.componentsIncluded.join(', ')}`);
-      
+
       // Build messages array with conversational prompt
       const messages = buildConversationMessages(
         conversationPrompt,
         conversationHistory,
         message
       );
-      
+
       let response: string;
-      
+
       // Use conversation-specific model if configured, otherwise use default
       const modelProvider = agent.conversationModelProvider || agent.modelProvider || "openai";
       const modelName = agent.conversationModelName || agent.modelName || "gpt-4-turbo-preview";
       const temperature = agent.conversationTemperature !== null ? Number(agent.conversationTemperature) : Number(agent.temperature) || 0.7;
       const maxTokens = agent.conversationMaxTokens || agent.maxTokens || 500;
-      
+
       // Call the appropriate AI provider
       if (modelProvider === "openai") {
         const openai = new OpenAI({ apiKey });
-        
+
         const params = buildOpenAIParams(modelName, {
           model: modelName,
           messages: messages as any,
@@ -1104,18 +1130,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           frequency_penalty: Number(agent.frequencyPenalty) || 0.5,
           presence_penalty: Number(agent.presencePenalty) || 0.5,
         });
-        
+
         const completion = await safeOpenAICall(openai, params);
-        
+
         response = completion.choices[0]?.message?.content || "No response generated";
-        
+
       } else if (modelProvider === "anthropic") {
         const anthropic = new Anthropic({ apiKey });
-        
+
         // Anthropic requires system message separately
         const systemMessage = messages.find(m => m.role === "system");
         const conversationMessages = messages.filter(m => m.role !== "system");
-        
+
         const completion = await anthropic.messages.create({
           model: modelName,
           system: systemMessage?.content || "You are a helpful AI assistant.",
@@ -1127,14 +1153,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           temperature,
           top_p: Number(agent.topP) || 0.9,
         });
-        
+
         const textContent = completion.content.find((c) => c.type === "text") as any;
         response = textContent?.text || "No response generated";
-        
+
       } else {
         return res.status(400).json({ error: `Unsupported model provider: ${agent.modelProvider}` });
       }
-      
+
       res.json({
         success: true,
         response,
@@ -1149,9 +1175,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       console.error("Error in conversation test:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: "Failed to process conversation",
-        details: error.message 
+        details: error.message
       });
     }
   });
@@ -1161,11 +1187,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { agentId } = req.params;
       const agent = await storage.getAgent(agentId);
-      
+
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
-      
+
       // Credential info (safe - only prefixes and lengths)
       const credentialInfo = {
         apiKey: {
@@ -1189,7 +1215,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           prefix: agent.twitterAccessSecret?.substring(0, 8) || "missing",
         },
       };
-      
+
       // Test 1: GET /2/users/me (should work on Free tier)
       let getUserTest = { success: false, error: "", details: "" };
       try {
@@ -1203,12 +1229,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const token = { key: agent.twitterAccessToken!, secret: agent.twitterAccessSecret! };
         const requestData = { url: 'https://api.twitter.com/2/users/me', method: 'GET' as const };
         const authHeader = oauth.toHeader(oauth.authorize(requestData, token));
-        
+
         const response = await fetch(requestData.url, {
           method: 'GET',
           headers: { ...authHeader },
         });
-        
+
         if (response.ok) {
           const data = await response.json();
           getUserTest = { success: true, error: "", details: JSON.stringify(data) };
@@ -1219,18 +1245,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (e: any) {
         getUserTest = { success: false, error: e.message, details: "" };
       }
-      
+
       res.json({
         agentName: agent.name,
         credentials: credentialInfo,
         tests: {
           getUserMe: getUserTest,
         },
-        recommendation: getUserTest.success 
+        recommendation: getUserTest.success
           ? "Credentials are working! GET requests are functional."
           : `GET request failed. Check if: 1) Access Token was regenerated AFTER enabling Read+Write permissions, 2) All 4 credentials are complete (not truncated), 3) No extra spaces in credential values`,
       });
-      
+
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -1242,13 +1268,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { agentId } = req.params;
       const bodyCredentials = req.body || {};
-      
+
       // Get agent configuration from database
       const agent = await storage.getAgent(agentId);
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
-      
+
       // Use request body credentials if provided, otherwise fall back to database, then env secrets
       // Priority: Request body > Database > Environment secrets
       // This allows testing unsaved form values while still supporting env-based credentials
@@ -1263,13 +1289,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         twitter2faSecret: bodyCredentials.twitter2faSecret || agent.twitter2faSecret,
         twitterCookies: bodyCredentials.twitterCookies || agent.twitterCookies,
       };
-      
+
       // Check which credentials are available (using merged credentials including env secrets)
-      const hasApiCredentials = testCredentials.twitterApiKey && testCredentials.twitterApiSecret && 
-                                testCredentials.twitterAccessToken && testCredentials.twitterAccessSecret;
+      const hasApiCredentials = testCredentials.twitterApiKey && testCredentials.twitterApiSecret &&
+        testCredentials.twitterAccessToken && testCredentials.twitterAccessSecret;
       const hasScraperCredentials = testCredentials.twitterUsername && testCredentials.twitterPassword;
       const hasCookies = testCredentials.twitterCookies && testCredentials.twitterCookies.trim() !== '';
-      
+
       // If no credential type is present (API, login, or cookies)
       if (!hasApiCredentials && !hasScraperCredentials && !hasCookies) {
         return res.status(400).json({
@@ -1279,14 +1305,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           hint: "Option 1 (Recommended): Import session cookies from your browser. Option 2: Add Twitter Username and Password. Option 3: Add API credentials for official posting."
         });
       }
-      
+
       const results: any = {
         agentName: agent.name,
         testedAt: new Date().toISOString(),
         api: null,
         scraper: null,
       };
-      
+
       // Test API credentials if present
       if (hasApiCredentials) {
         try {
@@ -1303,19 +1329,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 .digest('base64');
             },
           });
-          
+
           const token = {
             key: testCredentials.twitterAccessToken!,
             secret: testCredentials.twitterAccessSecret!,
           };
-          
+
           const requestData = {
             url: 'https://api.twitter.com/1.1/account/verify_credentials.json',
             method: 'GET',
           };
-          
+
           const authHeader = oauth.toHeader(oauth.authorize(requestData, token));
-          
+
           const response = await fetch(requestData.url, {
             method: requestData.method,
             headers: {
@@ -1323,7 +1349,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               'Content-Type': 'application/json',
             },
           });
-          
+
           if (response.ok) {
             const userData = await response.json();
             results.api = {
@@ -1343,7 +1369,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               success: false,
               error: `HTTP ${response.status}`,
               details: errorText,
-              hint: response.status === 401 
+              hint: response.status === 401
                 ? "Check API Key, Secret, Access Token, and Access Secret are correct"
                 : "API authentication failed"
             };
@@ -1356,13 +1382,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           };
         }
       }
-      
+
       // Test Scraper credentials: First try cookies (most reliable), then fall back to login
       if (hasCookies) {
         // Validate session using cookies - no login attempt (avoids Twitter blocks)
         try {
           const cookieResult = await validateSessionCookies(testCredentials.twitterCookies!, testCredentials.twitterUsername || undefined);
-          
+
           if (cookieResult.usernameRequired) {
             // Session is valid but username is missing - this is a blocking error
             results.scraper = {
@@ -1386,7 +1412,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 console.warn(`[Test] Could not persist detected username: ${e}`);
               }
             }
-            
+
             results.scraper = {
               success: true,
               message: "Session cookies valid",
@@ -1441,10 +1467,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
               hint: scraperResult.error?.includes('2fa') || scraperResult.error?.includes('2FA')
                 ? "Two-factor authentication required. Add your 2FA secret."
                 : scraperResult.error?.includes('locked') || scraperResult.error?.includes('suspended')
-                ? "Account may be locked or suspended. Check your Twitter account."
-                : scraperResult.error?.includes('page does not exist') || scraperResult.error?.includes('code 34')
-                ? "Twitter is blocking automated logins. Use 'Import Session Cookies' below instead."
-                : "Check username and password are correct. Email may also be required."
+                  ? "Account may be locked or suspended. Check your Twitter account."
+                  : scraperResult.error?.includes('page does not exist') || scraperResult.error?.includes('code 34')
+                    ? "Twitter is blocking automated logins. Use 'Import Session Cookies' below instead."
+                    : "Check username and password are correct. Email may also be required."
             };
           }
         } catch (e: any) {
@@ -1456,14 +1482,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           };
         }
       }
-      
+
       // Determine overall success and provide recommendation
       const apiSuccess = results.api?.success === true;
       const scraperSuccess = results.scraper?.success === true;
       const scraperPartialSuccess = (results.scraper as any)?.partialSuccess === true;
       const scraperCanPost = scraperSuccess || scraperPartialSuccess;
       const scraperCanDetectMentions = scraperSuccess; // Only true if username resolved
-      
+
       let recommendation = "";
       if (apiSuccess && scraperSuccess) {
         recommendation = "Both credential types working. API will be used for posting, scraper for mention/comment detection.";
@@ -1482,17 +1508,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         recommendation = "Both credential types failed. Please check your credentials.";
       }
-      
+
       // Overall success requires at least one working credential AND username resolved for scraper
       // If using cookies and username is not provided/detected, that's a blocking error
       const overallSuccess = (apiSuccess && scraperSuccess) || // Both work = full success
-                             (apiSuccess && !hasCookies && !hasScraperCredentials) || // API only, no scraper attempted
-                             (scraperSuccess && !hasApiCredentials) || // Scraper only (with username)
-                             (apiSuccess && scraperSuccess); // Both work
-      
+        (apiSuccess && !hasCookies && !hasScraperCredentials) || // API only, no scraper attempted
+        (scraperSuccess && !hasApiCredentials) || // Scraper only (with username)
+        (apiSuccess && scraperSuccess); // Both work
+
       // If only partial success (cookies work but no username), overall should be false
       const hasUsernameBlocker = scraperPartialSuccess && !scraperSuccess;
-      
+
       res.json({
         success: overallSuccess && !hasUsernameBlocker,
         usernameRequired: hasUsernameBlocker,
@@ -1506,15 +1532,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
           usernameRequired: hasUsernameBlocker
         }
       });
-      
+
     } catch (error: any) {
       console.error("Error testing Twitter credentials:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         success: false,
         error: "Failed to test Twitter credentials",
         details: error.message,
         hint: "An unexpected error occurred. Check server logs for details."
       });
+    }
+  });
+
+  // Export ElizaOS Character Manifest
+  app.get("/api/agents/:id/export", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const agent = await storage.getAgent(id);
+
+      if (!agent) {
+        return res.status(404).json({ error: "Agent not found" });
+      }
+
+      // Fetch Knowledge Base
+      const knowledgeEntries = await storage.getKnowledgeBaseEntries(id);
+      const activeKnowledge = knowledgeEntries
+        .filter(k => k.status === 'approved' && k.active)
+        .map(k => k.content);
+
+      // Helper to split text into array
+      const splitText = (text: string | null | undefined): string[] => {
+        if (!text) return [];
+        return text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+      };
+
+      const splitComma = (text: string | null | undefined): string[] => {
+        if (!text) return [];
+        return text.split(',').map(item => item.trim()).filter(item => item.length > 0);
+      };
+
+      // Construct Character JSON
+      const character = {
+        name: agent.name,
+        clients: ["twitter"],
+        modelProvider: agent.modelProvider || "openai",
+        settings: {
+          secrets: {},
+          voice: {
+            model: "en_US-male-medium"
+          }
+        },
+        plugins: [],
+        bio: splitText(agent.bio),
+        lore: splitText(agent.lore),
+        knowledge: activeKnowledge,
+        messageExamples: Array.isArray(agent.messageExamples) ? agent.messageExamples : [],
+        postExamples: Array.isArray(agent.postExamples) ? agent.postExamples : [],
+        style: {
+          all: splitText(agent.styleAll),
+          chat: splitText(agent.chatStyle),
+          post: splitText(agent.postStyle)
+        },
+        topics: splitComma(agent.topics),
+        adjectives: splitComma(agent.adjectives),
+        system: agent.systemPrompt || undefined,
+      };
+
+      // Set filename
+      const filename = `${agent.name.toLowerCase().replace(/\s+/g, '-')}.character.json`;
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Type', 'application/json');
+
+      res.json(character);
+    } catch (error: any) {
+      console.error("Error exporting agent manifest:", error);
+      res.status(500).json({ error: "Failed to export agent manifest" });
     }
   });
 
@@ -1527,14 +1619,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { agentId } = req.params;
       const agent = await storage.getAgent(agentId);
-      
+
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
 
       // Check credential status
-      const hasApiCreds = !!(agent.twitterApiKey && agent.twitterApiSecret && 
-                           agent.twitterAccessToken && agent.twitterAccessSecret);
+      const hasApiCreds = !!(agent.twitterApiKey && agent.twitterApiSecret &&
+        agent.twitterAccessToken && agent.twitterAccessSecret);
       const hasScraperCreds = !!(agent.twitterUsername && agent.twitterPassword);
       const hasCookies = !!(agent.twitterCookies && agent.twitterCookies.trim() !== '');
 
@@ -1544,16 +1636,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Calculate posting interval
       const postFrequency = agent.postFrequency || 1;
       const postInterval = agent.postInterval || "hours";
-      const intervalMs = postInterval === "minutes" 
-        ? postFrequency * 60 * 1000 
+      const intervalMs = postInterval === "minutes"
+        ? postFrequency * 60 * 1000
         : postFrequency * 60 * 60 * 1000;
 
       // Determine if posting is stalled
       const expectedPostTime = intervalMs * 2; // 2x interval = stalled
-      const isPostingStalled = postingStats.timeSinceLastPost !== null && 
-                               postingStats.timeSinceLastPost > expectedPostTime &&
-                               agent.status === "deployed" &&
-                               agent.postingEnabled;
+      const isPostingStalled = postingStats.timeSinceLastPost !== null &&
+        postingStats.timeSinceLastPost > expectedPostTime &&
+        agent.status === "deployed" &&
+        agent.postingEnabled;
 
       // Determine overall health status
       let healthStatus: "healthy" | "warning" | "critical" = "healthy";
@@ -1583,7 +1675,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         healthStatus = healthStatus === "critical" ? "critical" : "warning";
         issues.push(`High failure rate: ${postingStats.failedPosts} failed posts (${Math.round(postingStats.successRate)}% success rate)`);
       }
-      
+
       // Check for safe mode activation (agent paused due to repeated auth failures)
       let safeModeActivated = false;
       let safeModeReason = "";
@@ -1641,14 +1733,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { agentId } = req.params;
       const hours = parseInt(req.query.hours as string) || 24;
-      
+
       const agent = await storage.getAgent(agentId);
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
 
       const stats = await storage.getPostingHealthStats(agentId, hours);
-      
+
       res.json({
         agentId,
         agentName: agent.name,
@@ -1663,12 +1755,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Manually trigger news refresh
+  app.post("/api/agents/:id/news/refresh", requireAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const agent = await storage.getAgent(id);
+
+      if (!agent) {
+        return res.status(404).json({ error: "Agent not found" });
+      }
+
+      if (!agent.monitoringEnabled) {
+        return res.status(400).json({ error: "News monitoring is not enabled for this agent." });
+      }
+
+      // Run the scraper
+      const result = await runNewsMonitor(agent);
+
+      res.json({
+        success: result.success,
+        count: result.count,
+        message: result.success
+          ? `Successfully refreshed news. Found ${result.count} new items.`
+          : "News refresh completed but found no new items."
+      });
+    } catch (error: any) {
+      console.error("Error refreshing news:", error);
+      res.status(500).json({ error: "Failed to refresh news", details: error.message });
+    }
+  });
+
   // Get content diversity stats for an agent
   app.get("/api/agents/:agentId/content-diversity", async (req, res) => {
     try {
       const { agentId } = req.params;
       const days = parseInt(req.query.days as string) || 7;
-      
+
       const agent = await storage.getAgent(agentId);
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
@@ -1676,18 +1798,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Get content type usage stats
       const allContentTypes = [
-        "EVENT_BASED", "VERSE_REFLECTION", "DEEP_QUESTION", 
+        "EVENT_BASED", "VERSE_REFLECTION", "DEEP_QUESTION",
         "WISDOM_BITE", "CULTURAL_INSIGHT", "ENCOURAGEMENT", "ETERNITY_ANCHOR"
       ];
       const contentTypeUsages = await storage.getRecentContentTypeUsages(agentId, 50);
       const recentTypes = contentTypeUsages.slice(0, 7).map(u => u.contentType);
       const usedTypesSet = new Set(contentTypeUsages.map(u => u.contentType));
       const unusedTypes = allContentTypes.filter(t => !usedTypesSet.has(t));
-      
+
       // Get recent verse usages
       const verseWindow = (agent as any).verseReuseWindow || 30;
       const recentVerses = await storage.getRecentVerseUsages(agentId, verseWindow);
-      
+
       // Get recent posts with their content types and verses from activity logs
       const recentPosts = await storage.getActivityLogs(agentId, 20);
       const postsWithContent = recentPosts
@@ -1703,11 +1825,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const uniqueContentTypes = new Set(postsWithContent.map(p => p.contentType).filter(Boolean));
       const uniqueVerses = new Set(postsWithContent.map(p => p.bibleVerse).filter(Boolean));
       const totalPosts = postsWithContent.length;
-      
-      const contentTypeDiversityScore = totalPosts > 0 
-        ? Math.round((uniqueContentTypes.size / Math.min(totalPosts, 7)) * 100) 
+
+      const contentTypeDiversityScore = totalPosts > 0
+        ? Math.round((uniqueContentTypes.size / Math.min(totalPosts, 7)) * 100)
         : 0;
-      
+
       const verseDiversityScore = totalPosts > 0 && recentVerses.length > 0
         ? Math.round((uniqueVerses.size / Math.max(recentVerses.length, 1)) * 100)
         : 100; // 100% if no verses used (not repetitive)
@@ -1780,7 +1902,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const data = await response.json();
-        
+
         // Filter for GPT models and sort by creation date (newest first)
         const gptModels = data.data
           .filter((m: any) => m.id.includes('gpt') || m.id.includes('o1') || m.id.includes('o3'))
@@ -1801,7 +1923,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           models: models
         };
       }
-      
+
       // Test Google Gemini
       else if (provider === "google" || provider === "gemini") {
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
@@ -1819,7 +1941,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         const data = await response.json();
-        
+
         // Filter for Gemini models and normalize to match expected structure
         const geminiModels = data.models
           ?.filter((m: any) => m.name && m.name.includes('gemini'))
@@ -1843,7 +1965,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           models: models
         };
       }
-      
+
       // Test Anthropic Claude
       else if (provider === "anthropic") {
         // Anthropic doesn't have a public models list endpoint
@@ -1888,7 +2010,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           note: "Anthropic doesn't provide a models list API. These are the latest known Claude models."
         };
       }
-      
+
       else {
         return res.status(400).json({
           success: false,
@@ -1914,22 +2036,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Helper function to evaluate news relevance and priority using AI
   // Now includes learning from user priority corrections
   async function evaluateRelevance(
-    title: string, 
-    content: string, 
+    title: string,
+    content: string,
     customFilterPrompt?: string,
     agentId?: string
-  ): Promise<{ 
-    isRelevant: boolean; 
+  ): Promise<{
+    isRelevant: boolean;
     relevanceScore: number;
     priority: "high" | "medium" | "low";
-    topics: string[]; 
-    reason: string 
+    topics: string[];
+    reason: string
   }> {
     try {
       // This uses Replit AI Integrations - no API key needed, charges billed to credits
       const openaiModule = await import("openai");
       const OpenAI = openaiModule.default;
-      
+
       const openai = new OpenAI({
         baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
         apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY
@@ -1943,10 +2065,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (corrections.length > 0) {
             learningExamples = `
 IMPORTANT: Learn from the user's past priority corrections. They have adjusted these entries:
-${corrections.slice(0, 5).map((c, i) => 
-  `${i + 1}. "${c.title.substring(0, 80)}..." (Category: ${c.category})
+${corrections.slice(0, 5).map((c, i) =>
+              `${i + 1}. "${c.title.substring(0, 80)}..." (Category: ${c.category})
    AI assigned: ${c.originalPriority} → User corrected to: ${c.priority}`
-).join('\n')}
+            ).join('\n')}
 
 Use these corrections to better understand the user's priority preferences for similar content.
 `;
@@ -1957,7 +2079,7 @@ Use these corrections to better understand the user's priority preferences for s
       }
 
       // Use custom filter prompt if provided, otherwise use default
-      const basePrompt = customFilterPrompt 
+      const basePrompt = customFilterPrompt
         ? `You are a content relevance filter for a Twitter AI agent.
 
 Evaluate this news item based on the following custom criteria:
@@ -2013,19 +2135,19 @@ Respond in JSON format:
       });
 
       const result = JSON.parse(response.choices[0]?.message?.content || "{}");
-      const relevanceScore = typeof result.relevanceScore === "number" 
-        ? result.relevanceScore 
+      const relevanceScore = typeof result.relevanceScore === "number"
+        ? result.relevanceScore
         : 0.0;
-      
+
       // Auto-approve if score >= 0.6 (stated threshold)
       const isRelevant = relevanceScore >= 0.6;
-      
+
       // Get priority from AI response, default based on relevance if not provided
-      const priority: "high" | "medium" | "low" = 
+      const priority: "high" | "medium" | "low" =
         result.priority === "high" || result.priority === "medium" || result.priority === "low"
           ? result.priority
           : relevanceScore >= 0.8 ? "high" : relevanceScore >= 0.6 ? "medium" : "low";
-      
+
       return {
         isRelevant,
         relevanceScore,
@@ -2036,12 +2158,12 @@ Respond in JSON format:
     } catch (error) {
       console.error("AI relevance evaluation failed:", error);
       // Default to manual review if AI fails
-      return { 
-        isRelevant: false, 
+      return {
+        isRelevant: false,
         relevanceScore: 0.0,
         priority: "low",
-        topics: [], 
-        reason: "AI evaluation failed - requires manual review" 
+        topics: [],
+        reason: "AI evaluation failed - requires manual review"
       };
     }
   }
@@ -2050,16 +2172,16 @@ Respond in JSON format:
   app.post("/api/agents/:agentId/knowledge/ingest/:sourceId", async (req, res) => {
     try {
       const { agentId, sourceId } = req.params;
-      
+
       // Fetch custom API configuration
       const customApi = await storage.getCustomApi(sourceId);
       if (!customApi) {
         return res.status(404).json({ error: "Custom API not found" });
       }
-      
+
       // Build request headers
       const headers: Record<string, string> = { ...customApi.headers };
-      
+
       // Add authentication from environment variables
       if (customApi.authType !== "none" && customApi.authKeyEnvVar) {
         const apiKey = process.env[customApi.authKeyEnvVar];
@@ -2069,7 +2191,7 @@ Respond in JSON format:
             error: `API key not found. Please add ${customApi.authKeyEnvVar} to your Replit secrets.`,
           });
         }
-        
+
         if (customApi.authType === "bearer") {
           headers["Authorization"] = `Bearer ${apiKey}`;
         } else if (customApi.authType === "api_key" && customApi.authHeaderName) {
@@ -2078,31 +2200,31 @@ Respond in JSON format:
           headers["Authorization"] = `Basic ${Buffer.from(apiKey).toString("base64")}`;
         }
       }
-      
+
       // Build URL with query parameters
       let url = customApi.baseUrl;
       if (Object.keys(customApi.queryParams || {}).length > 0) {
         const params = new URLSearchParams(customApi.queryParams || {});
         url += `?${params.toString()}`;
       }
-      
+
       // Make API request
       const response = await fetch(url, {
         method: customApi.method || "GET",
         headers,
       });
-      
+
       if (!response.ok) {
         throw new Error(`API returned ${response.status}: ${response.statusText}`);
       }
-      
+
       const data = await response.json();
-      
+
       // Extract data using JSON path
       const jpModule = await import("jsonpath");
       const jp = jpModule.default || jpModule;
       let extractedData: any[] = [];
-      
+
       try {
         if (customApi.jsonPath) {
           extractedData = jp.query(data, customApi.jsonPath);
@@ -2118,7 +2240,7 @@ Respond in JSON format:
           jsonPath: customApi.jsonPath,
         });
       }
-      
+
       if (!extractedData || extractedData.length === 0) {
         console.warn(`No data extracted from ${customApi.baseUrl} using path: ${customApi.jsonPath}`);
         return res.status(400).json({
@@ -2128,15 +2250,15 @@ Respond in JSON format:
           hint: "Use the Test button to preview extraction results before ingesting",
         });
       }
-      
+
       // Create KB entries from extracted data with AI-powered relevance filtering
       const createdEntries = [];
       const relevanceStats = { approved: 0, pending: 0 };
-      
+
       for (const item of extractedData.slice(0, 20)) { // Limit to 20 entries per ingestion
         let title = "Untitled";
         let content = JSON.stringify(item);
-        
+
         // Extract title and content using paths
         if (customApi.titlePath) {
           const titles = jp.query(item, customApi.titlePath);
@@ -2144,18 +2266,18 @@ Respond in JSON format:
             title = String(titles[0]);
           }
         }
-        
+
         if (customApi.contentPath) {
           const contents = jp.query(item, customApi.contentPath);
           if (contents.length > 0) {
             content = String(contents[0]);
           }
         }
-        
+
         // AI-powered relevance evaluation with custom filter prompt from API config
         // Pass agentId to enable learning from user's priority corrections
         const relevanceEval = await evaluateRelevance(title, content, customApi.filterPrompt || undefined, agentId);
-        
+
         // Auto-approve if relevant, otherwise keep as pending for manual review
         const isAutoApproved = relevanceEval.isRelevant;
         const tags = [
@@ -2165,7 +2287,7 @@ Respond in JSON format:
           isAutoApproved ? "ai-approved" : "ai-review-required",
           `priority-${relevanceEval.priority}` // Tag with priority for easy filtering
         ];
-        
+
         const entryData = {
           title: title.substring(0, 500),
           content: content.substring(0, 10000),
@@ -2181,12 +2303,12 @@ Respond in JSON format:
           lastFetchedAt: new Date(),
           agentId: agentId,
         };
-        
+
         try {
           const validatedData = insertKnowledgeBaseSchema.parse(entryData);
           const created = await storage.createKnowledgeBaseEntry(validatedData);
           createdEntries.push(created);
-          
+
           if (isAutoApproved) {
             relevanceStats.approved++;
           } else {
@@ -2196,7 +2318,7 @@ Respond in JSON format:
           console.error("Error creating KB entry:", err);
         }
       }
-      
+
       res.status(201).json({
         success: true,
         message: `Ingested ${createdEntries.length} entries: ${relevanceStats.approved} auto-approved, ${relevanceStats.pending} pending review`,
@@ -2218,35 +2340,35 @@ Respond in JSON format:
   app.post("/api/agents/:agentId/knowledge/refresh/:sourceId", async (req, res) => {
     try {
       const { agentId, sourceId } = req.params;
-      
+
       // Delete old entries from this source (keep them fresh)
       const existingEntries = await storage.getKnowledgeBaseEntries(agentId);
       const entriesToDelete = existingEntries.filter(e => e.sourceId === sourceId).map(e => e.id);
-      
+
       if (entriesToDelete.length > 0) {
         await storage.batchArchiveKnowledgeBase(agentId, entriesToDelete);
       }
-      
+
       // Re-fetch and ingest new data (reuse ingestion logic)
       const customApi = await storage.getCustomApi(sourceId);
       if (!customApi) {
         return res.status(404).json({ error: "Custom API not found" });
       }
-      
+
       // Make a POST request to the ingestion endpoint
       const ingestUrl = `/api/agents/${agentId}/knowledge/ingest/${sourceId}`;
       const ingestResponse = await fetch(`http://localhost:5000${ingestUrl}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
-      
+
       const result = await ingestResponse.json();
-      
+
       // Update lastRefreshedAt on the customApi
       await storage.updateCustomApi(sourceId, {
         lastRefreshedAt: new Date(),
       } as any);
-      
+
       res.json({
         success: true,
         message: `Refreshed KB from ${customApi.name}`,
@@ -2264,17 +2386,17 @@ Respond in JSON format:
   app.get("/api/agents/:agentId/knowledge/ingest/status", async (req, res) => {
     try {
       const { agentId } = req.params;
-      
+
       // Get all KB entries grouped by source
       const entries = await storage.getKnowledgeBaseEntries(agentId);
-      
+
       const sourceStats: Record<string, {
         count: number;
         lastFetched: string | null;
         active: number;
         inactive: number;
       }> = {};
-      
+
       entries.forEach(entry => {
         const source = entry.source || "manual";
         if (!sourceStats[source]) {
@@ -2287,7 +2409,7 @@ Respond in JSON format:
         }
         sourceStats[source].count++;
         sourceStats[source][entry.active ? "active" : "inactive"]++;
-        
+
         if (entry.lastFetchedAt) {
           const fetchDate = new Date(entry.lastFetchedAt).toISOString();
           if (!sourceStats[source].lastFetched || fetchDate > sourceStats[source].lastFetched) {
@@ -2295,7 +2417,7 @@ Respond in JSON format:
           }
         }
       });
-      
+
       res.json({
         totalEntries: entries.length,
         sourceStats,
@@ -2315,18 +2437,18 @@ Respond in JSON format:
       // 2. Check lastRefreshedAt to see if they're due for refresh
       // 3. For each entry, fetch fresh data from its source
       // 4. Update the entry with new data
-      
+
       const now = new Date();
       const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      
+
       // Mock: simulate finding and refreshing stale entries
       const refreshed = {
         daily: 3,
         weekly: 1,
         errors: 0,
       };
-      
+
       res.json({
         success: true,
         message: "Stale KB entries refreshed",
@@ -2345,7 +2467,7 @@ Respond in JSON format:
   app.get("/api/ai-models", async (req, res) => {
     try {
       const provider = (req.query.provider as string) || "all";
-      
+
       const models: any = {
         openai: [
           { id: "gpt-4-turbo-preview", name: "GPT-4 Turbo", family: "gpt-4", contextWindow: 128000, pricing: { input: 0.01, output: 0.03 } },
@@ -2360,7 +2482,7 @@ Respond in JSON format:
           { id: "claude-3-haiku-20240307", name: "Claude 3 Haiku", family: "claude-3", contextWindow: 200000, pricing: { input: 0.00025, output: 0.00125 } },
         ],
       };
-      
+
       if (provider === "all") {
         res.json({ ...models });
       } else if (models[provider]) {
@@ -2378,7 +2500,7 @@ Respond in JSON format:
   app.get("/api/ai-models/latest", async (req, res) => {
     try {
       const { provider, family } = req.query;
-      
+
       // In production, this would call the actual API to get latest models
       // For now, return static latest versions
       const latestModels: Record<string, Record<string, string>> = {
@@ -2390,7 +2512,7 @@ Respond in JSON format:
           "claude-3": "claude-3-opus-20240229",
         },
       };
-      
+
       if (provider && family && latestModels[provider as string]) {
         const latest = latestModels[provider as string][family as string];
         if (latest) {
@@ -2501,7 +2623,7 @@ Respond in JSON format:
         agentId,
         promptMode: prompt ? "custom" : "auto-generated",
       };
-      
+
       if (!agentId) {
         return res.status(400).json({ error: "Agent ID required" });
       }
@@ -2510,7 +2632,7 @@ Respond in JSON format:
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
-      
+
       auditLog.agentName = agent.name;
       console.log(`[TWEET TEST] Starting for agent: ${agent.name} (${agentId})`);
 
@@ -2518,7 +2640,7 @@ Respond in JSON format:
       const knowledgeEntries = await storage.getActiveKnowledgeBase(agentId);
       auditLog.totalAvailableKBEntries = knowledgeEntries.length;
       console.log(`[TWEET TEST] Found ${knowledgeEntries.length} available KB entries`);
-      
+
       // Get recent verse usages for avoidance (based on agent's verse window setting)
       const verseWindow = agent.verseReuseWindow || 10;
       const recentVerses = await storage.getRecentVerseUsages(agentId, verseWindow);
@@ -2529,15 +2651,15 @@ Respond in JSON format:
         reusePolicy: agent.verseReusePolicy || "avoid_recent",
       };
       console.log(`[TWEET TEST] Bible verse avoidance: ${recentVerses.length} recent verses to avoid`);
-      
+
       // SERVER-SIDE CONTENT TYPE SELECTION (critical for proper rotation)
       const recentContentTypes = await storage.getRecentContentTypeUsages(agentId, 7);
       const hasKnowledgeBase = knowledgeEntries.length > 0;
       const rotationPolicy = ((agent as any).contentTypeReusePolicy || "rotate_all") as "rotate_all" | "avoid_last" | "allow";
-      
+
       // Select next content type based on rotation history
       const selectedContentType = selectNextContentType(recentContentTypes, hasKnowledgeBase, rotationPolicy);
-      
+
       auditLog.contentTypeSelection = {
         recentTypes: recentContentTypes.map(ct => ct.contentType),
         hasKB: hasKnowledgeBase,
@@ -2546,7 +2668,7 @@ Respond in JSON format:
         selectedTypeLabel: formatContentType(selectedContentType),
       };
       console.log(`[TWEET TEST] Content type rotation: Selected "${formatContentType(selectedContentType)}" (recent: ${recentContentTypes.map(ct => ct.contentType).join(", ") || "none"})`);
-      
+
       // Assemble prompt with KB entries, verse avoidance, and SERVER-SELECTED content type
       const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
         includeKnowledge: true,
@@ -2558,7 +2680,7 @@ Respond in JSON format:
         recentContentTypes,
         selectedContentType, // CRITICAL: Pass server-selected type
       });
-      
+
       const kbUsedIds = assembledPrompt.metadata.kbEntriesUsedIds || [];
       auditLog.kbEntriesSelected = {
         count: assembledPrompt.metadata.kbEntriesUsed,
@@ -2576,11 +2698,11 @@ Respond in JSON format:
       auditLog.promptComponents = assembledPrompt.metadata.componentsIncluded;
       console.log(`[TWEET TEST] KB entries selected: ${assembledPrompt.metadata.kbEntriesUsed}`);
       console.log(`[TWEET TEST] Prompt components: ${assembledPrompt.metadata.componentsIncluded.join(", ")}`);
-      
+
       // Simplified prompt - content type is already selected server-side
       const selectedTypeLabel = formatContentType(selectedContentType);
       const needsKB = selectedContentType === "EVENT_BASED" || selectedContentType === "CULTURAL_INSIGHT";
-      
+
       const defaultPrompt = `Generate a "${selectedTypeLabel}" post.
 
 CRITICAL FORMAT REQUIREMENTS:
@@ -2603,20 +2725,20 @@ OUTPUT: Write ONLY the tweet content with proper spacing.`;
       const tweetPrompt = prompt || defaultPrompt;
       auditLog.prompt = tweetPrompt;
       console.log(`[TWEET TEST] Using ${prompt ? "custom" : "default"} prompt`);
-      
+
       // Build messages for AI model
       const messages = buildMessagesArray(
         assembledPrompt,
         conversationHistory || [],
         tweetPrompt
       );
-      
+
       auditLog.systemPrompt = assembledPrompt.systemPrompt;
       auditLog.messagesCount = messages.length;
       console.log(`[TWEET TEST] System prompt assembled with ${messages.length} total messages`);
 
       let tweet = "";
-      
+
       // Use post-specific model if configured, otherwise use default
       const postModelProvider = agent.postModelProvider || agent.modelProvider || "openai";
       const postModelName = agent.postModelName || agent.modelName || "gpt-4-turbo-preview";
@@ -2624,7 +2746,7 @@ OUTPUT: Write ONLY the tweet content with proper spacing.`;
       const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.2;
       // Increased max_tokens to 600 for thorough content generation
       const postMaxTokens = agent.postMaxTokens || 600;
-      
+
       auditLog.modelConfig = {
         provider: postModelProvider,
         model: postModelName,
@@ -2632,32 +2754,56 @@ OUTPUT: Write ONLY the tweet content with proper spacing.`;
         maxTokens: postMaxTokens,
       };
       console.log(`[TWEET TEST] Model config: ${postModelProvider}/${postModelName} (temp: ${postTemperature}, max: ${postMaxTokens})`);
-      
+
       // Call appropriate AI model
       if (postModelProvider === "openai") {
         const OpenAI = (await import("openai")).default;
-        const openai = new OpenAI({ 
-          apiKey: process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-          baseURL: process.env.OPENAI_API_KEY ? undefined : process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+        // Prioritize keys: Agent > Env(Standard) > Env(Integration)
+        const agentKey = agent.modelApiKey?.trim();
+        const envKey = process.env.OPENAI_API_KEY?.trim();
+        const integrationKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY?.trim();
+
+        let apiKey = "";
+        let baseURL = undefined;
+
+        if (agentKey) {
+          apiKey = agentKey;
+          baseURL = undefined; // Always default URL for specific agent keys
+          console.log(`[TWEET TEST] Using Agent-specific API key`);
+        } else if (envKey && !envKey.includes("placeholder")) {
+          apiKey = envKey;
+          baseURL = undefined;
+          console.log(`[TWEET TEST] Using server environment OPENAI_API_KEY`);
+        } else if (integrationKey) {
+          apiKey = integrationKey;
+          baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+          console.log(`[TWEET TEST] Using AI_INTEGRATIONS credentials (Custom URL: ${baseURL || "default"})`);
+        } else {
+          console.warn("[TWEET TEST] No valid OpenAI API key found!");
+        }
+
+        const openai = new OpenAI({
+          apiKey,
+          baseURL
         });
-        
+
         const params = buildOpenAIParams(postModelName, {
           model: postModelName,
           messages: messages as any,
           temperature: postTemperature,
           max_completion_tokens: postMaxTokens,
         });
-        
+
         const completion = await safeOpenAICall(openai, params);
-        
+
         tweet = completion.choices[0]?.message?.content || "No tweet generated";
-        
+
       } else if (postModelProvider === "anthropic") {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-        
+
         const systemMessage = messages.find(m => m.role === "system");
         const userMessages = messages.filter(m => m.role !== "system");
-        
+
         const completion = await anthropic.messages.create({
           model: postModelName,
           system: systemMessage?.content || "You are a helpful AI assistant.",
@@ -2668,7 +2814,7 @@ OUTPUT: Write ONLY the tweet content with proper spacing.`;
           max_tokens: postMaxTokens,
           temperature: postTemperature,
         });
-        
+
         const textContent = completion.content.find((c) => c.type === "text") as any;
         tweet = textContent?.text || "No tweet generated";
       } else {
@@ -2678,7 +2824,7 @@ OUTPUT: Write ONLY the tweet content with proper spacing.`;
       const generationTime = Date.now() - startTime;
       console.log(`[TWEET TEST] Generation took ${generationTime}ms`);
       console.log(`[TWEET TEST] Raw output (before cleanup): ${tweet.substring(0, 100)}...`);
-      
+
       // Content type is already known from server-side selection
       // Detect only for verification/logging purposes
       const detectedContentType = detectContentType(tweet);
@@ -2686,7 +2832,7 @@ OUTPUT: Write ONLY the tweet content with proper spacing.`;
       auditLog.contentTypeDetected = detectedContentType;
       auditLog.contentTypeUsed = actualContentType;
       console.log(`[TWEET TEST] Content type: selected=${actualContentType}, detected=${detectedContentType}`);
-      
+
       // Strip content type labels from generated content (labels are for detection, not output)
       tweet = stripContentTypeLabels(tweet);
       // Clean special characters (em dashes, smart quotes)
@@ -2694,7 +2840,7 @@ OUTPUT: Write ONLY the tweet content with proper spacing.`;
       auditLog.finalTweetLength = tweet.length;
       auditLog.generationTimeMs = generationTime;
       console.log(`[TWEET TEST] Final tweet (${tweet.length} chars): ${tweet}`);
-      
+
       // LOG CONTENT TYPE USAGE for rotation tracking (CRITICAL for rotation to work)
       try {
         const tweetId = `tweet_test_${Date.now()}`;
@@ -2769,22 +2915,22 @@ OUTPUT: Write ONLY the tweet content with proper spacing.`;
       });
     } catch (error: any) {
       console.error("Error testing tweet generation:", error);
-      
+
       // Send webhook notification for failed tweet generation
       try {
         const agent = await storage.getAgent(req.body.agentId);
         if (agent?.webhookEnabled && agent?.webhookUrl) {
-          sendPostFailedWebhook(agent, error.message, req.body.prompt).catch(err => 
+          sendPostFailedWebhook(agent, error.message, req.body.prompt).catch(err =>
             console.error("Webhook error:", err)
           );
         }
       } catch (webhookErr) {
         console.error("Failed to send error webhook:", webhookErr);
       }
-      
-      res.status(500).json({ 
+
+      res.status(500).json({
         error: "Failed to test tweet generation",
-        details: error.message 
+        details: error.message
       });
     }
   });
@@ -2827,40 +2973,40 @@ OUTPUT: Write ONLY the tweet content with proper spacing.`;
   });
 
   // ============= TWITTER POSTING ============= //
-  
+
   // Force Generate & Post - generates tweet and posts to Twitter in one action
   app.post("/api/agents/:id/force-post", async (req, res) => {
     try {
       const { id } = req.params;
-      
+
       const agent = await storage.getAgent(id);
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
-      
+
       const { postTweet, getTwitterCredentials } = await import("./twitter");
-      
+
       // Check if any Twitter credentials are available (API or Scraper)
       // Uses getTwitterCredentials to check both env secrets AND database values
       const creds = getTwitterCredentials(agent);
-      const hasApiCreds = !!(creds.apiKey && creds.apiSecret && 
-                             creds.accessToken && creds.accessSecret);
-      const hasScraperCreds = !!(agent.twitterCookies || 
-                                 (agent.twitterUsername && agent.twitterPassword));
-      
+      const hasApiCreds = !!(creds.apiKey && creds.apiSecret &&
+        creds.accessToken && creds.accessSecret);
+      const hasScraperCreds = !!(agent.twitterCookies ||
+        (agent.twitterUsername && agent.twitterPassword));
+
       if (!hasApiCreds && !hasScraperCreds) {
         return res.status(400).json({
           error: "Missing Twitter credentials - configure either API credentials or username/password/cookies",
         });
       }
-      
+
       // Get active KB entries
       const knowledgeEntries = await storage.getActiveKnowledgeBase(id);
-      
+
       // Get recent verse usages for avoidance (based on agent's verse window setting)
       const verseWindow = agent.verseReuseWindow || 10;
       const recentVerses = await storage.getRecentVerseUsages(id, verseWindow);
-      
+
       // Assemble prompt and generate tweet (with verse avoidance)
       const assembledPrompt = await assemblePrompt(agent, knowledgeEntries, {
         includeKnowledge: true,
@@ -2870,7 +3016,7 @@ OUTPUT: Write ONLY the tweet content with proper spacing.`;
         maxKbTokens: 2000,
         recentVerses,
       });
-      
+
       const tweetPrompt = `Generate a single post following these critical rules:
 
 FORMAT REQUIREMENTS:
@@ -2889,23 +3035,23 @@ BIBLE VERSE REQUIREMENT:
 
 DO NOT write one long paragraph - use proper spacing!`;
       const messages = buildMessagesArray(assembledPrompt, [], tweetPrompt);
-      
+
       const postModelProvider = agent.postModelProvider || agent.modelProvider || "openai";
       const postModelName = agent.postModelName || agent.modelName || "gpt-4-turbo-preview";
       // Lower temperature (0.2) for highly deterministic output that closely follows message examples
       const postTemperature = agent.postTemperature !== null ? Number(agent.postTemperature) : Number(agent.temperature) || 0.2;
       // Increased max_tokens to 600 for thorough content generation
       const postMaxTokens = agent.postMaxTokens || 600;
-      
+
       let tweetContent = "";
-      
+
       if (postModelProvider === "openai") {
         const OpenAI = (await import("openai")).default;
         const openai = new OpenAI({
           apiKey: process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
           baseURL: process.env.OPENAI_API_KEY ? undefined : process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
         });
-        
+
         // Use same wrapper functions as test-tweet for consistency
         const params = buildOpenAIParams(postModelName, {
           model: postModelName,
@@ -2913,17 +3059,17 @@ DO NOT write one long paragraph - use proper spacing!`;
           temperature: postTemperature,
           max_completion_tokens: postMaxTokens,
         });
-        
+
         const completion = await safeOpenAICall(openai, params);
-        
+
         tweetContent = completion.choices[0]?.message?.content || "";
       } else if (postModelProvider === "anthropic") {
         const Anthropic = (await import("@anthropic-ai/sdk")).default;
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-        
+
         const systemMessage = messages.find((m) => m.role === "system");
         const userMessages = messages.filter((m) => m.role !== "system");
-        
+
         const completion = await anthropic.messages.create({
           model: postModelName,
           system: systemMessage?.content || "You are a helpful AI assistant.",
@@ -2934,36 +3080,36 @@ DO NOT write one long paragraph - use proper spacing!`;
           max_tokens: postMaxTokens,
           temperature: postTemperature,
         });
-        
+
         const textContent = completion.content.find((c) => c.type === "text") as any;
         tweetContent = textContent?.text || "";
       }
-      
+
       if (!tweetContent.trim()) {
         return res.status(500).json({ error: "Failed to generate tweet content" });
       }
-      
+
       // Detect content type BEFORE stripping labels (for accurate tracking)
-      const detectedContentType = (agent as any).contentTypeTrackingEnabled !== false 
-        ? detectContentType(tweetContent) 
+      const detectedContentType = (agent as any).contentTypeTrackingEnabled !== false
+        ? detectContentType(tweetContent)
         : null;
-      
+
       // Strip content type labels from generated content (labels are for detection, not output)
       tweetContent = stripContentTypeLabels(tweetContent);
       // Clean special characters (em dashes, smart quotes)
       tweetContent = cleanSpecialCharacters(tweetContent);
-      
+
       // Post to Twitter with fallback logic (API → Scraper)
       // Re-check credentials (already checked above, but reuse for clarity)
-      const hasScraper = !!(agent.twitterCookies || 
-                           (agent.twitterUsername && agent.twitterPassword));
-      
+      const hasScraper = !!(agent.twitterCookies ||
+        (agent.twitterUsername && agent.twitterPassword));
+
       let result: { success: boolean; tweetId?: string; error?: string; errorCode?: string; rateLimited?: boolean };
-      
+
       if (hasApiCreds) {
         // Try API first (credentials already validated via getTwitterCredentials)
         result = await postTweet(agent, tweetContent);
-        
+
         // If API fails and scraper is available, try scraper as fallback
         if (!result.success && hasScraper) {
           console.log(`[Force-Post] API failed, trying scraper fallback for ${agent.name}`);
@@ -2992,13 +3138,13 @@ DO NOT write one long paragraph - use proper spacing!`;
           errorCode: "NO_CREDENTIALS",
         };
       }
-      
+
       // Mark KB entries as used
       const kbUsedIds = assembledPrompt.metadata.kbEntriesUsedIds || [];
       if (kbUsedIds.length > 0 && result.success && result.tweetId) {
         await storage.markKnowledgeBaseAsUsed(kbUsedIds, result.tweetId);
       }
-      
+
       // Extract and log Bible verses from the tweet (if verse tracking enabled)
       if (result.success && result.tweetId && agent.verseTrackingEnabled !== false) {
         const { extractVerses } = await import("./verseExtractor");
@@ -3015,12 +3161,12 @@ DO NOT write one long paragraph - use proper spacing!`;
           );
         }
       }
-      
+
       // Log detected content type
       if (result.success && result.tweetId && detectedContentType) {
         await storage.logContentTypeUsage(id, detectedContentType, result.tweetId);
       }
-      
+
       // Log activity
       await storage.createActivityLog({
         agentId: id,
@@ -3036,14 +3182,14 @@ DO NOT write one long paragraph - use proper spacing!`;
         errorCode: result.errorCode,
         postedAt: result.success ? new Date() : undefined,
       });
-      
+
       if (result.success) {
         if (agent.webhookEnabled && agent.webhookUrl) {
           sendPostCreatedWebhook(agent, tweetContent, result.tweetId).catch(err =>
             console.error("Webhook error:", err)
           );
         }
-        
+
         res.json({
           success: true,
           tweet: tweetContent,
@@ -3059,7 +3205,7 @@ DO NOT write one long paragraph - use proper spacing!`;
             console.error("Webhook error:", err)
           );
         }
-        
+
         res.status(400).json({
           success: false,
           tweet: tweetContent,
@@ -3076,45 +3222,45 @@ DO NOT write one long paragraph - use proper spacing!`;
       });
     }
   });
-  
+
   // Post tweet directly to Twitter
   app.post("/api/agents/:id/post-tweet", async (req, res) => {
     try {
       const { id } = req.params;
       const { content } = req.body;
-      
+
       if (!content) {
         return res.status(400).json({ error: "Tweet content is required" });
       }
-      
+
       const agent = await storage.getAgent(id);
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
-      
+
       const { postTweet, getTwitterCredentials } = await import("./twitter");
-      
+
       // Check if any Twitter credentials are available (API or Scraper)
       // Uses getTwitterCredentials to check both env secrets AND database values
       const creds = getTwitterCredentials(agent);
-      const hasApi = !!(creds.apiKey && creds.apiSecret && 
-                        creds.accessToken && creds.accessSecret);
-      const hasScraper = !!(agent.twitterCookies || 
-                            (agent.twitterUsername && agent.twitterPassword));
-      
+      const hasApi = !!(creds.apiKey && creds.apiSecret &&
+        creds.accessToken && creds.accessSecret);
+      const hasScraper = !!(agent.twitterCookies ||
+        (agent.twitterUsername && agent.twitterPassword));
+
       if (!hasApi && !hasScraper) {
         return res.status(400).json({
           error: "Missing Twitter credentials - configure either API credentials or username/password/cookies",
         });
       }
-      
+
       // Post to Twitter with fallback logic (API → Scraper)
       let result: { success: boolean; tweetId?: string; error?: string; errorCode?: string; rateLimited?: boolean };
-      
+
       if (hasApi) {
         // Try API first (credentials validated via getTwitterCredentials)
         result = await postTweet(agent, content);
-        
+
         // If API fails and scraper is available, try scraper as fallback
         if (!result.success && hasScraper) {
           console.log(`[Post-Tweet] API failed, trying scraper fallback for ${agent.name}`);
@@ -3137,7 +3283,7 @@ DO NOT write one long paragraph - use proper spacing!`;
           errorCode: scraperResult.error ? 'SCRAPER_ERROR' : undefined,
         };
       }
-      
+
       // Extract and log Bible verses from the tweet (if verse tracking enabled)
       if (result.success && result.tweetId && agent.verseTrackingEnabled !== false) {
         const { extractVerses } = await import("./verseExtractor");
@@ -3154,7 +3300,7 @@ DO NOT write one long paragraph - use proper spacing!`;
           );
         }
       }
-      
+
       // Log the activity
       await storage.createActivityLog({
         agentId: id,
@@ -3169,7 +3315,7 @@ DO NOT write one long paragraph - use proper spacing!`;
         errorCode: result.errorCode,
         postedAt: result.success ? new Date() : undefined,
       });
-      
+
       if (result.success) {
         // Send webhook notification
         if (agent.webhookEnabled && agent.webhookUrl) {
@@ -3177,7 +3323,7 @@ DO NOT write one long paragraph - use proper spacing!`;
             console.error("Webhook error:", err)
           );
         }
-        
+
         res.json({
           success: true,
           tweetId: result.tweetId,
@@ -3190,7 +3336,7 @@ DO NOT write one long paragraph - use proper spacing!`;
             console.error("Webhook error:", err)
           );
         }
-        
+
         res.status(400).json({
           success: false,
           error: result.error,
@@ -3208,7 +3354,7 @@ DO NOT write one long paragraph - use proper spacing!`;
   });
 
   // ============= SCHEDULER CONTROL ============= //
-  
+
   // Start agent scheduler
   app.post("/api/agents/:id/scheduler/start", async (req, res) => {
     try {
@@ -3216,17 +3362,17 @@ DO NOT write one long paragraph - use proper spacing!`;
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
-      
+
       const { startAgent, isAgentRunning } = await import("./scheduler");
-      
+
       if (isAgentRunning(agent.id)) {
         return res.json({ success: true, message: "Agent is already running" });
       }
-      
+
       // Update agent status to active
       await storage.updateAgentStatus(agent.id, "active");
       startAgent(agent);
-      
+
       res.json({
         success: true,
         message: `Agent ${agent.name} started`,
@@ -3237,7 +3383,7 @@ DO NOT write one long paragraph - use proper spacing!`;
       res.status(500).json({ error: "Failed to start agent", details: error.message });
     }
   });
-  
+
   // Stop agent scheduler
   app.post("/api/agents/:id/scheduler/stop", async (req, res) => {
     try {
@@ -3245,13 +3391,13 @@ DO NOT write one long paragraph - use proper spacing!`;
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
-      
+
       const { stopAgent, isAgentRunning } = await import("./scheduler");
-      
+
       // Update agent status to inactive
       await storage.updateAgentStatus(agent.id, "inactive");
       stopAgent(agent.id);
-      
+
       res.json({
         success: true,
         message: `Agent ${agent.name} stopped`,
@@ -3262,7 +3408,7 @@ DO NOT write one long paragraph - use proper spacing!`;
       res.status(500).json({ error: "Failed to stop agent", details: error.message });
     }
   });
-  
+
   // Get scheduler status
   app.get("/api/scheduler/status", async (req, res) => {
     try {
@@ -3275,25 +3421,45 @@ DO NOT write one long paragraph - use proper spacing!`;
     }
   });
 
+  // Get agent status
+  app.get("/api/agents/:id/status", requireAuth, async (req, res) => {
+    try {
+      const id = req.params.id;
+      const status = getAgentStatus(id);
+
+      // Also return news context if requested (optional)
+      const newsContext = getLatestNewsContext(id);
+
+      res.json({
+        ...status,
+        newsContext: newsContext // Include news context in status
+      });
+    } catch (err: any) {
+      console.error(`Error getting agent status: ${err.message}`);
+      // Return default status if not found (agent might be stopped)
+      res.json({ isRunning: false, lastPostTime: null });
+    }
+  });
+
   // ============= ACTIVITY LOGS ============= //
-  
+
   // Get all activity logs
   app.get("/api/activity-logs", async (req, res) => {
     try {
       const limit = parseInt(req.query.limit as string) || 50;
       const agentId = req.query.agentId as string | undefined;
-      
+
       const logs = await storage.getActivityLogs(agentId, limit);
-      
+
       // Enrich logs with agent names
       const agents = await storage.getAllAgents();
       const agentMap = new Map(agents.map(a => [a.id, a.name]));
-      
+
       const enrichedLogs = logs.map(log => ({
         ...log,
         agentName: agentMap.get(log.agentId) || "Unknown Agent",
       }));
-      
+
       res.json(enrichedLogs);
     } catch (error: any) {
       console.error("Error fetching activity logs:", error);
@@ -3318,8 +3484,12 @@ DO NOT write one long paragraph - use proper spacing!`;
     try {
       const { initializeScheduler } = await import("./scheduler");
       await initializeScheduler();
+
+      // NEW: Initialize KB Auto-Refresh
+      const { initializeKbRefreshService } = await import("./kbRefresh");
+      await initializeKbRefreshService();
     } catch (error) {
-      console.error("Failed to initialize scheduler:", error);
+      console.error("Failed to initialize services:", error);
     }
   })();
 

@@ -1,8 +1,9 @@
 import type { Agent, KnowledgeBase, BibleVerseUsage, ContentTypeUsage, ActivityLog } from "@shared/schema";
+import type { ScrapedTweet } from "./twitterScraper";
 
 // All 7 content types for rotation
 export const ALL_CONTENT_TYPES = [
-  "EVENT_BASED", "VERSE_REFLECTION", "DEEP_QUESTION", 
+  "EVENT_BASED", "VERSE_REFLECTION", "DEEP_QUESTION",
   "WISDOM_BITE", "CULTURAL_INSIGHT", "ENCOURAGEMENT", "ETERNITY_ANCHOR"
 ] as const;
 
@@ -18,6 +19,8 @@ export interface PromptAssemblyOptions {
   recentContentTypes?: ContentTypeUsage[]; // Recently used content types to avoid
   selectedContentType?: ContentType; // Server-selected content type (for rotation)
   recentPosts?: ActivityLog[]; // Recent posts for anti-repetition context
+  focusTopic?: string; // Specific topic to focus on
+  newsContext?: ScrapedTweet[]; // Context from News Monitor
 }
 
 /**
@@ -31,29 +34,29 @@ export function selectNextContentType(
 ): ContentType {
   // If no rotation, pick randomly
   if (rotationPolicy === "allow") {
-    const validTypes = hasKnowledgeBase 
-      ? ALL_CONTENT_TYPES 
+    const validTypes = hasKnowledgeBase
+      ? ALL_CONTENT_TYPES
       : ALL_CONTENT_TYPES.filter(t => t !== "EVENT_BASED" && t !== "CULTURAL_INSIGHT");
     return validTypes[Math.floor(Math.random() * validTypes.length)];
   }
 
   const recentTypeNames = recentContentTypes.slice(0, 7).map(ct => ct.contentType);
-  
+
   // Find unused types
   let unusedTypes = ALL_CONTENT_TYPES.filter(t => !recentTypeNames.includes(t));
-  
+
   // If no KB, exclude types that require current events
   if (!hasKnowledgeBase) {
     unusedTypes = unusedTypes.filter(t => t !== "EVENT_BASED" && t !== "CULTURAL_INSIGHT");
   }
-  
+
   if (rotationPolicy === "rotate_all") {
     if (unusedTypes.length > 0) {
       // Pick randomly from unused types
       return unusedTypes[Math.floor(Math.random() * unusedTypes.length)];
     } else {
       // All types used - reset cycle, pick randomly from all valid types
-      const validTypes = hasKnowledgeBase 
+      const validTypes = hasKnowledgeBase
         ? [...ALL_CONTENT_TYPES]
         : ALL_CONTENT_TYPES.filter(t => t !== "EVENT_BASED" && t !== "CULTURAL_INSIGHT");
       return validTypes[Math.floor(Math.random() * validTypes.length)];
@@ -65,7 +68,7 @@ export function selectNextContentType(
       : ALL_CONTENT_TYPES.filter(t => t !== lastType && t !== "EVENT_BASED" && t !== "CULTURAL_INSIGHT");
     return validTypes[Math.floor(Math.random() * validTypes.length)];
   }
-  
+
   // Fallback
   return "VERSE_REFLECTION";
 }
@@ -116,6 +119,7 @@ export async function assemblePrompt(
     recentVerses = [],
     recentContentTypes = [],
     selectedContentType,
+    focusTopic,
   } = options;
 
   const componentsIncluded: string[] = [];
@@ -129,26 +133,26 @@ export async function assemblePrompt(
   // CRITICAL: Only include examples matching the server-selected content type
   let examplesUsed = 0;
   const examplesWithTypes: { content: string; contentType?: string }[] = [];
-  
+
   if (includeExamples && agent.messageExamples && agent.messageExamples.length > 0) {
     // Parse all examples and extract content types
     const allExamples: { content: string; contentType?: string }[] = [];
     for (const example of agent.messageExamples) {
       let content: string | null = null;
       let contentType: string | undefined = undefined;
-      
+
       if (typeof example === "string") {
         content = example;
       } else if (example && typeof example === "object" && "content" in example) {
         content = String((example as any).content);
         contentType = (example as any).contentType;
       }
-      
+
       if (content) {
         allExamples.push({ content, contentType });
       }
     }
-    
+
     // Filter examples: if selectedContentType is set, only include matching examples
     let filteredExamples = allExamples;
     if (selectedContentType) {
@@ -169,45 +173,43 @@ export async function assemblePrompt(
         console.log(`[PROMPT] WARNING: No matching examples found for content type: ${selectedContentType}. Using all ${allExamples.length} examples as fallback.`);
       }
     }
-    
+
     // Build the example section with clear formatting instructions
     const selectedTypeLabel = selectedContentType ? formatContentType(selectedContentType) : null;
-    
+
     if (selectedContentType && filteredExamples.length > 0) {
       // Single content type mode - very focused instructions
       const typeLabel = formatContentType(selectedContentType);
       systemPrompt += `## YOUR TASK: Generate a "${typeLabel}" Post\n\n`;
       systemPrompt += `You MUST generate a post that follows this EXACT format:\n\n`;
-      
+
       for (const ex of filteredExamples.slice(0, 2)) { // Max 2 examples for the selected type
         systemPrompt += `### EXAMPLE FORMAT:\n${ex.content}\n\n`;
         examplesUsed++;
         examplesWithTypes.push(ex);
       }
-      
-      systemPrompt += `### CRITICAL FORMAT RULES FOR ${typeLabel.toUpperCase()}:\n\n`;
-      systemPrompt += `**SPACING & READABILITY (MOST IMPORTANT):**\n`;
-      systemPrompt += `- Use BLANK LINES between paragraphs for readability\n`;
-      systemPrompt += `- Match the EXACT line breaks shown in the example\n`;
-      systemPrompt += `- Keep paragraphs short (2-3 sentences max)\n`;
-      systemPrompt += `- Use visual breathing room - don't cram text together\n\n`;
+
+      systemPrompt += `### GUIDELINES FOR ${typeLabel.toUpperCase()}:\n\n`;
+      systemPrompt += `**NATURAL STYLE (CRITICAL):**\n`;
+      systemPrompt += `- Write like a real human on Twitter/X, not a corporate bot\n`;
+      systemPrompt += `- Vary your sentence length. Mix short punchy lines with longer thoughts\n`;
+      systemPrompt += `- Don't be afraid of being "messy" or using lowercase if the example does\n`;
+      systemPrompt += `- Avoid "LinkedIn style" rigid paragraph spacing unless the example uses it\n\n`;
       systemPrompt += `**STRUCTURE:**\n`;
-      systemPrompt += `- Copy the EXACT structure from the example above\n`;
-      systemPrompt += `- Same number of paragraphs as the example\n`;
-      systemPrompt += `- Same flow: opening hook, body, closing\n\n`;
+      systemPrompt += `- Follow the *vibe* and *structure* of the example, but don't copy it robotically\n`;
+      systemPrompt += `- Ensure the core message lands effectively\n\n`;
       systemPrompt += `**DO NOT:**\n`;
-      systemPrompt += `- Add decorations (---, ###, ***, etc.)\n`;
-      systemPrompt += `- Add hashtags unless shown in example\n`;
-      systemPrompt += `- Use em dashes (—), en dashes (–), or smart quotes (" " ' ')\n`;
-      systemPrompt += `- Write one long paragraph - ALWAYS use line breaks\n\n`;
-      
+      systemPrompt += `- Use cringey AI openers like "Let's dive in" or "In the world of..."\n`;
+      systemPrompt += `- Use hashtags unless they are prevalent in the example\n`;
+      systemPrompt += `- Over-polish. Real tweets have character.\n\n`;
+
       componentsIncluded.push("messageExamples");
       componentsIncluded.push(`contentType:${selectedContentType}`);
     } else {
       // No specific type selected - include multiple examples (fallback mode)
       systemPrompt += "## Message Format Examples\n";
       systemPrompt += "Follow these examples exactly when generating content:\n\n";
-      
+
       for (const ex of filteredExamples.slice(0, 7)) {
         const typeLabel = ex.contentType ? formatContentType(ex.contentType) : null;
         if (typeLabel) {
@@ -218,7 +220,7 @@ export async function assemblePrompt(
         examplesUsed++;
         examplesWithTypes.push(ex);
       }
-      
+
       if (examplesUsed > 0) {
         componentsIncluded.push("messageExamples");
       }
@@ -258,7 +260,37 @@ export async function assemblePrompt(
     if (characterConfig.length > 0) {
       systemPrompt += "## Character Guidelines\n" + characterConfig.join("\n") + "\n\n";
       componentsIncluded.push("characterGuidelines");
+
+      // Special Formatting Rules based on style keywords
+      const lowerStyle = (agent.postStyle || "").toLowerCase();
+
+      if (lowerStyle.includes("lowercase")) {
+        systemPrompt += "## FORMATTING RULE: LOWERCASE ONLY\n";
+        systemPrompt += "You must write in all lowercase letters. Use minimal punctuation.\n\n";
+        componentsIncluded.push("format:lowercase");
+      }
+
+      if (lowerStyle.includes("shitpost") || lowerStyle.includes("unhinged") || lowerStyle.includes("chaotic")) {
+        systemPrompt += "## FORMATTING RULE: CHAOS MODE\n";
+        systemPrompt += "Be unpredictable. Ignore standard grammar. Be obscure, esoteric, or aggressive as needed.\n\n";
+        componentsIncluded.push("format:chaos");
+      }
+
+      if (lowerStyle.includes("academic") || lowerStyle.includes("formal")) {
+        systemPrompt += "## FORMATTING RULE: ACADEMIC\n";
+        systemPrompt += "Use precise language, proper citations (if applicable), and complex sentence structures.\n\n";
+        componentsIncluded.push("format:academic");
+      }
     }
+  }
+
+  // 3b. Focus Topic (Anti-Repetition)
+  if (focusTopic) {
+    systemPrompt += "## REQUIRED TOPIC\n";
+    systemPrompt += `You MUST write this post about: **${focusTopic}**\n`;
+    systemPrompt += "- Focus strictly on this specific topic\n";
+    systemPrompt += "- Do not drift to other general subjects\n\n";
+    componentsIncluded.push(`focusTopic:${focusTopic}`);
   }
 
   // 4. Knowledge base entries (active, approved, prioritized with reuse policy)
@@ -267,12 +299,12 @@ export async function assemblePrompt(
   const reusePolicy = (agent as any).kbReusePolicy || "deprioritize";
   const reuseCooldownHours = (agent as any).kbReuseCooldownHours || 24;
   const now = new Date();
-  
+
   if (includeKnowledge && knowledgeEntries.length > 0) {
     // Filter: only active and approved entries
     let activeKb = knowledgeEntries
       .filter(kb => kb.active && kb.status === "approved");
-    
+
     // Apply reuse policy
     if (reusePolicy === "never") {
       // Exclude entries used within cooldown period
@@ -283,7 +315,7 @@ export async function assemblePrompt(
         return (now.getTime() - usedTime) > cooldownMs; // Include if cooldown passed
       });
     }
-    
+
     // Sort entries with reuse consideration
     activeKb = activeKb.sort((a, b) => {
       // If deprioritize policy, penalize recently used entries
@@ -291,7 +323,7 @@ export async function assemblePrompt(
         const aUsed = a.usedAt ? 1 : 0;
         const bUsed = b.usedAt ? 1 : 0;
         if (aUsed !== bUsed) return aUsed - bUsed; // Unused entries first
-        
+
         // If both used, prefer the one used longer ago
         if (a.usedAt && b.usedAt) {
           const aTime = new Date(a.usedAt).getTime();
@@ -299,7 +331,7 @@ export async function assemblePrompt(
           if (aTime !== bTime) return aTime - bTime; // Older usage first
         }
       }
-      
+
       // Then sort by priority (desc), then by freshness (desc)
       const aPriority = priorityToNumber(a.priority);
       const bPriority = priorityToNumber(b.priority);
@@ -338,6 +370,18 @@ export async function assemblePrompt(
     }
   }
 
+  // 7. Add News Monitor Context (if available)
+  if (options.newsContext && options.newsContext.length > 0) {
+    const newsItems = options.newsContext.slice(0, 3).map(t => `- @${t.username}: ${t.text.replace(/\n/g, ' ')}`).join('\n');
+    promptParts.push(`
+GLOBAL CONTEXT (Latest News):
+${newsItems}
+
+INSTRUCTION: If these events are relevant to your topic/verse, you may subtly reference them to make your post timely. Otherwise, ignore them.
+`);
+  }
+
+  // 8. Add Recent Post Context (Anti-Repetition)
   // 4b. Recent Posts Context (Anti-Repetition) - Show AI what it recently posted
   const recentPosts = options.recentPosts || [];
   if (recentPosts.length > 0) {
@@ -347,28 +391,28 @@ export async function assemblePrompt(
     systemPrompt += "- Different tone/posture (not the same emotional angle)\n";
     systemPrompt += "- Different ending style (not the same conclusion pattern)\n";
     systemPrompt += "- Different Scripture (if using verses)\n\n";
-    
+
     for (let i = 0; i < recentPosts.length; i++) {
       const post = recentPosts[i];
       const contentType = post.contentType ? formatContentType(post.contentType) : "Unknown";
       const postDate = post.postedAt ? new Date(post.postedAt).toLocaleDateString() : "Recent";
-      
+
       systemPrompt += `### Post ${i + 1} (${contentType}, ${postDate}):\n`;
       systemPrompt += `${post.content || "[No content]"}\n\n`;
     }
-    
+
     systemPrompt += "---\n";
     systemPrompt += "Now create something FRESH with a different message, theme, and approach.\n\n";
-    
+
     componentsIncluded.push("recentPostContext");
   }
 
   // 5. Bible Verse Guidelines with Historical Context Requirement
   const verseTrackingEnabled = (agent as any).verseTrackingEnabled !== false; // Default true
   const verseReusePolicy = (agent as any).verseReusePolicy || "avoid_recent";
-  
+
   systemPrompt += "## Bible Verse Guidelines\n\n";
-  
+
   // CRITICAL: Historical context requirement
   systemPrompt += "### REQUIRED: Historical Context for Bible Verses\n";
   systemPrompt += "When sharing ANY Bible verse, you MUST include brief historical or cultural context:\n";
@@ -379,14 +423,14 @@ export async function assemblePrompt(
   systemPrompt += "Example: 'Paul wrote this to believers in Rome who faced persecution...'\n";
   systemPrompt += "Example: 'Jesus spoke these words during the Sermon on the Mount to crowds...'\n\n";
   componentsIncluded.push("historicalContext");
-  
+
   if (verseTrackingEnabled && verseReusePolicy !== "allow" && recentVerses.length > 0) {
     const verseList = recentVerses.map(v => v.verseRef).join(", ");
-    
+
     systemPrompt += "### Verse Avoidance (for variety)\n";
     systemPrompt += "AVOID these recently used verses:\n";
     systemPrompt += `${verseList}\n\n`;
-    
+
     if (recentVerses.length >= 20) {
       systemPrompt += "NOTE: Many verses used recently. If needed:\n";
       systemPrompt += "- Use a less common translation or paraphrase\n";
@@ -395,7 +439,7 @@ export async function assemblePrompt(
     } else {
       systemPrompt += "Choose different, fresh Scripture passages for variety.\n\n";
     }
-    
+
     componentsIncluded.push("verseAvoidance");
   } else {
     systemPrompt += "Include book, chapter, and verse references when citing Scripture.\n\n";
@@ -472,7 +516,7 @@ export async function assembleConversationPrompt(
   // 1. Core Identity & Conversational Role
   systemPrompt += `# Who You Are\n\n`;
   systemPrompt += `You are ${agent.name || "an AI assistant"}`;
-  
+
   if (agent.personalityPrompt && agent.personalityPrompt.trim().length > 0) {
     systemPrompt += `. ${agent.personalityPrompt}\n\n`;
     componentsIncluded.push("personality");
@@ -485,23 +529,23 @@ export async function assembleConversationPrompt(
 
   // 2. Conversational Style Guidelines
   systemPrompt += `## How You Communicate\n\n`;
-  
+
   // Add topics, style, and adjectives if available
   if (agent.topics && agent.topics.trim().length > 0) {
     systemPrompt += `**Your Areas of Expertise**: ${agent.topics}\n`;
     componentsIncluded.push("topics");
   }
-  
+
   if (agent.postStyle && agent.postStyle.trim().length > 0) {
     systemPrompt += `**Your Communication Style**: ${agent.postStyle}\n`;
     componentsIncluded.push("style");
   }
-  
+
   if (agent.adjectives && agent.adjectives.trim().length > 0) {
     systemPrompt += `**Your Tone**: ${agent.adjectives}\n`;
     componentsIncluded.push("adjectives");
   }
-  
+
   systemPrompt += `\n`;
 
   // 3. Conversational Behavior Rules
@@ -518,7 +562,7 @@ export async function assembleConversationPrompt(
 
   // 4. Add knowledge base context (if available and requested)
   let kbEntriesUsed = 0;
-  
+
   if (includeKnowledge && knowledgeEntries.length > 0) {
     const activeKb = knowledgeEntries
       .filter(kb => kb.active && kb.status === "approved")
@@ -543,7 +587,7 @@ export async function assembleConversationPrompt(
         tokenCount += estimatedTokens;
         kbEntriesUsed++;
       }
-      
+
       componentsIncluded.push("knowledgeBase");
     }
   }

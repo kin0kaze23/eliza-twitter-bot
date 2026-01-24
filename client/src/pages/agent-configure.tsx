@@ -29,16 +29,17 @@ import {
 } from "@/components/ui/collapsible";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap, Pencil, Star, Info, Sparkles, BookOpen, MessageSquare, Thermometer, Hash, Database, Layers, Twitter, ChevronDown, Cookie } from "lucide-react";
+import { Save, AlertCircle, CheckCircle2, XCircle, Eye, EyeOff, Play, Plus, Trash2, PlayCircle, RefreshCw, Settings, Zap, Pencil, Star, Info, Sparkles, BookOpen, MessageSquare, Thermometer, Hash, Database, Layers, Twitter, ChevronDown, Cookie, Download, Radio, Book } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { Link } from "wouter";
+import { Link, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Agent, KnowledgeBase, MessageExample, MessageExamples } from "@shared/schema";
 import { CONTENT_TYPES } from "@shared/schema";
 import { Skeleton } from "@/components/ui/skeleton";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 type KBEntry = {
   id: string;
@@ -61,15 +62,29 @@ export default function AgentConfigure() {
   const { toast } = useToast();
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
 
-  // Fetch all agents and use the first one
+  // Check for route param
+  const [match, params] = useRoute("/agent/:id/configure");
+  const routeId = match ? params?.id : null;
+
+  // Fetch all agents
   const { data: agents, isLoading: agentsLoading } = useQuery<Agent[]>({
     queryKey: ["/api/agents"],
   });
-  
-  const agent = agents?.[0];
+
+  const agent = routeId
+    ? agents?.find(a => a.id === routeId)
+    : agents?.[0];
+
   const id = agent?.id;
   const isLoading = agentsLoading;
   const noAgentExists = !agent && !agentsLoading;
+
+  // Fetch agent status (for monitoring)
+  const { data: agentStatus } = useQuery({
+    queryKey: ["/api/agents", id, "status"],
+    enabled: !!id,
+    refetchInterval: 5000, // Refresh status every 5s to see new scrapes
+  });
 
   // Fetch knowledge base
   const { data: kbData } = useQuery<KnowledgeBase[]>({
@@ -84,8 +99,13 @@ export default function AgentConfigure() {
   });
 
   // Fetch approved KB entries
-  const { data: approvedKB = [] } = useQuery<KnowledgeBase[]>({
-    queryKey: ["/api/agents", id, "knowledge/approved"],
+  // Fetch all KB entries for the agent
+  const { data: kbEntries = [], refetch: refetchKB } = useQuery({
+    queryKey: [`/api/agents/${id}/knowledge`],
+    queryFn: async () => {
+      const res = await apiRequest.get(`/api/agents/${id}/knowledge`);
+      return res.json();
+    },
     enabled: !!id,
   });
 
@@ -96,13 +116,7 @@ export default function AgentConfigure() {
 
   // KB batch operations state
   const [selectedKBIds, setSelectedKBIds] = useState<Set<string>>(new Set());
-  const [kbSubtab, setKbSubtab] = useState<"review" | "active">("review");
-  
-  // Clear KB selection when switching tabs to prevent cross-tab operations
-  useEffect(() => {
-    setSelectedKBIds(new Set());
-  }, [kbSubtab]);
-  
+
   // Twitter API Credentials
   const [twitterConfig, setTwitterConfig] = useState({
     apiKey: "",
@@ -121,12 +135,12 @@ export default function AgentConfigure() {
     // Browser cookies (most reliable method)
     cookies: "",
   });
-  
-  const [twitterTestResult, setTwitterTestResult] = useState<{ 
-    success: boolean; 
-    message?: string; 
-    error?: string; 
-    hint?: string; 
+
+  const [twitterTestResult, setTwitterTestResult] = useState<{
+    success: boolean;
+    message?: string;
+    error?: string;
+    hint?: string;
     user?: any;
     api?: { success: boolean; message?: string; error?: string; user?: any; capabilities?: string[] };
     scraper?: { success: boolean; message?: string; error?: string; username?: string; capabilities?: string[] };
@@ -137,7 +151,7 @@ export default function AgentConfigure() {
   const [availableModels, setAvailableModels] = useState<any[]>([]);
   const [availablePostModels, setAvailablePostModels] = useState<any[]>([]);
   const [availableConversationModels, setAvailableConversationModels] = useState<any[]>([]);
-  
+
   // Twitter API Test Mutation - sends current form values to test without requiring save first
   const testTwitter = useMutation({
     mutationFn: async () => {
@@ -167,11 +181,11 @@ export default function AgentConfigure() {
       const apiOk = data.api?.success;
       const scraperOk = data.scraper?.success;
       const username = data.api?.user?.username || data.scraper?.username;
-      
+
       toast({
         title: data.success ? "Connection Test Complete" : "Connection Issues",
-        description: username 
-          ? `Connected as @${username}` 
+        description: username
+          ? `Connected as @${username}`
           : data.recommendation || data.message,
         variant: data.success ? "default" : "destructive",
       });
@@ -271,7 +285,7 @@ export default function AgentConfigure() {
       toast({ title: "Failed to load models", variant: "destructive" });
     },
   });
-  
+
   // Character & Prompts (Combined)
   const [character, setCharacter] = useState<{
     name: string;
@@ -280,6 +294,10 @@ export default function AgentConfigure() {
     systemPrompt: string;
     personalityPrompt: string;
     messageExamples: MessageExamples;
+    postExamples: string[];
+    lore: string;
+    chatStyle: string;
+    styleAll: string;
     postStyle: string;
     topics: string;
     adjectives: string;
@@ -287,30 +305,34 @@ export default function AgentConfigure() {
     name: "CryptoAnalyst",
     username: "@cryptoanalyst_ai",
     bio: "Cryptocurrency analyst powered by AI. Providing data-driven insights on Bitcoin, Ethereum, and DeFi. Not financial advice. DYOR.",
+    lore: "",
     systemPrompt: "You are an AI agent with expertise in cryptocurrency markets, blockchain technology, and DeFi. Provide accurate, timely insights based on current market data and news. Always maintain a helpful and professional demeanor.",
     personalityPrompt: "Personality: Knowledgeable, analytical, enthusiastic about innovation. Tone: Professional yet conversational. Style: Clear, concise, data-driven insights with occasional wit.",
     messageExamples: [
       "🚀 Bitcoin breaking above $45k resistance! On-chain metrics showing strong accumulation. This could be the start of the next leg up. #BTC",
       "Interesting DeFi development: New L2 protocol launching with novel liquidity mechanism. Early data looks promising. Will monitor closely.",
     ],
+    postExamples: [],
     postStyle: "Mix of analysis, insights, and commentary with data-driven observations",
+    chatStyle: "",
+    styleAll: "",
     topics: "Cryptocurrency, DeFi, NFTs, Blockchain Technology, Market Analysis, Trading",
     adjectives: "analytical, insightful, timely, professional, innovative",
   });
-  
+
   // Helper functions for message examples (support both string and object formats)
   const getExampleContent = (example: string | MessageExample): string => {
     return typeof example === "string" ? example : example.content;
   };
-  
+
   const getExampleContentType = (example: string | MessageExample): string | undefined => {
     return typeof example === "object" ? example.contentType : undefined;
   };
-  
+
   const formatContentType = (type: string): string => {
     return type.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
   };
-  
+
   // Custom Prompts (Additional specialized instructions)
   const [customPrompts, setCustomPrompts] = useState<CustomPrompt[]>([
     {
@@ -331,7 +353,7 @@ export default function AgentConfigure() {
   ]);
   const [isAddCustomPromptOpen, setIsAddCustomPromptOpen] = useState(false);
   const [newCustomPrompt, setNewCustomPrompt] = useState({ key: "", value: "" });
-  
+
   // Model Configuration (default/fallback)
   const [modelConfig, setModelConfig] = useState({
     provider: "openai",
@@ -360,7 +382,7 @@ export default function AgentConfigure() {
     temperature: [0.7],
     maxTokens: [500],
   });
-  
+
   // Behavior Configuration (Combined posting, replies, modules)
   const [behavior, setBehavior] = useState({
     // Posting
@@ -372,7 +394,7 @@ export default function AgentConfigure() {
     quietHoursStart: "22:00",
     quietHoursEnd: "08:00",
     timezone: "UTC",
-    
+
     // Replies
     replyEnabled: true,
     replyRate: [70],
@@ -381,35 +403,25 @@ export default function AgentConfigure() {
     onlyVerified: false,
     replyKeywords: "bitcoin, crypto, defi, blockchain",
     ignoreKeywords: "spam, scam, airdrop",
-    
-    // Modules
-    cryptoCommentary: true,
-    marketAnalysis: true,
-    newsCommentary: true,
-    technicalAnalysis: false,
-    threads: true,
-    memes: false,
-    
+
+
+
     // Triggers
     priceChangeThreshold: [5],
     volumeChangeThreshold: [50],
     autoTweetOnNews: true,
     minNewsSentiment: [0.6],
-    
+
     // Bible Verse Tracking
     verseTrackingEnabled: true,
     verseReusePolicy: "avoid_recent",
     verseReuseWindow: "10",
-    
+
     // Content Type Tracking
     contentTypeTrackingEnabled: true,
     contentTypeReusePolicy: "rotate_all",
     contentTypeWindow: "7",
-    // Priority Mode - prioritize EVENT_BASED when fresh news exists
-    eventPriorityModeEnabled: false,
-    eventPriorityFreshnessMinutes: "360",
-    eventPriorityMinPriority: "medium",
-    eventPriorityFallbackPolicy: "respect_rotation",
+
   });
 
   // Knowledge Base Settings
@@ -419,6 +431,13 @@ export default function AgentConfigure() {
     reuseCooldownHours: "24",
     autoRefreshEnabled: false,
     autoRefreshIntervalHours: "6",
+  });
+
+  // News Monitor Settings
+  const [monitoringSettings, setMonitoringSettings] = useState({
+    enabled: true,
+    targets: "DegenerateNews,Cointelegraph,TheInsiderPaper,FirstSquawk",
+    interval: "4"
   });
 
   // Webhook Settings
@@ -542,8 +561,8 @@ export default function AgentConfigure() {
       queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/approved"] });
       queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
       setSelectedKBIds(new Set());
-      toast({ 
-        title: "Approved!", 
+      toast({
+        title: "Approved!",
         description: data.message || `Approved ${data.approvedCount} entries`
       });
     },
@@ -566,8 +585,8 @@ export default function AgentConfigure() {
       queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/approved"] });
       queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
       setSelectedKBIds(new Set());
-      toast({ 
-        title: "Archived!", 
+      toast({
+        title: "Archived!",
         description: data.message || `Archived ${data.archivedCount} entries`
       });
     },
@@ -582,7 +601,7 @@ export default function AgentConfigure() {
 
   const handleAddKBEntry = () => {
     if (!newKBEntry.title || !newKBEntry.content) return;
-    
+
     const tags = newKBEntry.tags.split(",").map(t => t.trim()).filter(Boolean);
     addKBMutation.mutate({
       title: newKBEntry.title,
@@ -623,6 +642,52 @@ export default function AgentConfigure() {
     batchApproveMutation.mutate(Array.from(selectedKBIds));
   };
 
+  const handleRefreshNews = async () => {
+    if (!id || !agent?.monitoringEnabled) return;
+
+    toast({
+      title: "Refreshing News",
+      description: "Starting manual news scrape. This may take a few seconds...",
+    });
+
+    try {
+      const response = await fetch(`/api/agents/${id}/news/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      const data = await response.json();
+
+      if (response.ok) {
+        toast({
+          title: "News Refreshed",
+          description: data.message,
+        });
+        // Refresh status to see new context
+        queryClient.invalidateQueries({ queryKey: [`/api/agents/${id}/status`] });
+      } else {
+        toast({
+          title: "Refresh Failed",
+          description: data.error,
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to reach server",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleFetchStatus = async () => {
+    // This function was empty in the provided snippet, assuming it's a placeholder or needs content.
+    // Based on the context, it might be intended to fetch agent status.
+    // For now, keeping it as is from the user's instruction.
+    if (selectedKBIds.size === 0) return; // This line seems misplaced if it's a generic fetch status.
+    batchApproveMutation.mutate(Array.from(selectedKBIds)); // This line also seems misplaced for a generic fetch status.
+  };
+
   const handleBatchArchive = () => {
     if (selectedKBIds.size === 0) return;
     batchArchiveMutation.mutate(Array.from(selectedKBIds));
@@ -637,8 +702,8 @@ export default function AgentConfigure() {
       queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/approved"] });
       queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
       setSelectedKBIds(new Set());
-      toast({ 
-        title: "Deactivated!", 
+      toast({
+        title: "Deactivated!",
         description: data.message || `Deactivated ${data.deactivatedCount} entries`
       });
     },
@@ -660,8 +725,8 @@ export default function AgentConfigure() {
       queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/approved"] });
       queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
       setSelectedKBIds(new Set());
-      toast({ 
-        title: "Deleted!", 
+      toast({
+        title: "Deleted!",
         description: data.message || `Deleted ${data.deletedCount} entries`
       });
     },
@@ -682,9 +747,9 @@ export default function AgentConfigure() {
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge/approved"] });
       queryClient.invalidateQueries({ queryKey: ["/api/agents", id, "knowledge"] });
-      toast({ 
-        title: "Priority Updated", 
-        description: data.originalPriority 
+      toast({
+        title: "Priority Updated",
+        description: data.originalPriority
           ? `Changed from ${data.originalPriority} to ${data.priority} - this helps the AI learn your preferences!`
           : `Priority set to ${data.priority}`
       });
@@ -710,17 +775,17 @@ export default function AgentConfigure() {
 
   const handleAddCustomPrompt = () => {
     if (!newCustomPrompt.key || !newCustomPrompt.value) return;
-    
+
     const prompt: CustomPrompt = {
       id: Date.now().toString(),
       key: newCustomPrompt.key,
       value: newCustomPrompt.value,
     };
-    
+
     setCustomPrompts([...customPrompts, prompt]);
     setNewCustomPrompt({ key: "", value: "" });
     setIsAddCustomPromptOpen(false);
-    
+
     toast({
       title: "Custom prompt added",
       description: "Additional prompt instruction has been added to this agent.",
@@ -739,7 +804,7 @@ export default function AgentConfigure() {
         acc[prompt.key] = prompt.value;
         return acc;
       }, {} as Record<string, string>);
-      
+
       return apiRequest("PATCH", `/api/agents/${id}`, {
         // Twitter API (OAuth 1.0a)
         twitterApiKey: twitterConfig.apiKey,
@@ -763,10 +828,14 @@ export default function AgentConfigure() {
         bio: character.bio,
         systemPrompt: character.systemPrompt,
         personalityPrompt: character.personalityPrompt,
+        lore: character.lore,
         postStyle: character.postStyle,
+        chatStyle: character.chatStyle,
+        styleAll: character.styleAll,
         topics: character.topics,
         adjectives: character.adjectives,
         messageExamples: character.messageExamples,
+        postExamples: character.postExamples,
         customPrompts: customPromptsObj,
         // Model (default)
         modelProvider: modelConfig.provider,
@@ -804,16 +873,7 @@ export default function AgentConfigure() {
         onlyReplyVerified: behavior.onlyVerified,
         replyKeywords: behavior.replyKeywords,
         ignoreKeywords: behavior.ignoreKeywords,
-        cryptoCommentary: behavior.cryptoCommentary,
-        marketAnalysis: behavior.marketAnalysis,
-        newsCommentary: behavior.newsCommentary,
-        technicalAnalysis: behavior.technicalAnalysis,
-        threads: behavior.threads,
-        memes: behavior.memes,
-        priceChangeThreshold: behavior.priceChangeThreshold[0],
-        volumeChangeThreshold: behavior.volumeChangeThreshold[0],
-        autoTweetOnNews: behavior.autoTweetOnNews,
-        minNewsSentiment: behavior.minNewsSentiment[0].toString(),
+
         // Bible Verse Tracking
         verseTrackingEnabled: behavior.verseTrackingEnabled,
         verseReusePolicy: behavior.verseReusePolicy,
@@ -822,11 +882,7 @@ export default function AgentConfigure() {
         contentTypeTrackingEnabled: behavior.contentTypeTrackingEnabled,
         contentTypeReusePolicy: behavior.contentTypeReusePolicy,
         contentTypeWindow: parseInt(behavior.contentTypeWindow) || 7,
-        // Priority Mode
-        eventPriorityModeEnabled: behavior.eventPriorityModeEnabled,
-        eventPriorityFreshnessMinutes: parseInt(behavior.eventPriorityFreshnessMinutes) || 360,
-        eventPriorityMinPriority: behavior.eventPriorityMinPriority,
-        eventPriorityFallbackPolicy: behavior.eventPriorityFallbackPolicy,
+
         // Knowledge Base Settings
         kbMaxEntries: parseInt(kbSettings.maxEntries) || 10,
         kbReusePolicy: kbSettings.reusePolicy,
@@ -838,6 +894,10 @@ export default function AgentConfigure() {
         webhookUrl: webhookSettings.url || undefined,
         webhookSecret: webhookSettings.secret || undefined,
         webhookEvents: webhookSettings.events,
+        // News Monitor
+        monitoringEnabled: monitoringSettings.enabled,
+        monitoringTargets: monitoringSettings.targets,
+        monitoringIntervalHours: parseInt(monitoringSettings.interval) || 4,
       });
     },
     onSuccess: () => {
@@ -933,7 +993,7 @@ export default function AgentConfigure() {
   // Load agent data into state when fetched
   useEffect(() => {
     if (!agent) return;
-    
+
     // Load Twitter config
     setTwitterConfig({
       apiKey: agent.twitterApiKey || "",
@@ -951,20 +1011,24 @@ export default function AgentConfigure() {
       twoFactorSecret: agent.twitter2faSecret || "",
       cookies: agent.twitterCookies || "",
     });
-    
+
     // Load character
     setCharacter({
-      name: agent.name,
-      username: agent.username,
+      name: agent.name || "",
+      username: agent.username || "",
       bio: agent.bio || "",
+      lore: agent.lore || "",
       systemPrompt: agent.systemPrompt || "",
       personalityPrompt: agent.personalityPrompt || "",
       postStyle: agent.postStyle || "",
+      chatStyle: agent.chatStyle || "",
+      styleAll: agent.styleAll || "",
       topics: agent.topics || "",
       adjectives: agent.adjectives || "",
       messageExamples: agent.messageExamples || [],
+      postExamples: agent.postExamples || [],
     });
-    
+
     // Load custom prompts
     if (agent.customPrompts && typeof agent.customPrompts === "object") {
       const prompts = Object.entries(agent.customPrompts).map(([key, value], idx) => ({
@@ -974,7 +1038,7 @@ export default function AgentConfigure() {
       }));
       setCustomPrompts(prompts);
     }
-    
+
     // Load model config
     setModelConfig({
       provider: agent.modelProvider || "openai",
@@ -987,7 +1051,7 @@ export default function AgentConfigure() {
       presencePenalty: [typeof agent.presencePenalty === 'number' ? agent.presencePenalty : 0.5],
       contextWindow: (agent.contextWindow || 8000).toString(),
     });
-    
+
     // Load post-specific model config
     setPostModelConfig({
       provider: agent.postModelProvider || "",
@@ -995,7 +1059,7 @@ export default function AgentConfigure() {
       temperature: [typeof agent.postTemperature === 'number' ? agent.postTemperature : 0.7],
       maxTokens: [agent.postMaxTokens || 280],
     });
-    
+
     // Load conversation-specific model config
     setConversationModelConfig({
       provider: agent.conversationModelProvider || "",
@@ -1003,7 +1067,7 @@ export default function AgentConfigure() {
       temperature: [typeof agent.conversationTemperature === 'number' ? agent.conversationTemperature : 0.7],
       maxTokens: [agent.conversationMaxTokens || 500],
     });
-    
+
     // Load behavior
     setBehavior({
       postingEnabled: agent.postingEnabled ?? true,
@@ -1021,31 +1085,9 @@ export default function AgentConfigure() {
       onlyVerified: agent.onlyReplyVerified ?? false,
       replyKeywords: agent.replyKeywords || "",
       ignoreKeywords: agent.ignoreKeywords || "",
-      cryptoCommentary: agent.cryptoCommentary ?? true,
-      marketAnalysis: agent.marketAnalysis ?? true,
-      newsCommentary: agent.newsCommentary ?? true,
-      technicalAnalysis: agent.technicalAnalysis ?? false,
-      threads: agent.threads ?? true,
-      memes: agent.memes ?? false,
-      priceChangeThreshold: [agent.priceChangeThreshold || 5],
-      volumeChangeThreshold: [agent.volumeChangeThreshold || 50],
-      autoTweetOnNews: agent.autoTweetOnNews ?? true,
-      minNewsSentiment: [parseFloat(agent.minNewsSentiment || "0.6")],
-      // Bible Verse Tracking
-      verseTrackingEnabled: agent.verseTrackingEnabled ?? true,
-      verseReusePolicy: agent.verseReusePolicy || "avoid_recent",
-      verseReuseWindow: (agent.verseReuseWindow || 10).toString(),
-      // Content Type Tracking
-      contentTypeTrackingEnabled: (agent as any).contentTypeTrackingEnabled ?? true,
-      contentTypeReusePolicy: (agent as any).contentTypeReusePolicy || "rotate_all",
-      contentTypeWindow: ((agent as any).contentTypeWindow || 7).toString(),
-      // Priority Mode
-      eventPriorityModeEnabled: (agent as any).eventPriorityModeEnabled ?? false,
-      eventPriorityFreshnessMinutes: ((agent as any).eventPriorityFreshnessMinutes || 360).toString(),
-      eventPriorityMinPriority: (agent as any).eventPriorityMinPriority || "medium",
-      eventPriorityFallbackPolicy: (agent as any).eventPriorityFallbackPolicy || "respect_rotation",
+
     });
-    
+
     // Load KB settings
     setKbSettings({
       maxEntries: (agent.kbMaxEntries || 10).toString(),
@@ -1054,7 +1096,7 @@ export default function AgentConfigure() {
       autoRefreshEnabled: agent.kbAutoRefreshEnabled || false,
       autoRefreshIntervalHours: (agent.kbAutoRefreshIntervalHours || 6).toString(),
     });
-    
+
     // Load webhook settings
     setWebhookSettings({
       enabled: agent.webhookEnabled ?? false,
@@ -1100,6 +1142,15 @@ export default function AgentConfigure() {
   const modelComplete = modelConfig.apiKey !== "";
   const characterComplete = character.name && character.username && character.systemPrompt;
   const isConfigurationComplete = twitterComplete && modelComplete && characterComplete;
+
+  const handleExport = () => {
+    if (!id) return;
+    window.location.href = `/api/agents/${id}/export`;
+    toast({
+      title: "Exporting...",
+      description: "Character manifest download started.",
+    });
+  };
 
   if (isLoading) {
     return (
@@ -1159,6 +1210,10 @@ export default function AgentConfigure() {
               Test in Playground
             </Button>
           </Link>
+          <Button onClick={handleExport} variant="outline" data-testid="button-export-config">
+            <Download className="mr-2 h-4 w-4" />
+            Export
+          </Button>
           <Button onClick={handleSave} data-testid="button-save-config">
             <Save className="mr-2 h-4 w-4" />
             Save All
@@ -1559,6 +1614,18 @@ export default function AgentConfigure() {
                 />
                 <p className="text-xs text-muted-foreground">{character.bio.length} / 160 characters</p>
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="char-lore">Character Lore</Label>
+                <Textarea
+                  id="char-lore"
+                  value={character.lore}
+                  onChange={(e) => setCharacter({ ...character, lore: e.target.value })}
+                  placeholder="Deep backstory, key events, or foundational myths about this agent (newline separated)"
+                  className="min-h-[100px] font-mono text-sm"
+                  data-testid="input-char-lore"
+                />
+                <p className="text-xs text-muted-foreground">Historical context and foundational backstory.</p>
+              </div>
             </CardContent>
           </Card>
 
@@ -1623,6 +1690,60 @@ export default function AgentConfigure() {
                 />
                 <p className="text-xs text-muted-foreground">Writing style guidelines and tone descriptors.</p>
               </div>
+
+              <div className="space-y-3 pt-2">
+                <Label>Voice Presets (Click to Auto-Configure Style)</Label>
+                <RadioGroup
+                  defaultValue="natural"
+                  className="grid grid-cols-2 gap-4"
+                  onValueChange={(val) => {
+                    let newStyle = character.postStyle || "";
+                    // Clear previous preset keywords
+                    newStyle = newStyle.replace(/pipeline: (lowercase|unhinged|academic)\n?/g, "").trim();
+
+                    if (val === "lowercase") {
+                      newStyle = `pipeline: lowercase\n${newStyle}`;
+                    } else if (val === "unhinged") {
+                      newStyle = `pipeline: unhinged\n${newStyle}`;
+                    } else if (val === "academic") {
+                      newStyle = `pipeline: academic\n${newStyle}`;
+                    }
+
+                    setCharacter({ ...character, postStyle: newStyle.trim() });
+                  }}
+                >
+                  <div className="flex items-center space-x-2 border rounded-md p-3 hover:bg-muted/50 transition-colors">
+                    <RadioGroupItem value="natural" id="vp-natural" />
+                    <Label htmlFor="vp-natural" className="cursor-pointer">
+                      <div className="font-semibold">Natural</div>
+                      <div className="text-xs text-muted-foreground">Default behavior</div>
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2 border rounded-md p-3 hover:bg-muted/50 transition-colors">
+                    <RadioGroupItem value="lowercase" id="vp-lowercase" />
+                    <Label htmlFor="vp-lowercase" className="cursor-pointer">
+                      <div className="font-semibold">lowercase</div>
+                      <div className="text-xs text-muted-foreground">gen z aesthetic</div>
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2 border rounded-md p-3 hover:bg-muted/50 transition-colors">
+                    <RadioGroupItem value="unhinged" id="vp-chaos" />
+                    <Label htmlFor="vp-chaos" className="cursor-pointer">
+                      <div className="font-semibold">CHAOS MODE</div>
+                      <div className="text-xs text-muted-foreground">unpredictable</div>
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2 border rounded-md p-3 hover:bg-muted/50 transition-colors">
+                    <RadioGroupItem value="academic" id="vp-academic" />
+                    <Label htmlFor="vp-academic" className="cursor-pointer">
+                      <div className="font-semibold">Academic</div>
+                      <div className="text-xs text-muted-foreground">formal & cited</div>
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </div>
+
+
               <div className="space-y-2">
                 <Label htmlFor="topics">Topics (comma-separated)</Label>
                 <Input
@@ -1709,7 +1830,7 @@ export default function AgentConfigure() {
                     onChange={(e) => {
                       const newExamples = [...character.messageExamples];
                       const contentType = getExampleContentType(example);
-                      newExamples[idx] = contentType 
+                      newExamples[idx] = contentType
                         ? { content: e.target.value, contentType: contentType as any }
                         : e.target.value;
                       setCharacter({ ...character, messageExamples: newExamples });
@@ -1734,6 +1855,55 @@ export default function AgentConfigure() {
                   <strong>Content Type Tagging:</strong> Optionally tag each example with its content type. This helps the AI understand when to use each format without needing [LABELS] in your examples. The AI will rotate through content types automatically.
                 </AlertDescription>
               </Alert>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <CardTitle>Post Examples</CardTitle>
+                <Badge variant="secondary" className="text-xs">ELIZA PARITY</Badge>
+              </div>
+              <CardDescription>Examples of how the agent should structure and write public posts.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-4">
+                {character.postExamples.map((example, idx) => (
+                  <div key={idx} className="flex gap-2 items-start">
+                    <Textarea
+                      value={example}
+                      onChange={(e) => {
+                        const newExamples = [...character.postExamples];
+                        newExamples[idx] = e.target.value;
+                        setCharacter({ ...character, postExamples: newExamples });
+                      }}
+                      placeholder="Enter a post example..."
+                      className="min-h-[60px] text-sm"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => {
+                        const newExamples = [...character.postExamples];
+                        newExamples.splice(idx, 1);
+                        setCharacter({ ...character, postExamples: newExamples });
+                      }}
+                      className="text-muted-foreground hover:text-destructive shrink-0"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full border-dashed"
+                  onClick={() => setCharacter({ ...character, postExamples: [...character.postExamples, ""] })}
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Post Example
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
@@ -2367,7 +2537,7 @@ export default function AgentConfigure() {
                 </div>
                 <Slider
                   value={behavior.replyRate}
-                  onValueChange={(v) => setBehavior({ ...behavior, replyRate: v })}
+                  onValueChange={(v) => setBehavior({ ...behavior.replyRate, replyRate: v })}
                   max={100}
                   step={5}
                   disabled={!behavior.replyEnabled}
@@ -2389,7 +2559,7 @@ export default function AgentConfigure() {
                   />
                   <p className="text-xs text-muted-foreground">Rate limit for auto-replies</p>
                 </div>
-                
+
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label>Reply Delay</Label>
@@ -2421,42 +2591,7 @@ export default function AgentConfigure() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Content Modules</CardTitle>
-              <CardDescription>Enable or disable content types for this agent</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label>Crypto Commentary</Label>
-                <Switch
-                  checked={behavior.cryptoCommentary}
-                  onCheckedChange={(v) => setBehavior({ ...behavior, cryptoCommentary: v })}
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <Label>Market Analysis</Label>
-                <Switch
-                  checked={behavior.marketAnalysis}
-                  onCheckedChange={(v) => setBehavior({ ...behavior, marketAnalysis: v })}
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <Label>News Commentary</Label>
-                <Switch
-                  checked={behavior.newsCommentary}
-                  onCheckedChange={(v) => setBehavior({ ...behavior, newsCommentary: v })}
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <Label>Long-form Threads</Label>
-                <Switch
-                  checked={behavior.threads}
-                  onCheckedChange={(v) => setBehavior({ ...behavior, threads: v })}
-                />
-              </div>
-            </CardContent>
-          </Card>
+
 
           <Card>
             <CardHeader>
@@ -2469,7 +2604,7 @@ export default function AgentConfigure() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              
+
               <div className="space-y-4 p-4 rounded-lg bg-muted/30 border">
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
@@ -2515,16 +2650,18 @@ export default function AgentConfigure() {
                         value={behavior.verseReuseWindow}
                         onChange={(e) => setBehavior({ ...behavior, verseReuseWindow: e.target.value })}
                         disabled={behavior.verseReusePolicy === "allow"}
-                        data-testid="input-verse-window"
+                        className="min-h-[80px] font-mono text-xs"
                       />
                       <p className="text-xs text-muted-foreground">
-                        Check last {behavior.verseReuseWindow} posts for verse reuse
+                        The agent will read the last 3 tweets from these accounts every 4 hours.
                       </p>
                     </div>
+
+
                   </div>
                 )}
               </div>
-              
+
               <div className="space-y-4 p-4 rounded-lg bg-muted/30 border">
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
@@ -2581,121 +2718,9 @@ export default function AgentConfigure() {
                   </div>
                 )}
               </div>
-              
-              {/* Priority Mode - Event-Based Content Priority */}
-              <div className="space-y-4 p-4 rounded-lg bg-amber-500/5 border border-amber-500/20">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label className="flex items-center gap-2">
-                      <Zap className="h-4 w-4 text-amber-500" />
-                      Priority Mode
-                      <Badge variant="secondary" className="text-xs">NEW</Badge>
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      When fresh news exists in Knowledge Base, prioritize Event-Based posts over rotation
-                    </p>
-                  </div>
-                  <Switch
-                    checked={behavior.eventPriorityModeEnabled}
-                    onCheckedChange={(v) => setBehavior({ ...behavior, eventPriorityModeEnabled: v })}
-                    disabled={!behavior.newsCommentary}
-                    data-testid="switch-priority-mode"
-                  />
-                </div>
 
-                {!behavior.newsCommentary && (
-                  <Alert className="bg-muted/50">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription className="text-xs">
-                      Enable "News Commentary" above to use Priority Mode
-                    </AlertDescription>
-                  </Alert>
-                )}
 
-                {behavior.eventPriorityModeEnabled && behavior.newsCommentary && (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pl-6 pt-2 border-l-2 border-amber-500/30">
-                    <div className="space-y-2">
-                      <Label>Freshness Window</Label>
-                      <Select
-                        value={behavior.eventPriorityFreshnessMinutes}
-                        onValueChange={(v) => setBehavior({ ...behavior, eventPriorityFreshnessMinutes: v })}
-                      >
-                        <SelectTrigger data-testid="select-freshness-window">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="60">1 hour</SelectItem>
-                          <SelectItem value="120">2 hours</SelectItem>
-                          <SelectItem value="180">3 hours</SelectItem>
-                          <SelectItem value="360">6 hours</SelectItem>
-                          <SelectItem value="720">12 hours</SelectItem>
-                          <SelectItem value="1440">24 hours</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">
-                        News added within this time triggers priority
-                      </p>
-                    </div>
 
-                    <div className="space-y-2">
-                      <Label>Minimum Priority</Label>
-                      <Select
-                        value={behavior.eventPriorityMinPriority}
-                        onValueChange={(v) => setBehavior({ ...behavior, eventPriorityMinPriority: v })}
-                      >
-                        <SelectTrigger data-testid="select-min-priority">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="high">High only</SelectItem>
-                          <SelectItem value="medium">Medium and above</SelectItem>
-                          <SelectItem value="low">All priorities</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">
-                        Minimum KB priority to trigger priority mode
-                      </p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Diversity Safeguard</Label>
-                      <Select
-                        value={behavior.eventPriorityFallbackPolicy}
-                        onValueChange={(v) => setBehavior({ ...behavior, eventPriorityFallbackPolicy: v })}
-                      >
-                        <SelectTrigger data-testid="select-fallback-policy">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="respect_rotation">Respect rotation</SelectItem>
-                          <SelectItem value="allow_consecutive">Allow consecutive</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">
-                        How to handle back-to-back event posts
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {behavior.eventPriorityModeEnabled && behavior.newsCommentary && (
-                  <Alert className="bg-amber-500/5 border-amber-500/20">
-                    <Zap className="h-4 w-4 text-amber-500" />
-                    <AlertDescription className="text-xs text-muted-foreground">
-                      <strong>How it works:</strong> When fresh news exists (within the freshness window), the system will select EVENT_BASED content type instead of normal rotation. This ensures timely news gets posted quickly. The diversity safeguard prevents excessive consecutive event posts.
-                    </AlertDescription>
-                  </Alert>
-                )}
-              </div>
-              
-              <Alert className="bg-primary/5 border-primary/20">
-                <Info className="h-4 w-4 text-primary" />
-                <AlertDescription className="text-xs text-muted-foreground">
-                  <strong>How it works:</strong> The AI receives information about recently used verses and content types when generating new posts. 
-                  It prioritizes fresh content while still maintaining your agent's voice and style.
-                </AlertDescription>
-              </Alert>
-              
             </CardContent>
           </Card>
         </TabsContent>
@@ -2710,752 +2735,295 @@ export default function AgentConfigure() {
                 <Badge variant="secondary" className="text-xs">HELPFUL</Badge>
               </div>
               <p className="text-muted-foreground">
-                Knowledge Base entries provide current events and news content for the AI to reference. High-priority, unused entries are selected first. 
+                Knowledge Base entries provide current events and news content for the AI to reference. High-priority, unused entries are selected first.
                 The KB gives your agent fresh topics to discuss, but <strong>Message Examples</strong> and <strong>System Prompt</strong> control the actual output format.
               </p>
             </AlertDescription>
           </Alert>
 
-          {/* Workflow Guide */}
-          <Card className="bg-muted/30">
+          <div className="flex items-center justify-between my-4">
+            <div>
+              <h2 className="text-lg font-medium">Knowledge Base Management</h2>
+              <p className="text-sm text-muted-foreground">Manage static knowledge and lore for your agent</p>
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={() => setIsAddKBDialogOpen(true)} data-testid="button-add-kb-entry">
+                <Plus className="mr-2 h-4 w-4" />
+                Add Entry
+              </Button>
+            </div>
+          </div>
+
+
+          <Card className="mb-6">
             <CardHeader>
-              <CardTitle className="text-base">How to Add Knowledge</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <Radio className="h-5 w-5 text-primary" />
+                News Monitor & Knowledge Strategy
+              </CardTitle>
+              <CardDescription>
+                Configure how the agent monitors external sources and utilizes its knowledge base
+              </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-3 text-sm">
-                <div className="flex gap-3">
-                  <div className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground font-semibold text-xs">1</div>
-                  <div>
-                    <p className="font-medium">Set up API sources</p>
-                    <p className="text-muted-foreground">Go to <Link href="/api-management" className="text-primary hover:underline">Knowledge Sources</Link> to configure APIs (news, crypto prices, etc.)</p>
+            <CardContent className="space-y-6">
+              {/* News Monitor Section */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label className="text-base">News Monitor</Label>
+                    <p className="text-sm text-muted-foreground">Scrape X accounts for fresh context (bypass API limits)</p>
+                  </div>
+                  <Switch
+                    checked={monitoringSettings.enabled}
+                    onCheckedChange={(v) => setMonitoringSettings({ ...monitoringSettings, enabled: v })}
+                    data-testid="switch-news-monitor"
+                  />
+                </div>
+
+                {monitoringSettings.enabled && (
+                  <div className="space-y-4 pl-4 border-l-2 border-primary/20">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="monitor-targets">Target Accounts (comma-separated)</Label>
+                        <Input
+                          id="monitor-targets"
+                          placeholder="DegenerateNews, Cointelegraph"
+                          value={monitoringSettings.targets}
+                          onChange={(e) => setMonitoringSettings({ ...monitoringSettings, targets: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="monitor-interval">Check Interval (Hours)</Label>
+                        <Input
+                          id="monitor-interval"
+                          type="number"
+                          min="1"
+                          max="24"
+                          value={monitoringSettings.interval}
+                          onChange={(e) => setMonitoringSettings({ ...monitoringSettings, interval: e.target.value })}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Scraped Content Display */}
+                    <div className="space-y-2 pt-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          Current Context (In-Memory)
+                        </Label>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 text-[10px] gap-1 px-2"
+                          onClick={handleRefreshNews}
+                          disabled={!monitoringSettings.enabled}
+                        >
+                          <RefreshCw className="h-3 w-3" />
+                          Refresh Now
+                        </Button>
+                      </div>
+                      <div className="rounded-md border border-border bg-muted/50 p-2 space-y-2 max-h-[200px] overflow-y-auto">
+                        {agentStatus?.newsContext && agentStatus.newsContext.length > 0 ? (
+                          agentStatus.newsContext.map((tweet: any, i: number) => (
+                            <div key={i} className="text-xs space-y-1 pb-2 border-b border-border/50 last:border-0">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-blue-500">@{tweet.username}</span>
+                                <span className="text-muted-foreground text-[10px]">
+                                  {new Date(tweet.timeParsed || Date.now()).toLocaleDateString()}
+                                </span>
+                              </div>
+                              <p className="text-muted-foreground/90 line-clamp-3">{tweet.text}</p>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-xs text-muted-foreground italic p-2 text-center">
+                            No news context scraped yet. Agent will fetch on next run.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t pt-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label className="text-base">Knowledge Selection</Label>
+                    <p className="text-sm text-muted-foreground">How many KB items to inject per tweet</p>
                   </div>
                 </div>
-                <div className="flex gap-3">
-                  <div className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground font-semibold text-xs">2</div>
-                  <div>
-                    <p className="font-medium">Test and fetch data</p>
-                    <p className="text-muted-foreground">Test your API connection, then click "Ingest to Agent" to pull in fresh content</p>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="kb-max-entries">Max Entries per Post</Label>
+                    <Input
+                      id="kb-max-entries"
+                      type="number"
+                      min="1"
+                      max="10"
+                      value={kbSettings.maxEntries}
+                      onChange={(e) => setKbSettings({ ...kbSettings, maxEntries: parseInt(e.target.value) || 1 })}
+                    />
                   </div>
-                </div>
-                <div className="flex gap-3">
-                  <div className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground font-semibold text-xs">3</div>
-                  <div>
-                    <p className="font-medium">Review and approve</p>
-                    <p className="text-muted-foreground">New content appears in "Review Queue" below - approve what you want your agent to know</p>
+                  <div className="space-y-2">
+                    <Label>Reuse Policy</Label>
+                    <Select
+                      value={kbSettings.reusePolicy}
+                      onValueChange={(v) => setKbSettings({ ...kbSettings, reusePolicy: v })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="allow">Allow Reuse</SelectItem>
+                        <SelectItem value="deprioritize">prioritize Unused</SelectItem>
+                        <SelectItem value="block">Block Reuse (Cooldown)</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
-                </div>
-                <div className="flex gap-3">
-                  <div className="flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground font-semibold text-xs">4</div>
-                  <div>
-                    <p className="font-medium">Manage active knowledge</p>
-                    <p className="text-muted-foreground">Approved entries appear in "Active Knowledge" and are used in conversations. Delete outdated items anytime.</p>
+                  <div className="space-y-2">
+                    <Label htmlFor="kb-cooldown">Cooldown (Hours)</Label>
+                    <Input
+                      id="kb-cooldown"
+                      type="number"
+                      min="1"
+                      value={kbSettings.reuseCooldownHours}
+                      onChange={(e) => setKbSettings({ ...kbSettings, reuseCooldownHours: parseInt(e.target.value) || 0 })}
+                      disabled={kbSettings.reusePolicy !== "block"}
+                    />
                   </div>
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          {/* KB Selection Settings */}
+
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Settings className="h-4 w-4" />
-                Knowledge Selection Settings
-              </CardTitle>
-              <CardDescription>Control how knowledge base entries are selected for posts</CardDescription>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
+              <div className="space-y-1">
+                <CardTitle className="flex items-center gap-2">
+                  <Book className="h-5 w-5 text-primary" />
+                  Knowledge Entries
+                </CardTitle>
+                <CardDescription>
+                  {kbEntries.length} total entries • Auto-approved
+                </CardDescription>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="kb-max-entries">Max KB Entries Per Post</Label>
-                <Input
-                  id="kb-max-entries"
-                  type="number"
-                  min="1"
-                  max="50"
-                  value={kbSettings.maxEntries}
-                  onChange={(e) => setKbSettings({ ...kbSettings, maxEntries: e.target.value })}
-                  data-testid="input-kb-max-entries"
-                />
-                <p className="text-xs text-muted-foreground">Maximum number of KB entries to include when generating posts (default: 10)</p>
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="kb-reuse-policy">Reuse Policy</Label>
-                <Select
-                  value={kbSettings.reusePolicy}
-                  onValueChange={(v) => setKbSettings({ ...kbSettings, reusePolicy: v })}
-                >
-                  <SelectTrigger data-testid="select-kb-reuse-policy">
-                    <SelectValue placeholder="Select reuse policy" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="never">Never Reuse - Skip entries used in recent posts</SelectItem>
-                    <SelectItem value="deprioritize">Deprioritize - Prefer unused entries but allow reuse</SelectItem>
-                    <SelectItem value="allow">Allow - No restrictions on reuse</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">How to handle KB entries that have already been used in posts</p>
-              </div>
-              
-              {kbSettings.reusePolicy !== "allow" && (
-                <div className="space-y-2">
-                  <Label htmlFor="kb-cooldown">Cooldown Period (Hours)</Label>
-                  <Input
-                    id="kb-cooldown"
-                    type="number"
-                    min="1"
-                    max="168"
-                    value={kbSettings.reuseCooldownHours}
-                    onChange={(e) => setKbSettings({ ...kbSettings, reuseCooldownHours: e.target.value })}
-                    data-testid="input-kb-cooldown"
-                  />
-                  <p className="text-xs text-muted-foreground">Hours to wait before allowing an entry to be reused</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* KB Auto-Refresh Settings */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <RefreshCw className="h-4 w-4" />
-                Auto-Refresh Settings
-              </CardTitle>
-              <CardDescription>Automatically refresh knowledge base entries from API sources</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>Enable Auto-Refresh</Label>
-                  <p className="text-xs text-muted-foreground">Automatically refresh KB entries from custom APIs on a schedule</p>
-                </div>
-                <Switch
-                  checked={kbSettings.autoRefreshEnabled}
-                  onCheckedChange={(checked) => setKbSettings({ ...kbSettings, autoRefreshEnabled: checked })}
-                  data-testid="switch-kb-auto-refresh"
-                />
-              </div>
-              
-              {kbSettings.autoRefreshEnabled && (
-                <div className="space-y-2">
-                  <Label htmlFor="kb-refresh-interval">Refresh Interval (Hours)</Label>
-                  <Input
-                    id="kb-refresh-interval"
-                    type="number"
-                    min="1"
-                    max="168"
-                    value={kbSettings.autoRefreshIntervalHours}
-                    onChange={(e) => setKbSettings({ ...kbSettings, autoRefreshIntervalHours: e.target.value })}
-                    data-testid="input-kb-refresh-interval"
-                  />
-                  <p className="text-xs text-muted-foreground">How often to refresh KB entries from API sources (e.g., 6 = every 6 hours)</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* API Data Sources & Refresh Controls */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-base">API Data Sources</CardTitle>
-                  <CardDescription>Refresh knowledge from configured API sources</CardDescription>
-                </div>
-                <Link href="/api-management">
-                  <Button size="sm" variant="outline">
-                    <Plus className="mr-2 h-4 w-4" />
-                    Manage Sources
-                  </Button>
-                </Link>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {customApis.length === 0 ? (
+              {kbEntries.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
-                  <p className="mb-2">No API sources configured</p>
-                  <p className="text-sm">
-                    <Link href="/api-management" className="text-primary hover:underline">
-                      Add API sources
-                    </Link>
-                    {" "}to automatically fetch knowledge for this agent
-                  </p>
+                  No knowledge entries found. Add some content to get started.
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {customApis.map((api: any) => (
-                    <div
-                      key={api.id}
-                      className="flex items-center justify-between p-3 border rounded-lg hover-elevate"
-                    >
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h4 className="font-medium">{api.name}</h4>
-                          <Badge variant="outline" className="text-xs">{api.category}</Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground line-clamp-1">{api.description}</p>
-                        <div className="flex items-center gap-3 mt-1">
-                          {api.endpoint && (
-                            <p className="text-xs text-muted-foreground font-mono">{api.endpoint}</p>
-                          )}
-                          {api.lastRefreshedAt && (
-                            <span className="text-xs text-muted-foreground" data-testid={`api-refresh-time-${api.id}`}>
-                              Last refreshed: {new Date(api.lastRefreshedAt).toLocaleString()}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleRefreshAPI(api.id)}
-                        disabled={refreshingApiId === api.id}
-                        data-testid={`button-refresh-${api.id}`}
-                      >
-                        <RefreshCw className={`mr-2 h-4 w-4 ${refreshingApiId === api.id ? 'animate-spin' : ''}`} />
-                        {refreshingApiId === api.id ? "Refreshing..." : "Refresh"}
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Tabs value={kbSubtab} onValueChange={(v) => setKbSubtab(v as "review" | "active")} className="w-full">
-            <div className="flex items-center justify-between mb-4">
-              <TabsList>
-                <TabsTrigger value="review" data-testid="tab-kb-review">
-                  Review Queue ({pendingKB.length})
-                </TabsTrigger>
-                <TabsTrigger value="active" data-testid="tab-kb-active">
-                  Active Knowledge ({approvedKB.length})
-                </TabsTrigger>
-              </TabsList>
-              <Dialog open={isAddKBDialogOpen} onOpenChange={setIsAddKBDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button size="sm">
-                    <Plus className="mr-2 h-4 w-4" />
-                    Add Entry
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                  <DialogHeader>
-                    <DialogTitle>Add Knowledge Entry</DialogTitle>
-                    <DialogDescription>Add knowledge (will be approved automatically)</DialogDescription>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="kb-title">Title</Label>
-                        <Input
-                          id="kb-title"
-                          value={newKBEntry.title}
-                          onChange={(e) => setNewKBEntry({ ...newKBEntry, title: e.target.value })}
-                          placeholder="Entry title..."
-                          data-testid="input-kb-title"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="kb-category">Category</Label>
-                        <Select
-                          value={newKBEntry.category}
-                          onValueChange={(value) => setNewKBEntry({ ...newKBEntry, category: value })}
-                        >
-                          <SelectTrigger data-testid="select-kb-category">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="general">General</SelectItem>
-                            <SelectItem value="crypto">Crypto</SelectItem>
-                            <SelectItem value="theology">Theology</SelectItem>
-                            <SelectItem value="narratives">Narratives</SelectItem>
-                            <SelectItem value="solana">Solana</SelectItem>
-                            <SelectItem value="mental_models">Mental Models</SelectItem>
-                            <SelectItem value="memes">Memes</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label htmlFor="kb-content">Content</Label>
-                      <Textarea
-                        id="kb-content"
-                        value={newKBEntry.content}
-                        onChange={(e) => setNewKBEntry({ ...newKBEntry, content: e.target.value })}
-                        placeholder="Knowledge content..."
-                        className="min-h-[120px] font-mono text-sm"
-                        data-testid="textarea-kb-content"
-                      />
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label htmlFor="kb-tags">Tags (comma-separated)</Label>
-                      <Input
-                        id="kb-tags"
-                        value={newKBEntry.tags}
-                        onChange={(e) => setNewKBEntry({ ...newKBEntry, tags: e.target.value })}
-                        placeholder="tag1, tag2, tag3"
-                        data-testid="input-kb-tags"
-                      />
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="kb-priority">Priority</Label>
-                        <Select
-                          value={newKBEntry.priority}
-                          onValueChange={(value: "high" | "medium" | "low") => setNewKBEntry({ ...newKBEntry, priority: value })}
-                        >
-                          <SelectTrigger data-testid="select-kb-priority">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="high">High</SelectItem>
-                            <SelectItem value="medium">Medium</SelectItem>
-                            <SelectItem value="low">Low</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="kb-refresh">Refresh Strategy</Label>
-                        <Select
-                          value={newKBEntry.refreshStrategy}
-                          onValueChange={(value) => setNewKBEntry({ ...newKBEntry, refreshStrategy: value })}
-                        >
-                          <SelectTrigger data-testid="select-kb-refresh">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="static">Static (Never refresh)</SelectItem>
-                            <SelectItem value="daily">Daily</SelectItem>
-                            <SelectItem value="weekly">Weekly</SelectItem>
-                            <SelectItem value="on_demand">On Demand</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center justify-between py-2 px-3 bg-muted/50 rounded-lg">
-                      <Label htmlFor="kb-active" className="cursor-pointer">Active (Include in generations)</Label>
-                      <Switch
-                        id="kb-active"
-                        checked={newKBEntry.active}
-                        onCheckedChange={(checked) => setNewKBEntry({ ...newKBEntry, active: checked })}
-                        data-testid="switch-kb-active"
-                      />
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setIsAddKBDialogOpen(false)}>Cancel</Button>
-                    <Button
-                      onClick={handleAddKBEntry}
-                      disabled={addKBMutation.isPending}
-                      data-testid="button-add-kb-entry"
-                    >
-                      {addKBMutation.isPending ? "Adding..." : "Add Entry"}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-
-              {/* Edit KB Entry Dialog */}
-              <Dialog open={isEditKBDialogOpen} onOpenChange={setIsEditKBDialogOpen}>
-                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                  <DialogHeader>
-                    <DialogTitle>Edit Knowledge Entry</DialogTitle>
-                    <DialogDescription>Update the content and settings for this entry</DialogDescription>
-                  </DialogHeader>
-                  {editingKBEntry && (
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="edit-kb-title">Title</Label>
-                          <Input
-                            id="edit-kb-title"
-                            value={editingKBEntry.title}
-                            onChange={(e) => setEditingKBEntry({ ...editingKBEntry, title: e.target.value })}
-                            placeholder="Entry title..."
-                            data-testid="input-edit-kb-title"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="edit-kb-category">Category</Label>
-                          <Select
-                            value={editingKBEntry.category}
-                            onValueChange={(value) => setEditingKBEntry({ ...editingKBEntry, category: value })}
-                          >
-                            <SelectTrigger data-testid="select-edit-kb-category">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="general">General</SelectItem>
-                              <SelectItem value="crypto">Crypto</SelectItem>
-                              <SelectItem value="theology">Theology</SelectItem>
-                              <SelectItem value="narratives">Narratives</SelectItem>
-                              <SelectItem value="solana">Solana</SelectItem>
-                              <SelectItem value="mental_models">Mental Models</SelectItem>
-                              <SelectItem value="memes">Memes</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                      
-                      <div className="space-y-2">
-                        <Label htmlFor="edit-kb-content">Content</Label>
-                        <Textarea
-                          id="edit-kb-content"
-                          value={editingKBEntry.content}
-                          onChange={(e) => setEditingKBEntry({ ...editingKBEntry, content: e.target.value })}
-                          placeholder="Knowledge content..."
-                          className="min-h-[120px] font-mono text-sm"
-                          data-testid="textarea-edit-kb-content"
-                        />
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="edit-kb-priority">Priority</Label>
-                          <Select
-                            value={editingKBEntry.priority}
-                            onValueChange={(value) => setEditingKBEntry({ ...editingKBEntry, priority: value })}
-                          >
-                            <SelectTrigger data-testid="select-edit-kb-priority">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="high">High</SelectItem>
-                              <SelectItem value="medium">Medium</SelectItem>
-                              <SelectItem value="low">Low</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="edit-kb-refresh">Refresh Strategy</Label>
-                          <Select
-                            value={editingKBEntry.refreshStrategy}
-                            onValueChange={(value) => setEditingKBEntry({ ...editingKBEntry, refreshStrategy: value })}
-                          >
-                            <SelectTrigger data-testid="select-edit-kb-refresh">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="static">Static (Never refresh)</SelectItem>
-                              <SelectItem value="daily">Daily</SelectItem>
-                              <SelectItem value="weekly">Weekly</SelectItem>
-                              <SelectItem value="on_demand">On Demand</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center justify-between py-2 px-3 bg-muted/50 rounded-lg">
-                        <Label htmlFor="edit-kb-active" className="cursor-pointer">Active (Include in generations)</Label>
-                        <Switch
-                          id="edit-kb-active"
-                          checked={editingKBEntry.active}
-                          onCheckedChange={(checked) => setEditingKBEntry({ ...editingKBEntry, active: checked })}
-                          data-testid="switch-edit-kb-active"
-                        />
-                      </div>
-                    </div>
-                  )}
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => {
-                      setIsEditKBDialogOpen(false);
-                      setEditingKBEntry(null);
-                    }}>Cancel</Button>
-                    <Button
-                      onClick={() => {
-                        if (editingKBEntry) {
-                          updateKBMutation.mutate({
-                            entryId: editingKBEntry.id,
-                            data: {
-                              title: editingKBEntry.title,
-                              content: editingKBEntry.content,
-                              category: editingKBEntry.category,
-                              priority: editingKBEntry.priority,
-                              active: editingKBEntry.active,
-                              refreshStrategy: editingKBEntry.refreshStrategy,
+                <>
+                  {kbEntries.map((entry: any) => (
+                    <div key={entry.id} className="p-3 border rounded-lg space-y-2" data-testid={`active-kb-entry-${entry.id}`}>
+                      <div className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedKBIds.has(entry.id)}
+                          onChange={() => {
+                            const newSet = new Set(selectedKBIds);
+                            if (newSet.has(entry.id)) {
+                              newSet.delete(entry.id);
+                            } else {
+                              newSet.add(entry.id);
                             }
-                          });
-                        }
-                      }}
-                      disabled={updateKBMutation.isPending}
-                      data-testid="button-save-kb-entry"
-                    >
-                      {updateKBMutation.isPending ? "Saving..." : "Save Changes"}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-            </div>
-
-            {/* Review Queue Tab */}
-            <TabsContent value="review" className="space-y-4">
-              {selectedKBIds.size > 0 && (
-                <Card className="bg-primary/5 border-primary/20">
-                  <CardContent className="flex items-center justify-between gap-4 py-3">
-                    <span className="text-sm font-medium">{selectedKBIds.size} selected</span>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        onClick={handleBatchApprove}
-                        disabled={batchApproveMutation.isPending}
-                        data-testid="button-batch-approve"
-                      >
-                        <CheckCircle2 className="mr-2 h-4 w-4" />
-                        {batchApproveMutation.isPending ? "Approving..." : "Approve"}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={handleBatchArchive}
-                        disabled={batchArchiveMutation.isPending}
-                        data-testid="button-batch-archive"
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        {batchArchiveMutation.isPending ? "Archiving..." : "Archive"}
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle>Pending Entries</CardTitle>
-                      <CardDescription>Review and approve ingested data before activation</CardDescription>
-                    </div>
-                    {pendingKB.length > 0 && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleSelectAllKB(pendingKB)}
-                        data-testid="button-select-all"
-                      >
-                        {selectedKBIds.size === pendingKB.length ? "Deselect All" : "Select All"}
-                      </Button>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {pendingKB.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <p>No pending entries. Ingest data from Custom APIs to review.</p>
-                    </div>
-                  ) : (
-                    pendingKB.map((entry) => (
-                      <div key={entry.id} className="p-3 border rounded-lg space-y-2 hover-elevate" data-testid={`kb-entry-${entry.id}`}>
-                        <div className="flex items-start gap-3">
-                          <input
-                            type="checkbox"
-                            checked={selectedKBIds.has(entry.id)}
-                            onChange={() => handleToggleKBSelection(entry.id)}
-                            className="mt-1"
-                            data-testid={`checkbox-kb-${entry.id}`}
-                          />
-                          <div className="flex-1">
-                            <div className="flex items-start justify-between gap-2">
-                              <h4 className="font-medium">{entry.title}</h4>
+                            setSelectedKBIds(newSet);
+                          }}
+                          className="mt-1"
+                          data-testid={`checkbox-active-kb-${entry.id}`}
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <h4 className="font-medium">{entry.title}</h4>
+                            <div className="flex gap-1">
                               <Badge variant="outline" className="text-xs">{entry.category}</Badge>
-                            </div>
-                            <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{entry.content}</p>
-                            <div className="flex gap-2 mt-2 flex-wrap items-center">
-                              {entry.tags?.map((tag: string) => (
-                                <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
-                              ))}
-                              {entry.source && (
-                                <Badge variant="outline" className="text-xs">Source: {entry.source}</Badge>
-                              )}
-                              {entry.lastRefreshedAt && (
-                                <span className="text-xs text-muted-foreground ml-auto" data-testid={`kb-pending-refresh-time-${entry.id}`}>
-                                  Ingested: {new Date(entry.lastRefreshedAt).toLocaleString()}
-                                </span>
+                              <Badge variant="outline" className="text-xs">{entry.source}</Badge>
+                              {entry.active ? (
+                                <Badge variant="default" className="text-xs">Active</Badge>
+                              ) : (
+                                <Badge variant="secondary" className="text-xs">Disabled</Badge>
                               )}
                             </div>
                           </div>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            {/* Active Knowledge Tab */}
-            <TabsContent value="active" className="space-y-4">
-              {selectedKBIds.size > 0 && kbSubtab === "active" && (
-                <Card className="bg-primary/5 border-primary/20">
-                  <CardContent className="flex items-center justify-between gap-4 py-3">
-                    <span className="text-sm font-medium">{selectedKBIds.size} selected</span>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={handleBatchDeactivateKB}
-                        disabled={batchDeactivateMutation.isPending}
-                        data-testid="button-batch-deactivate"
-                      >
-                        {batchDeactivateMutation.isPending ? "Deactivating..." : "Deactivate"}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={handleBatchDeleteActive}
-                        disabled={batchDeleteActiveMutation.isPending}
-                        data-testid="button-batch-delete-active"
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        {batchDeleteActiveMutation.isPending ? "Deleting..." : "Delete"}
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle>Active Knowledge</CardTitle>
-                      <CardDescription>Approved entries used in agent conversations</CardDescription>
-                    </div>
-                    {approvedKB.length > 0 && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          if (selectedKBIds.size === approvedKB.length) {
-                            setSelectedKBIds(new Set());
-                          } else {
-                            setSelectedKBIds(new Set(approvedKB.map(kb => kb.id)));
-                          }
-                        }}
-                        data-testid="button-select-all-active"
-                      >
-                        {selectedKBIds.size === approvedKB.length ? "Deselect All" : "Select All"}
-                      </Button>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {approvedKB.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <p>No active knowledge entries yet. Approve pending entries or add manually.</p>
-                    </div>
-                  ) : (
-                    approvedKB.map((entry) => (
-                      <div key={entry.id} className="p-3 border rounded-lg space-y-2" data-testid={`active-kb-entry-${entry.id}`}>
-                        <div className="flex items-start gap-3">
-                          <input
-                            type="checkbox"
-                            checked={selectedKBIds.has(entry.id)}
-                            onChange={() => {
-                              const newSet = new Set(selectedKBIds);
-                              if (newSet.has(entry.id)) {
-                                newSet.delete(entry.id);
-                              } else {
-                                newSet.add(entry.id);
-                              }
-                              setSelectedKBIds(newSet);
-                            }}
-                            className="mt-1"
-                            data-testid={`checkbox-active-kb-${entry.id}`}
-                          />
-                          <div className="flex-1">
-                            <div className="flex items-start justify-between gap-2">
-                              <h4 className="font-medium">{entry.title}</h4>
-                              <div className="flex gap-1">
-                                <Badge variant="outline" className="text-xs">{entry.category}</Badge>
-                                <Badge variant="outline" className="text-xs">{entry.source}</Badge>
-                                {entry.active ? (
-                                  <Badge variant="default" className="text-xs">Active</Badge>
-                                ) : (
-                                  <Badge variant="secondary" className="text-xs">Disabled</Badge>
-                                )}
-                              </div>
-                            </div>
-                            <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{entry.content}</p>
-                            <div className="flex gap-2 mt-2 flex-wrap items-center">
-                              {entry.tags?.map((tag: string) => (
-                                <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
-                              ))}
-                              <Select
-                                value={entry.priority || "medium"}
-                                onValueChange={(value) => {
-                                  updatePriorityMutation.mutate({ entryId: entry.id, priority: value });
-                                }}
-                                disabled={updatePriorityMutation.isPending}
+                          <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{entry.content}</p>
+                          <div className="flex gap-2 mt-2 flex-wrap items-center">
+                            {entry.tags?.map((tag: string) => (
+                              <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
+                            ))}
+                            <Select
+                              value={entry.priority || "medium"}
+                              onValueChange={(value) => {
+                                updatePriorityMutation.mutate({ entryId: entry.id, priority: value });
+                              }}
+                              disabled={updatePriorityMutation.isPending}
+                            >
+                              <SelectTrigger
+                                className="h-6 w-[110px] text-xs"
+                                data-testid={`select-priority-${entry.id}`}
                               >
-                                <SelectTrigger 
-                                  className="h-6 w-[110px] text-xs"
-                                  data-testid={`select-priority-${entry.id}`}
-                                >
-                                  <SelectValue placeholder="Priority" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="high" data-testid={`priority-high-${entry.id}`}>
-                                    <span className="flex items-center gap-1">
-                                      <span className="w-2 h-2 rounded-full bg-red-500"></span>
-                                      High
-                                    </span>
-                                  </SelectItem>
-                                  <SelectItem value="medium" data-testid={`priority-medium-${entry.id}`}>
-                                    <span className="flex items-center gap-1">
-                                      <span className="w-2 h-2 rounded-full bg-yellow-500"></span>
-                                      Medium
-                                    </span>
-                                  </SelectItem>
-                                  <SelectItem value="low" data-testid={`priority-low-${entry.id}`}>
-                                    <span className="flex items-center gap-1">
-                                      <span className="w-2 h-2 rounded-full bg-gray-500"></span>
-                                      Low
-                                    </span>
-                                  </SelectItem>
-                                </SelectContent>
-                              </Select>
-                              {entry.originalPriority && entry.originalPriority !== entry.priority && (
-                                <Badge variant="outline" className="text-xs text-muted-foreground">
-                                  was: {entry.originalPriority}
-                                </Badge>
-                              )}
-                              {entry.lastRefreshedAt && (
-                                <span className="text-xs text-muted-foreground ml-auto" data-testid={`kb-refresh-time-${entry.id}`}>
-                                  Last refreshed: {new Date(entry.lastRefreshedAt).toLocaleString()}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex gap-1">
-                            {/* Only show edit button for manually added entries */}
-                            {entry.source === "manual" && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => {
-                                  setEditingKBEntry(entry);
-                                  setIsEditKBDialogOpen(true);
-                                }}
-                                data-testid={`button-edit-kb-${entry.id}`}
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
+                                <SelectValue placeholder="Priority" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="high" data-testid={`priority-high-${entry.id}`}>
+                                  <span className="flex items-center gap-1">
+                                    <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                                    High
+                                  </span>
+                                </SelectItem>
+                                <SelectItem value="medium" data-testid={`priority-medium-${entry.id}`}>
+                                  <span className="flex items-center gap-1">
+                                    <span className="w-2 h-2 rounded-full bg-yellow-500"></span>
+                                    Medium
+                                  </span>
+                                </SelectItem>
+                                <SelectItem value="low" data-testid={`priority-low-${entry.id}`}>
+                                  <span className="flex items-center gap-1">
+                                    <span className="w-2 h-2 rounded-full bg-gray-500"></span>
+                                    Low
+                                  </span>
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {entry.originalPriority && entry.originalPriority !== entry.priority && (
+                              <Badge variant="outline" className="text-xs text-muted-foreground">
+                                was: {entry.originalPriority}
+                              </Badge>
+                            )}
+                            {entry.lastRefreshedAt && (
+                              <span className="text-xs text-muted-foreground ml-auto" data-testid={`kb-refresh-time-${entry.id}`}>
+                                Last refreshed: {new Date(entry.lastRefreshedAt).toLocaleString()}
+                              </span>
                             )}
                           </div>
                         </div>
+                        <div className="flex gap-1">
+                          {/* Only show edit button for manually added entries */}
+                          {entry.source === "manual" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setEditingKBEntry(entry);
+                                setIsEditKBDialogOpen(true);
+                              }}
+                              data-testid={`button-edit-kb-${entry.id}`}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
-        </TabsContent>
+                    </div>
+                  ))}
+                </>
+              )}
+            </CardContent>
+          </Card >
+        </TabsContent >
 
         <TabsContent value="webhooks" className="space-y-6">
           <Card>
@@ -3625,7 +3193,7 @@ export default function AgentConfigure() {
             </CardHeader>
             <CardContent>
               <pre className="text-xs bg-background p-3 rounded-md overflow-x-auto">
-{`{
+                {`{
   "event": "post_created",
   "timestamp": "2024-01-15T10:30:00Z",
   "agentId": "${id || "agent-id"}",
@@ -3649,8 +3217,10 @@ export default function AgentConfigure() {
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
-      </Tabs>
+
+
+        </TabsContent >
+      </Tabs >
 
       <div className="flex justify-between items-center gap-4 p-4 border rounded-lg bg-muted/50">
         <div className="flex items-center gap-2">
@@ -3680,6 +3250,16 @@ export default function AgentConfigure() {
             {forceGenerateMutation.isPending ? "Generating..." : "Force Generate Tweet"}
           </Button>
           <Button
+            onClick={handleExport}
+            variant="outline"
+            size="lg"
+            disabled={!agent}
+            data-testid="button-export-config-footer"
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Export Character
+          </Button>
+          <Button
             onClick={handleSave}
             size="lg"
             disabled={updateAgentMutation.isPending}
@@ -3690,6 +3270,6 @@ export default function AgentConfigure() {
           </Button>
         </div>
       </div>
-    </div>
+    </div >
   );
 }

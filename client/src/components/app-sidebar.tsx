@@ -41,24 +41,10 @@ const menuItems = [
     group: "main",
   },
   {
-    title: "Knowledge Base",
-    url: "/knowledge-base",
-    icon: Book,
-    testId: "link-knowledge-base",
-    group: "main",
-  },
-  {
     title: "Activity",
     url: "/activity",
     icon: Activity,
     testId: "link-activity",
-    group: "main",
-  },
-  {
-    title: "API Management",
-    url: "/api-management",
-    icon: Zap,
-    testId: "link-api-management",
     group: "main",
   },
   {

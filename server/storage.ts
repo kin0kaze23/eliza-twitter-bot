@@ -21,6 +21,8 @@ import {
   type InsertContentTypeUsage,
   type ProcessedMention,
   type InsertProcessedMention,
+  type TopicUsage, // NEW
+  type InsertTopicUsage, // NEW
   type SchedulerState,
   type InsertSchedulerState,
   users,
@@ -33,6 +35,7 @@ import {
   bibleVerseUsages,
   contentTypeUsages,
   processedMentions,
+  topicUsages, // NEW
   schedulerState,
 } from "@shared/schema";
 import { eq, desc, and, sql, inArray, isNull } from "drizzle-orm";
@@ -43,7 +46,7 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, user: Partial<InsertUser>): Promise<User | undefined>;
-  
+
   // Agents
   getAgent(id: string): Promise<Agent | undefined>;
   getAllAgents(): Promise<Agent[]>;
@@ -52,7 +55,7 @@ export interface IStorage {
   deleteAgent(id: string): Promise<boolean>;
   updateAgentStatus(id: string, status: string): Promise<Agent | undefined>;
   acquirePostingLock(agentId: string, intervalMs: number): Promise<boolean>;
-  
+
   // Knowledge Base
   getKnowledgeBaseEntries(agentId: string): Promise<KnowledgeBase[]>;
   getKnowledgeBaseEntry(id: string): Promise<KnowledgeBase | undefined>;
@@ -69,20 +72,20 @@ export interface IStorage {
   refreshKnowledgeBaseEntry(id: string): Promise<KnowledgeBase | undefined>;
   batchApproveKnowledgeBase(agentId: string, ids: string[], approvedBy?: string): Promise<number>;
   batchArchiveKnowledgeBase(agentId: string, ids: string[]): Promise<number>;
-  
+
   // Agent Activity (Monitoring)
   getAgentActivity(agentId: string, startDate?: string, endDate?: string): Promise<AgentActivity[]>;
   getAgentActivitySummary(agentId: string): Promise<AgentActivity | undefined>;
   createOrUpdateActivity(activity: InsertAgentActivity): Promise<AgentActivity>;
   getActivityByDate(agentId: string, date: string): Promise<AgentActivity | undefined>;
-  
+
   // Custom APIs
   getAllCustomApis(): Promise<CustomApi[]>;
   getCustomApi(id: string): Promise<CustomApi | undefined>;
   createCustomApi(api: InsertCustomApi): Promise<CustomApi>;
   updateCustomApi(id: string, api: Partial<InsertCustomApi>): Promise<CustomApi | undefined>;
   deleteCustomApi(id: string): Promise<boolean>;
-  
+
   // API Keys
   getAllApiKeys(): Promise<ApiKey[]>;
   getApiKey(id: string): Promise<ApiKey | undefined>;
@@ -90,7 +93,7 @@ export interface IStorage {
   createApiKey(key: InsertApiKey): Promise<ApiKey>;
   updateApiKey(id: string, key: Partial<InsertApiKey>): Promise<ApiKey | undefined>;
   deleteApiKey(id: string): Promise<boolean>;
-  
+
   // Activity Logs
   getActivityLogs(agentId?: string, limit?: number): Promise<ActivityLog[]>;
   getRecentActivityLogs(limit?: number): Promise<ActivityLog[]>;
@@ -106,17 +109,21 @@ export interface IStorage {
     timeSinceLastPost: number | null;
     recentErrors: string[];
   }>;
-  
+
   // Bible Verse Tracking
   getRecentVerseUsages(agentId: string, limit?: number): Promise<BibleVerseUsage[]>;
   logVerseUsage(agentId: string, verseRef: string, book: string, chapter: number, verseStart: number, verseEnd: number | undefined, tweetId?: string): Promise<BibleVerseUsage>;
   clearVerseHistory(agentId: string): Promise<number>;
-  
+
   // Content Type Tracking
   getRecentContentTypeUsages(agentId: string, limit?: number): Promise<ContentTypeUsage[]>;
   logContentTypeUsage(agentId: string, contentType: string, tweetId?: string): Promise<ContentTypeUsage>;
   clearContentTypeHistory(agentId: string): Promise<number>;
-  
+
+  // Topic Tracking
+  getRecentTopicUsages(agentId: string, limit?: number): Promise<TopicUsage[]>;
+  logTopicUsage(agentId: string, topic: string, tweetId: string): Promise<TopicUsage>;
+
   // Processed Mentions Tracking
   getProcessedMention(agentId: string, mentionTweetId: string): Promise<ProcessedMention | undefined>;
   getUnrespondedMentions(agentId: string, limit?: number): Promise<ProcessedMention[]>;
@@ -124,7 +131,7 @@ export interface IStorage {
   markMentionResponded(id: string, responseTweetId: string, responseText: string): Promise<ProcessedMention | undefined>;
   markMentionFailed(id: string, errorMessage: string): Promise<ProcessedMention | undefined>;
   getRecentMentions(agentId: string, limit?: number): Promise<ProcessedMention[]>;
-  
+
   // Scheduler State Persistence
   getSchedulerState(agentId: string): Promise<SchedulerState | undefined>;
   saveSchedulerState(agentId: string, state: Partial<InsertSchedulerState>): Promise<SchedulerState>;
@@ -201,12 +208,12 @@ export class DbStorage implements IStorage {
   async acquirePostingLock(agentId: string, intervalMs: number): Promise<boolean> {
     const now = new Date();
     const cutoffTime = new Date(now.getTime() - intervalMs);
-    
+
     const result = await db
       .update(agents)
-      .set({ 
+      .set({
         lastPostAttemptAt: now,
-        updatedAt: now 
+        updatedAt: now
       })
       .where(
         and(
@@ -215,7 +222,7 @@ export class DbStorage implements IStorage {
         )
       )
       .returning();
-    
+
     return result.length > 0;
   }
 
@@ -361,7 +368,7 @@ export class DbStorage implements IStorage {
 
   async getFreshKnowledgeEntries(agentId: string, freshnessMinutes: number, minPriority?: string): Promise<KnowledgeBase[]> {
     const cutoffTime = new Date(Date.now() - freshnessMinutes * 60 * 1000);
-    
+
     // Build priority filter based on minPriority
     let priorityFilter;
     if (minPriority === "high") {
@@ -371,9 +378,9 @@ export class DbStorage implements IStorage {
     } else {
       priorityFilter = sql`1=1`; // Allow all priorities (low, medium, high)
     }
-    
+
     const priorityOrder = sql`CASE WHEN ${knowledgeBase.priority} = 'high' THEN 3 WHEN ${knowledgeBase.priority} = 'medium' THEN 2 ELSE 1 END`;
-    
+
     return await db
       .select()
       .from(knowledgeBase)
@@ -454,13 +461,13 @@ export class DbStorage implements IStorage {
 
   async markKnowledgeBaseAsUsed(ids: string[], tweetId: string): Promise<void> {
     if (ids.length === 0) return;
-    
+
     for (const id of ids) {
       const entry = await db.select().from(knowledgeBase).where(eq(knowledgeBase.id, id)).limit(1);
       if (entry[0]) {
         const usedTweetIds = (entry[0].usedInTweetIds || []) as string[];
         usedTweetIds.push(tweetId);
-        
+
         await db.update(knowledgeBase)
           .set({
             usedAt: new Date(),
@@ -488,7 +495,7 @@ export class DbStorage implements IStorage {
         )
         .orderBy(desc(agentActivity.date), desc(agentActivity.hour));
     }
-    
+
     return await db
       .select()
       .from(agentActivity)
@@ -508,7 +515,7 @@ export class DbStorage implements IStorage {
 
   async createOrUpdateActivity(activity: InsertAgentActivity): Promise<AgentActivity> {
     const existing = await this.getActivityByDate(activity.agentId, activity.date);
-    
+
     if (existing) {
       const updatedData: any = {
         postsGenerated: existing.postsGenerated + (activity.postsGenerated || 0),
@@ -521,7 +528,7 @@ export class DbStorage implements IStorage {
         kbCategoriesUsed: activity.kbCategoriesUsed || existing.kbCategoriesUsed,
         updatedAt: new Date(),
       };
-      
+
       const result = await db
         .update(agentActivity)
         .set(updatedData)
@@ -655,7 +662,7 @@ export class DbStorage implements IStorage {
     recentErrors: string[];
   }> {
     const cutoffTime = new Date(Date.now() - hours * 60 * 60 * 1000);
-    
+
     const posts = await db
       .select()
       .from(activityLogs)
@@ -667,18 +674,18 @@ export class DbStorage implements IStorage {
         )
       )
       .orderBy(desc(activityLogs.createdAt));
-    
+
     const successfulPosts = posts.filter(p => p.status === "success");
     const failedPosts = posts.filter(p => p.status === "failed");
-    
+
     const lastSuccessful = successfulPosts[0]?.createdAt || null;
     const lastFailed = failedPosts[0]?.createdAt || null;
-    
+
     const recentErrors = failedPosts
       .slice(0, 5)
       .map(p => p.errorMessage || "Unknown error")
       .filter(e => e !== "Unknown error");
-    
+
     return {
       totalPosts: posts.length,
       successfulPosts: successfulPosts.length,
@@ -723,12 +730,12 @@ export class DbStorage implements IStorage {
         eq(bibleVerseUsages.agentId, agentId),
         eq(bibleVerseUsages.verseRef, verseRef)
       ));
-    
+
     if (existing.length > 0) {
       // Update existing record
       const currentTweetIds = (existing[0].tweetIds as string[]) || [];
       const newTweetIds = tweetId ? [...currentTweetIds, tweetId] : currentTweetIds;
-      
+
       const result = await db
         .update(bibleVerseUsages)
         .set({
@@ -740,7 +747,7 @@ export class DbStorage implements IStorage {
         .returning();
       return result[0];
     }
-    
+
     // Create new record
     const result = await db
       .insert(bibleVerseUsages)
@@ -788,12 +795,12 @@ export class DbStorage implements IStorage {
         eq(contentTypeUsages.agentId, agentId),
         eq(contentTypeUsages.contentType, contentType)
       ));
-    
+
     if (existing.length > 0) {
       // Update existing record
       const currentTweetIds = (existing[0].tweetIds as string[]) || [];
       const newTweetIds = tweetId ? [...currentTweetIds, tweetId] : currentTweetIds;
-      
+
       const result = await db
         .update(contentTypeUsages)
         .set({
@@ -805,7 +812,7 @@ export class DbStorage implements IStorage {
         .returning();
       return result[0];
     }
-    
+
     // Create new record
     const result = await db
       .insert(contentTypeUsages)
@@ -826,6 +833,28 @@ export class DbStorage implements IStorage {
     return result.length;
   }
 
+  // Topic Tracking
+  async getRecentTopicUsages(agentId: string, limit: number = 5): Promise<TopicUsage[]> {
+    return await db
+      .select()
+      .from(topicUsages)
+      .where(eq(topicUsages.agentId, agentId))
+      .orderBy(desc(topicUsages.createdAt))
+      .limit(limit);
+  }
+
+  async logTopicUsage(agentId: string, topic: string, tweetId: string): Promise<TopicUsage> {
+    const result = await db
+      .insert(topicUsages)
+      .values({
+        agentId,
+        topic,
+        tweetId,
+      })
+      .returning();
+    return result[0];
+  }
+
   async getContentTypeFreshnessStats(agentId: string): Promise<{
     recentTypes: string[];
     unusedTypes: string[];
@@ -840,12 +869,12 @@ export class DbStorage implements IStorage {
       "ENCOURAGEMENT",
       "ETERNITY_ANCHOR",
     ];
-    
+
     const usages = await this.getRecentContentTypeUsages(agentId, 50);
     const recentTypes = usages.slice(0, 7).map(u => u.contentType);
     const usedTypes = new Set(usages.map(u => u.contentType));
     const unusedTypes = allTypes.filter(t => !usedTypes.has(t));
-    
+
     return {
       recentTypes,
       unusedTypes,
@@ -932,7 +961,7 @@ export class DbStorage implements IStorage {
 
   async saveSchedulerState(agentId: string, updates: Partial<InsertSchedulerState>): Promise<SchedulerState> {
     const existing = await this.getSchedulerState(agentId);
-    
+
     // Build update object with only defined values
     const updateObj: Record<string, unknown> = { updatedAt: new Date() };
     if (updates.lastPostTime !== undefined) updateObj.lastPostTime = updates.lastPostTime;
@@ -950,7 +979,7 @@ export class DbStorage implements IStorage {
     if (updates.apiBackoffUntil !== undefined) updateObj.apiBackoffUntil = updates.apiBackoffUntil;
     if (updates.scraperBackoffUntil !== undefined) updateObj.scraperBackoffUntil = updates.scraperBackoffUntil;
     if (updates.lastDiversityCheck !== undefined) updateObj.lastDiversityCheck = updates.lastDiversityCheck;
-    
+
     if (existing) {
       const result = await db
         .update(schedulerState)
@@ -959,7 +988,7 @@ export class DbStorage implements IStorage {
         .returning();
       return result[0];
     }
-    
+
     const result = await db
       .insert(schedulerState)
       .values({
@@ -971,7 +1000,7 @@ export class DbStorage implements IStorage {
         consecutiveFailures: updates.consecutiveFailures ?? 0,
         repliesThisHour: updates.repliesThisHour ?? 0,
         repliesHourStart: updates.repliesHourStart ?? null,
-        recentBotTweets: (updates.recentBotTweets ?? []) as Array<{tweetId: string; postedAt: string; lastReplyId?: string}>,
+        recentBotTweets: (updates.recentBotTweets ?? []) as Array<{ tweetId: string; postedAt: string; lastReplyId?: string }>,
         preferredAuthMethod: updates.preferredAuthMethod ?? 'api',
         apiFailureCount: updates.apiFailureCount ?? 0,
         scraperFailureCount: updates.scraperFailureCount ?? 0,
@@ -993,20 +1022,20 @@ export class DbStorage implements IStorage {
   async updateCircuitBreaker(agentId: string, method: 'api' | 'scraper', success: boolean): Promise<SchedulerState> {
     const existing = await this.getSchedulerState(agentId);
     const now = new Date();
-    
+
     // Circuit breaker constants
     const FAILURE_THRESHOLD = 3; // Switch after 3 consecutive failures
     const RECOVERY_PERIOD_MS = 30 * 60 * 1000; // 30 min before trying failed method again
-    
+
     let updates: Partial<InsertSchedulerState> = {};
-    
+
     if (method === 'api') {
       if (success) {
         updates.apiFailureCount = 0;
       } else {
         const newCount = (existing?.apiFailureCount || 0) + 1;
         updates.apiFailureCount = newCount;
-        
+
         // Switch to scraper if API is failing too much
         if (newCount >= FAILURE_THRESHOLD) {
           updates.preferredAuthMethod = 'scraper';
@@ -1020,7 +1049,7 @@ export class DbStorage implements IStorage {
       } else {
         const newCount = (existing?.scraperFailureCount || 0) + 1;
         updates.scraperFailureCount = newCount;
-        
+
         // Switch to API if scraper is failing too much
         if (newCount >= FAILURE_THRESHOLD) {
           updates.preferredAuthMethod = 'api';
@@ -1029,7 +1058,7 @@ export class DbStorage implements IStorage {
         }
       }
     }
-    
+
     // Check if we should try recovering the failed method
     if (existing?.circuitBreakerTrippedAt) {
       const timeSinceTrip = now.getTime() - new Date(existing.circuitBreakerTrippedAt).getTime();
@@ -1041,7 +1070,7 @@ export class DbStorage implements IStorage {
         console.log(`[CircuitBreaker] Recovery period elapsed for agent ${agentId}, resetting counts`);
       }
     }
-    
+
     return this.saveSchedulerState(agentId, updates);
   }
 
@@ -1049,7 +1078,7 @@ export class DbStorage implements IStorage {
     const state = await this.getSchedulerState(agentId);
     return (state?.preferredAuthMethod as 'api' | 'scraper') || 'api';
   }
-  
+
   // Circuit breaker methods for scheduler integration
   async getCircuitBreakerState(agentId: string): Promise<{
     apiBackoffUntil: Date | null;
@@ -1060,7 +1089,7 @@ export class DbStorage implements IStorage {
   } | null> {
     const state = await this.getSchedulerState(agentId);
     if (!state) return null;
-    
+
     return {
       apiBackoffUntil: state.apiBackoffUntil,
       scraperBackoffUntil: state.scraperBackoffUntil,
@@ -1069,20 +1098,20 @@ export class DbStorage implements IStorage {
       preferredMethod: (state.preferredAuthMethod as 'api' | 'scraper') || 'api',
     };
   }
-  
+
   async recordCircuitBreakerFailure(agentId: string, method: 'api' | 'scraper'): Promise<void> {
     const FAILURE_THRESHOLD = 3;
     const BACKOFF_DURATION_MS = 30 * 60 * 1000; // 30 minutes
-    
+
     const state = await this.getSchedulerState(agentId);
     const now = new Date();
-    
+
     let updates: Partial<InsertSchedulerState> = {};
-    
+
     if (method === 'api') {
       const newCount = (state?.apiFailureCount || 0) + 1;
       updates.apiFailureCount = newCount;
-      
+
       // Trip circuit breaker after threshold
       if (newCount >= FAILURE_THRESHOLD) {
         updates.apiBackoffUntil = new Date(now.getTime() + BACKOFF_DURATION_MS);
@@ -1091,19 +1120,19 @@ export class DbStorage implements IStorage {
     } else {
       const newCount = (state?.scraperFailureCount || 0) + 1;
       updates.scraperFailureCount = newCount;
-      
+
       if (newCount >= FAILURE_THRESHOLD) {
         updates.scraperBackoffUntil = new Date(now.getTime() + BACKOFF_DURATION_MS);
         console.log(`[CircuitBreaker] Scraper method in backoff for ${agentId} until ${updates.scraperBackoffUntil.toISOString()}`);
       }
     }
-    
+
     await this.saveSchedulerState(agentId, updates);
   }
-  
+
   async recordCircuitBreakerSuccess(agentId: string, method: 'api' | 'scraper'): Promise<void> {
     let updates: Partial<InsertSchedulerState> = {};
-    
+
     if (method === 'api') {
       updates.apiFailureCount = 0;
       updates.apiBackoffUntil = null;
@@ -1111,10 +1140,10 @@ export class DbStorage implements IStorage {
       updates.scraperFailureCount = 0;
       updates.scraperBackoffUntil = null;
     }
-    
+
     await this.saveSchedulerState(agentId, updates);
   }
-  
+
   // Recovery: Reset all failure counters and circuit breaker state
   async recoverAgent(agentId: string): Promise<void> {
     // Reset scheduler state completely
@@ -1126,7 +1155,7 @@ export class DbStorage implements IStorage {
       rateLimitBackoffUntil: null,
       consecutiveFailures: 0,
     });
-    
+
     // Clear session cookies to force re-authentication
     const agent = await this.getAgent(agentId);
     if (agent) {
@@ -1134,7 +1163,7 @@ export class DbStorage implements IStorage {
         twitterCookies: null,
       });
     }
-    
+
     console.log(`[Recovery] Agent ${agentId} recovered - all failure counters reset`);
   }
 }

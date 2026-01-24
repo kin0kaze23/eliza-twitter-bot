@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Play, RefreshCw, AlertCircle, CheckCircle2, XCircle, Send, ExternalLink, Zap, FileSearch, Copy, Eye, AlertTriangle } from "lucide-react";
+import { Play, RefreshCw, AlertCircle, CheckCircle2, XCircle, Send, ExternalLink, Zap, FileSearch, Copy, Eye, AlertTriangle, Star } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
@@ -37,12 +37,12 @@ type ConversationMessage = {
 
 export default function Playground() {
   const { toast } = useToast();
-  
+
   // Fetch all agents
   const { data: agents, isLoading: agentsLoading } = useQuery<Agent[]>({
     queryKey: ["/api/agents"],
   });
-  
+
   const [selectedAgent, setSelectedAgent] = useState<string | undefined>(agents?.[0]?.id);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isPosting, setIsPosting] = useState(false);
@@ -50,12 +50,12 @@ export default function Playground() {
   const [postResult, setPostResult] = useState<{ success: boolean; tweetId?: string; tweetUrl?: string; error?: string } | null>(null);
   const [forcePostResult, setForcePostResult] = useState<{ success: boolean; tweet?: string; tweetId?: string; tweetUrl?: string; error?: string; errorCode?: string; rateLimited?: boolean; kbEntriesUsed?: number } | null>(null);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
-  
+
   // Conversation mode state
   const [conversationMode, setConversationMode] = useState(false);
   const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([]);
   const [conversationInput, setConversationInput] = useState("");
-  
+
   // Prompt Inspector state
   const [promptInspector, setPromptInspector] = useState<{
     systemPrompt: string;
@@ -72,17 +72,17 @@ export default function Playground() {
     isLoading: false,
     hasFetched: false,
   });
-  
+
   // Active tab state for triggering prompt fetch
   const [activeTab, setActiveTab] = useState("generate");
-  
+
   // Set first agent as selected when agents load
   useEffect(() => {
     if (agents && agents.length > 0 && !selectedAgent) {
       setSelectedAgent(agents[0].id);
     }
   }, [agents, selectedAgent]);
-  
+
   const [configValidation, setConfigValidation] = useState({
     prompts: { valid: false, message: "Not validated yet" },
     apiKeys: { valid: false, message: "Not validated yet" },
@@ -214,6 +214,41 @@ export default function Playground() {
     }
   };
 
+  const handleSaveExample = async (content: string, contentType?: string) => {
+    if (!selectedAgent) return;
+
+    try {
+      const response = await fetch(`/api/agents/${selectedAgent}/examples`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ content, contentType }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        toast({
+          title: "Example Saved",
+          description: "This post has been added to the agent's message examples.",
+        });
+      } else {
+        toast({
+          title: "Failed to save example",
+          description: data.error || "Unknown error",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to connect to server",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handlePostToTwitter = async () => {
     if (!selectedAgent || !testResult?.output) {
       toast({
@@ -285,7 +320,7 @@ export default function Playground() {
     setIsGenerating(true);
     setTestResult(null);
     setPostResult(null);
-    
+
     try {
       const response = await fetch("/api/playground/test-tweet", {
         method: "POST",
@@ -301,7 +336,7 @@ export default function Playground() {
       }
 
       const data = await response.json();
-      
+
       const result: TestResult = {
         success: data.success,
         output: data.tweet,
@@ -312,15 +347,15 @@ export default function Playground() {
         contentType: data.contentType,
         generationTimeMs: data.generationTimeMs,
       };
-      
+
       // Store KB sources for display
       (result as any).kbSources = data.kbSources || [];
       (result as any).kbEntriesCount = data.kbEntriesCount || 0;
       (result as any).mode = data.mode;
       (result as any).config = data.config;
-      
+
       setTestResult(result);
-      
+
       toast({
         title: "Tweet Generated",
         description: `${data.mode === "auto-generated" ? "Auto-generated" : "Generated"} using ${data.kbEntriesCount} KB entries`,
@@ -338,9 +373,9 @@ export default function Playground() {
 
   const handleSendConversation = async () => {
     if (!conversationInput.trim() || !selectedAgent) return;
-    
+
     setIsGenerating(true);
-    
+
     // Add user message
     const userMessage: ConversationMessage = {
       id: Date.now().toString(),
@@ -348,12 +383,12 @@ export default function Playground() {
       content: conversationInput,
       timestamp: new Date(),
     };
-    
+
     const updatedHistory = [...conversationHistory, userMessage];
     setConversationHistory(updatedHistory);
     const currentInput = conversationInput;
     setConversationInput("");
-    
+
     try {
       // Call backend with conversation context
       const response = await fetch(`/api/agents/${selectedAgent}/test/conversation`, {
@@ -364,20 +399,20 @@ export default function Playground() {
           conversationHistory: updatedHistory.slice(-10), // Last 10 messages for context
         }),
       });
-      
+
       if (!response.ok) {
         throw new Error("Failed to get response");
       }
-      
+
       const data = await response.json();
-      
+
       const aiMessage: ConversationMessage = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
         content: data.response,
         timestamp: new Date(data.timestamp),
       };
-      
+
       setConversationHistory(prev => [...prev, aiMessage]);
     } catch (error) {
       toast({
@@ -385,7 +420,7 @@ export default function Playground() {
         description: "Failed to get agent response. Please try again.",
         variant: "destructive",
       });
-      
+
       // Remove the user message if request failed
       setConversationHistory(conversationHistory);
     } finally {
@@ -405,11 +440,11 @@ export default function Playground() {
   const validateConfig = (agent: Agent) => {
     // Check if posting is enabled and has valid frequency
     const postingValid = agent.postingEnabled && agent.postFrequency && agent.postFrequency > 0;
-    
+
     const validation = {
       prompts: {
         valid: !!(agent.systemPrompt || agent.personalityPrompt),
-        message: (agent.systemPrompt || agent.personalityPrompt) 
+        message: (agent.systemPrompt || agent.personalityPrompt)
           ? "System or personality prompt configured"
           : "Missing system prompt or personality prompt - configure in Agent → Prompts tab"
       },
@@ -433,21 +468,21 @@ export default function Playground() {
         valid: Boolean(postingValid),
         message: Boolean(postingValid)
           ? `Auto-posting enabled: ${agent.postFrequency} tweets per hour`
-          : agent.postingEnabled 
+          : agent.postingEnabled
             ? "Posting enabled but frequency not set - configure in Agent → Behavior tab"
             : "Auto-posting disabled - enable in Agent → Behavior tab if needed"
       },
     };
-    
+
     setConfigValidation(validation);
   };
 
   const handleValidateConfig = () => {
     if (currentAgent) {
       validateConfig(currentAgent);
-      
+
       const hasIssues = Object.values(configValidation).some(v => !v.valid);
-      
+
       toast({
         title: hasIssues ? "Configuration issues found" : "Configuration valid",
         description: hasIssues
@@ -461,54 +496,54 @@ export default function Playground() {
   // Fetch and analyze prompts for the inspector
   const fetchPromptAnalysis = async () => {
     if (!selectedAgent) return;
-    
+
     setPromptInspector(prev => ({ ...prev, isLoading: true }));
-    
+
     try {
       const response = await fetch(`/api/agents/${selectedAgent}/prompt-analysis`);
       const data = await response.json();
-      
+
       if (response.ok) {
         // Analyze for conflicts using backend sections metadata
         const conflicts: { type: string; message: string; severity: 'warning' | 'error' | 'info' }[] = [];
-        
+
         const systemPrompt = data.systemPrompt || "";
         const userPrompt = data.userPrompt || "";
         const sections = data.sections || [];
         const sectionNames = sections.map((s: any) => s.name.toLowerCase());
-        
+
         // Only check if user has a personality prompt
         if (userPrompt && userPrompt.length > 0) {
           const userLower = userPrompt.toLowerCase();
-          
+
           // Check if user prompt duplicates sections already in system prompt
-          if (sectionNames.includes("format rules") && 
-              (userLower.match(/\b(spacing|line break|paragraph|format)\b/i))) {
+          if (sectionNames.includes("format rules") &&
+            (userLower.match(/\b(spacing|line break|paragraph|format)\b/i))) {
             conflicts.push({
               type: "Redundancy",
               message: "System prompt already includes Format Rules. Your personality prompt may have redundant spacing/format instructions.",
               severity: "info"
             });
           }
-          
-          if (sectionNames.includes("bible verse guidelines") && 
-              userLower.match(/\b(bible|scripture|verse|psalm|proverb)\b/i)) {
+
+          if (sectionNames.includes("bible verse guidelines") &&
+            userLower.match(/\b(bible|scripture|verse|psalm|proverb)\b/i)) {
             conflicts.push({
-              type: "Redundancy", 
+              type: "Redundancy",
               message: "System prompt already includes Bible Verse Guidelines. Consider removing Bible-specific rules from your personality prompt.",
               severity: "info"
             });
           }
-          
-          if (sectionNames.includes("restrictions") && 
-              userLower.match(/\b(don't|do not|never|avoid|forbidden)\b/i)) {
+
+          if (sectionNames.includes("restrictions") &&
+            userLower.match(/\b(don't|do not|never|avoid|forbidden)\b/i)) {
             conflicts.push({
               type: "Overlap",
               message: "System prompt already includes Restrictions. Negative instructions in personality may conflict.",
               severity: "warning"
             });
           }
-          
+
           // Character restriction conflicts
           if (userLower.match(/\b(em[\s-]?dash|smart[\s-]?quote|curly[\s-]?quote)\b/i)) {
             conflicts.push({
@@ -517,11 +552,11 @@ export default function Playground() {
               severity: "info"
             });
           }
-          
+
           // Emoji conflicts
           if (userLower.match(/\bemoji\b/i)) {
-            if (systemPrompt.toLowerCase().includes("no emoji") || 
-                systemPrompt.toLowerCase().includes("without emoji")) {
+            if (systemPrompt.toLowerCase().includes("no emoji") ||
+              systemPrompt.toLowerCase().includes("without emoji")) {
               conflicts.push({
                 type: "Conflict",
                 message: "System prompt prohibits emojis but your personality prompt mentions them.",
@@ -530,7 +565,7 @@ export default function Playground() {
             }
           }
         }
-        
+
         // If no conflicts, show a success message
         if (conflicts.length === 0 && userPrompt && userPrompt.length > 0) {
           conflicts.push({
@@ -539,7 +574,7 @@ export default function Playground() {
             severity: "info"
           });
         }
-        
+
         setPromptInspector({
           systemPrompt: data.systemPrompt || "",
           userPrompt: userPrompt,
@@ -621,7 +656,7 @@ export default function Playground() {
                 {testResult?.success ? "Post Preview to X" : "Force Generate & Post"}
               </CardTitle>
               <CardDescription>
-                {testResult?.success 
+                {testResult?.success
                   ? "Post your previewed tweet to X/Twitter. The exact preview content will be posted."
                   : "Generate a tweet from your knowledge base and post it directly to X/Twitter in one click."
                 }
@@ -658,7 +693,7 @@ export default function Playground() {
                   </>
                 )}
               </Button>
-              
+
               {forcePostResult && (
                 <div className={`p-4 rounded-lg border ${forcePostResult.success ? 'border-green-500 bg-green-500/10' : 'border-destructive bg-destructive/10'}`}>
                   {forcePostResult.success ? (
@@ -713,7 +748,7 @@ export default function Playground() {
                   )}
                 </div>
               )}
-              
+
               {!selectedAgent && (
                 <p className="text-xs text-yellow-600">
                   <AlertCircle className="h-3 w-3 inline mr-1" />
@@ -775,7 +810,32 @@ export default function Playground() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label>Generated Tweet</Label>
+                  <div className="flex items-center justify-between">
+                    <Label>Generated Tweet</Label>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => {
+                          navigator.clipboard.writeText(testResult.output);
+                          toast({ description: "Copied to clipboard" });
+                        }}
+                        title="Copy to clipboard"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => handleSaveExample(testResult.output, testResult.contentType)}
+                        title="Save as Training Example"
+                      >
+                        <Star className="h-4 w-4 text-yellow-500" />
+                      </Button>
+                    </div>
+                  </div>
                   <div className="bg-muted p-4 rounded-md">
                     <p className="text-sm whitespace-pre-wrap">{testResult.output}</p>
                   </div>
@@ -915,7 +975,7 @@ export default function Playground() {
                           <div className="bg-muted p-3 rounded text-xs">
                             <p className="font-medium text-foreground">Content Type Selection:</p>
                             <p className="text-muted-foreground">
-                              Selected: {testResult.audit.contentTypeSelection.selectedTypeLabel || testResult.audit.contentTypeSelection.selectedType} | 
+                              Selected: {testResult.audit.contentTypeSelection.selectedTypeLabel || testResult.audit.contentTypeSelection.selectedType} |
                               Recent types: {testResult.audit.contentTypeSelection.recentTypes?.length || 0} |
                               Policy: {testResult.audit.contentTypeSelection.rotationPolicy}
                             </p>
@@ -1039,11 +1099,10 @@ export default function Playground() {
                       data-testid={`message-${message.role}-${message.id}`}
                     >
                       <div
-                        className={`max-w-[80%] rounded-lg p-3 ${
-                          message.role === "user"
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted"
-                        }`}
+                        className={`max-w-[80%] rounded-lg p-3 ${message.role === "user"
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted"
+                          }`}
                       >
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs font-medium">
@@ -1183,11 +1242,10 @@ export default function Playground() {
                         {promptInspector.conflicts.map((conflict, idx) => (
                           <div
                             key={idx}
-                            className={`p-3 rounded border text-sm ${
-                              conflict.severity === 'error' ? 'bg-destructive/10 border-destructive/30' :
+                            className={`p-3 rounded border text-sm ${conflict.severity === 'error' ? 'bg-destructive/10 border-destructive/30' :
                               conflict.severity === 'warning' ? 'bg-yellow-500/10 border-yellow-500/30' :
-                              'bg-blue-500/10 border-blue-500/30'
-                            }`}
+                                'bg-blue-500/10 border-blue-500/30'
+                              }`}
                           >
                             <Badge variant="outline" className="mb-1">
                               {conflict.type}
@@ -1383,13 +1441,13 @@ export default function Playground() {
                   <div className="space-y-2">
                     <Label>Model Parameters</Label>
                     <pre className="bg-muted p-3 rounded text-xs font-mono overflow-auto">
-{JSON.stringify({
-  temperature: currentAgent.temperature ?? 'Not set',
-  maxTokens: currentAgent.maxTokens ?? 'Not set',
-  topP: currentAgent.topP ?? 'Not set',
-  frequencyPenalty: currentAgent.frequencyPenalty ?? 'Not set',
-  presencePenalty: currentAgent.presencePenalty ?? 'Not set'
-}, null, 2)}
+                      {JSON.stringify({
+                        temperature: currentAgent.temperature ?? 'Not set',
+                        maxTokens: currentAgent.maxTokens ?? 'Not set',
+                        topP: currentAgent.topP ?? 'Not set',
+                        frequencyPenalty: currentAgent.frequencyPenalty ?? 'Not set',
+                        presencePenalty: currentAgent.presencePenalty ?? 'Not set'
+                      }, null, 2)}
                     </pre>
                   </div>
                   <div className="space-y-2">

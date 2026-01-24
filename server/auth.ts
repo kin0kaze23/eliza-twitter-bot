@@ -10,7 +10,11 @@ declare module "express-session" {
   }
 }
 
-const SESSION_SECRET = process.env.SESSION_SECRET || "eliza-agent-dashboard-secret-key-change-in-production";
+const SESSION_SECRET = process.env.SESSION_SECRET;
+if (!SESSION_SECRET) {
+  console.error("[Auth] FATAL: SESSION_SECRET environment variable is required");
+  process.exit(1);
+}
 
 export const sessionMiddleware = session({
   secret: SESSION_SECRET,
@@ -42,12 +46,19 @@ export async function seedDefaultAdmin() {
   try {
     const existingUser = await storage.getUserByUsername("admin");
     if (!existingUser) {
-      const hashedPassword = await hashPassword("graceimmutable");
+      const defaultPassword = process.env.ADMIN_DEFAULT_PASSWORD;
+      if (!defaultPassword) {
+        console.warn("[Auth] No ADMIN_DEFAULT_PASSWORD set. Skipping admin user creation.");
+        console.warn("[Auth] Set ADMIN_DEFAULT_PASSWORD env var to create initial admin user.");
+        return;
+      }
+      const hashedPassword = await hashPassword(defaultPassword);
       await storage.createUser({
         username: "admin",
         password: hashedPassword,
       });
       console.log("[Auth] Default admin user created (username: admin)");
+      console.log("[Auth] IMPORTANT: Change the default password after first login!");
     } else {
       console.log("[Auth] Admin user already exists");
     }

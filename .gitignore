@@ -4,3 +4,26 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+
+# Environment and secrets
+.env
+.env.local
+.env.production
+
+# Replit specific
+.local/
+
+# Database migrations (generated)
+migrations/
+
+# Test artifacts
+agents.json
+api_test_result.json
+export.json
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
