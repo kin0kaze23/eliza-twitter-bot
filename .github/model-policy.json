@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "description": "Per-repo model access guardrail",
+  "default_provider_access": "deny",
+  "allowed_providers": [
+    "openai",
+    "anthropic"
+  ],
+  "denied_providers": [
+    "groq",
+    "xai",
+    "openrouter"
+  ],
+  "default_model_access": "allow",
+  "allow_patterns": [],
+  "deny_patterns": [
+    ":free$"
+  ]
+}
