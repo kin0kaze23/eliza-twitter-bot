@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: eliza-dashboard
+    env: node
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: ${DATABASE_URL}
+      - key: SESSION_SECRET
+        value: ${SESSION_SECRET}
+      - key: PORT
+        value: 10000
+      - key: OPENAI_API_KEY
+        value: ${OPENAI_API_KEY}
+      - key: GROQ_API_KEY
+        value: ${GROQ_API_KEY}
+      - key: XAI_API_KEY
+        value: ${XAI_API_KEY}
+      - key: OPENROUTER_API_KEY
+        value: ${OPENROUTER_API_KEY}
+      - key: APIFY_API_TOKEN
+        value: ${APIFY_API_TOKEN}

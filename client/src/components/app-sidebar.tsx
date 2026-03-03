@@ -5,6 +5,7 @@ import {
   Activity,
   Settings,
   Sliders,
+  Sparkles,
   Book,
   Zap,
 } from "lucide-react";
@@ -45,6 +46,13 @@ const menuItems = [
     url: "/activity",
     icon: Activity,
     testId: "link-activity",
+    group: "main",
+  },
+  {
+    title: "Behavior",
+    url: "/behavior",
+    icon: Sparkles,
+    testId: "link-behavior",
     group: "main",
   },
   {

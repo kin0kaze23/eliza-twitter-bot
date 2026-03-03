@@ -10,6 +10,7 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import Dashboard from "@/pages/dashboard";
 import AgentConfigure from "@/pages/agent-configure";
 import Activity from "@/pages/activity";
+import Behavior from "@/pages/behavior";
 import Settings from "@/pages/settings";
 import Playground from "@/pages/playground";
 import KnowledgeBase from "@/pages/knowledge-base";
@@ -26,6 +27,7 @@ function Router() {
       <Route path="/agent/:id/configure" component={AgentConfigure} />
       <Route path="/knowledge-base" component={KnowledgeBase} />
       <Route path="/activity" component={Activity} />
+      <Route path="/behavior" component={Behavior} />
       <Route path="/api-management" component={APIManagement} />
       <Route path="/settings" component={Settings} />
       <Route path="/playground" component={Playground} />

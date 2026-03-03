@@ -24,7 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { 
+import {
   RefreshCw, 
   ExternalLink, 
   CheckCircle2, 
@@ -50,10 +50,22 @@ import { Skeleton } from "@/components/ui/skeleton";
 type MentionStats = {
   total: number;
   responded: number;
-  pending: number;
+  unresponded: number;
   failed: number;
-  lastHour: number;
-  last24h: number;
+  repliesLastHour: number;
+  repliesLast24h: number;
+};
+
+type AgentStats = {
+  postsToday: number;
+  postsThisWeek: number;
+  errorsToday: number;
+  successRate: number;
+  lastPostTime: string | null;
+  nextPostTime: string | null;
+  nextPostDue: boolean;
+  schedulerActive: boolean;
+  webhookEnabled: boolean;
 };
 
 export default function Activity() {
@@ -91,6 +103,12 @@ export default function Activity() {
     queryKey: ["/api/agents", agent?.id, "mentions/stats"],
     enabled: !!agent,
     refetchInterval: 30000,
+  });
+
+  const { data: agentStats, isLoading: statsLoading } = useQuery<AgentStats>({
+    queryKey: ["/api/agents", agent?.id, "stats"],
+    enabled: !!agent,
+    refetchInterval: 15000,
   });
 
   const filteredLogs = activityLogs?.filter(log => {
@@ -147,6 +165,13 @@ export default function Activity() {
     return date.toLocaleString();
   };
 
+  const formatNextPost = (dateStr: string | null, isDue: boolean, schedulerActive: boolean | undefined) => {
+    if (!schedulerActive) return "Paused";
+    if (!dateStr) return "Not scheduled";
+    if (isDue) return "Due now";
+    return formatDate(dateStr);
+  };
+
   const formatContentType = (type: string | null) => {
     if (!type) return null;
     return type.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
@@ -193,6 +218,83 @@ export default function Activity() {
         </Button>
       </div>
 
+      {statsLoading && !agentStats ? (
+        <div className="grid grid-cols-2 gap-4 xl:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <Skeleton key={index} className="h-28 w-full" />
+          ))}
+        </div>
+      ) : agentStats ? (
+        <div className="grid grid-cols-2 gap-4 xl:grid-cols-6">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Posts today</span>
+              </div>
+              <p className="mt-2 text-2xl font-semibold tabular-nums" data-testid="text-posts-today">
+                {agentStats.postsToday}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-2">
+                <Bot className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Posts this week</span>
+              </div>
+              <p className="mt-2 text-2xl font-semibold tabular-nums" data-testid="text-posts-week">
+                {agentStats.postsThisWeek}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-red-500" />
+                <span className="text-sm text-muted-foreground">Errors today</span>
+              </div>
+              <p className="mt-2 text-2xl font-semibold tabular-nums" data-testid="text-errors-today">
+                {agentStats.errorsToday}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                <span className="text-sm text-muted-foreground">24h success rate</span>
+              </div>
+              <p className="mt-2 text-2xl font-semibold tabular-nums" data-testid="text-success-rate">
+                {agentStats.successRate}%
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Last post</span>
+              </div>
+              <p className="mt-2 text-sm font-medium text-pretty" data-testid="text-last-post-time">
+                {formatDate(agentStats.lastPostTime)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">Next post</span>
+              </div>
+              <p className="mt-2 text-sm font-medium text-pretty" data-testid="text-next-post-time">
+                {formatNextPost(agentStats.nextPostTime, agentStats.nextPostDue, agentStats.schedulerActive)}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
       {mentionStats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
@@ -219,16 +321,16 @@ export default function Activity() {
                 <Clock className="h-4 w-4 text-yellow-500" />
                 <span className="text-sm text-muted-foreground">Pending</span>
               </div>
-              <p className="text-2xl font-semibold mt-1" data-testid="text-pending-mentions">{mentionStats.pending}</p>
+              <p className="text-2xl font-semibold mt-1" data-testid="text-pending-mentions">{mentionStats.unresponded}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-6">
               <div className="flex items-center gap-2">
                 <Zap className="h-4 w-4 text-blue-500" />
-                <span className="text-sm text-muted-foreground">Last 24h</span>
+                <span className="text-sm text-muted-foreground">Replies 24h</span>
               </div>
-              <p className="text-2xl font-semibold mt-1" data-testid="text-24h-mentions">{mentionStats.last24h}</p>
+              <p className="text-2xl font-semibold mt-1" data-testid="text-24h-mentions">{mentionStats.repliesLast24h}</p>
             </CardContent>
           </Card>
         </div>
@@ -243,8 +345,8 @@ export default function Activity() {
           <TabsTrigger value="mentions" className="gap-2">
             <AtSign className="h-4 w-4" />
             Mentions
-            {mentionStats && mentionStats.pending > 0 && (
-              <Badge variant="secondary" className="ml-1">{mentionStats.pending}</Badge>
+            {mentionStats && mentionStats.unresponded > 0 && (
+              <Badge variant="secondary" className="ml-1">{mentionStats.unresponded}</Badge>
             )}
           </TabsTrigger>
         </TabsList>

@@ -3,7 +3,7 @@ import { activityLogs } from "@shared/schema";
 import { postTweet, validateTwitterCredentials, replyToTweet, fetchMentions, fetchRepliesToTweet, type TwitterMention } from "./twitter";
 import { fetchMentionsViaScraper, fetchRepliesViaScraper, sendReplyViaScraper, sendTweetViaScraper, fetchMonitoredTweets, type ScrapedTweet } from "./twitterScraper";
 import { assemblePrompt, buildMessagesArray, selectNextContentType, formatContentType, assembleConversationPrompt, buildConversationMessages, type ContentType } from "./promptAssembly";
-import { sendPostCreatedWebhook, sendPostFailedWebhook, sendReplyCreatedWebhook, sendReplyFailedWebhook } from "./webhook";
+import { sendErrorWebhook, sendPostCreatedWebhook, sendPostFailedWebhook, sendRateLimitWarningWebhook, sendReplyCreatedWebhook, sendReplyFailedWebhook } from "./webhook";
 import { buildOpenAIParams, safeOpenAICall } from "./openaiHelpers";
 import type { Agent } from "@shared/schema";
 
@@ -1160,6 +1160,21 @@ async function executePost(agent: Agent): Promise<void> {
 
         if (isRateLimit) {
           console.log(`[Scheduler] Rate limited or Daily limit! Agent ${agent.name} in backoff until ${backoffUntil.toISOString()} (Duration: ${Math.ceil(duration / 60000)}m, Failures: ${failureCount})`);
+          const postsTodayKey = `${agent.id}_${new Date().toISOString().split("T")[0]}`;
+          const postsToday = state.postsToday.get(postsTodayKey) || 0;
+
+          if (agent.webhookEnabled && agent.webhookUrl) {
+            sendRateLimitWarningWebhook(
+              agent,
+              postsToday,
+              agent.maxPostsPerDay || 1,
+              {
+                backoffUntil: backoffUntil.toISOString(),
+                source: "scheduled_post",
+                error: result.error || "Twitter rate limit detected",
+              },
+            ).catch((err) => console.error("Webhook error:", err));
+          }
         } else {
           console.log(`[Scheduler] Permission error! Agent ${agent.name} in backoff until ${backoffUntil.toISOString()} (Duration: ${Math.ceil(duration / 60000)}m, Failures: ${failureCount})`);
           console.log(`[Scheduler] TIP: "Not permitted" errors usually mean stale cookies or account restrictions. Try exporting fresh cookies from x.com.`);
@@ -1232,15 +1247,22 @@ async function executePost(agent: Agent): Promise<void> {
       }
     }
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
     console.error(`[Scheduler] Unexpected error during post for agent ${agent.name}:`, error);
 
     await logActivity({
       agentId: agent.id,
       eventType: "error",
       status: "failed",
-      errorMessage: error instanceof Error ? error.message : "Unknown error",
+      errorMessage,
       errorCode: "SCHEDULER_ERROR",
     });
+
+    if (agent.webhookEnabled && agent.webhookUrl) {
+      sendErrorWebhook(agent, "SCHEDULER_ERROR", errorMessage, {
+        source: "scheduled_post",
+      }).catch((err) => console.error("Webhook error:", err));
+    }
   } finally {
     // Always release the posting lock
     state.postingLock.set(agent.id, false);
@@ -1472,6 +1494,14 @@ async function processMention(agent: Agent, mention: TwitterMention, mentionType
     if (repliesInLastHour >= maxRepliesPerHour) {
       console.log(`[MentionBot] Rate limit reached (${repliesInLastHour}/${maxRepliesPerHour} replies/hour), skipping`);
       await storage.markMentionFailed(mentionRecord.id, "Rate limit reached");
+
+      if (agent.webhookEnabled && agent.webhookUrl) {
+        await sendRateLimitWarningWebhook(agent, repliesInLastHour, maxRepliesPerHour, {
+          source: "mention_replies",
+          mentionId: mention.id,
+        }).catch((err) => console.error("Webhook error:", err));
+      }
+
       return;
     }
 
@@ -1576,7 +1606,7 @@ async function processMention(agent: Agent, mention: TwitterMention, mentionType
       incrementReplyCount(agent.id);
 
       // Send webhook
-      await sendReplyCreatedWebhook(agent, replyText, result.tweetId, mention.id);
+      await sendReplyCreatedWebhook(agent, replyText, mention.id, result.tweetId);
 
       // Log activity
       await logActivity({
@@ -1612,6 +1642,13 @@ async function processMention(agent: Agent, mention: TwitterMention, mentionType
     const errorMsg = error instanceof Error ? error.message : "Unknown error";
     console.error(`[MentionBot] Error processing mention ${mention.id}:`, error);
     await storage.markMentionFailed(mentionRecord.id, errorMsg);
+
+    if (agent.webhookEnabled && agent.webhookUrl) {
+      await sendErrorWebhook(agent, "MENTION_REPLY_ERROR", errorMsg, {
+        mentionId: mention.id,
+        authorUsername: mention.authorUsername,
+      }).catch((err) => console.error("Webhook error:", err));
+    }
   }
 }
 

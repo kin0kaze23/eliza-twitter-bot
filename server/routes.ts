@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage, db } from "./storage";
-import { insertAgentSchema, insertKnowledgeBaseSchema, insertCustomApiSchema, insertApiKeySchema, insertAgentActivitySchema, knowledgeBase } from "@shared/schema";
+import { insertAgentSchema, insertKnowledgeBaseSchema, insertCustomApiSchema, insertApiKeySchema, insertAgentActivitySchema, knowledgeBase, type ActivityLog } from "@shared/schema";
 import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
 import OpenAI from "openai";
@@ -69,6 +69,17 @@ function detectContentType(content: string): string | null {
   if (upperContent.includes("[ETERNITY ANCHOR]") || upperContent.includes("[ETERNITY_ANCHOR]")) return "ETERNITY_ANCHOR";
 
   return null;
+}
+
+function getAgentIntervalMs(postFrequency: number | null, postInterval: string | null): number {
+  const frequency = postFrequency || 1;
+  return postInterval === "minutes"
+    ? frequency * 60 * 1000
+    : frequency * 60 * 60 * 1000;
+}
+
+function getActivityLogTime(log: ActivityLog): Date {
+  return log.postedAt ? new Date(log.postedAt) : new Date(log.createdAt);
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -840,6 +851,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching mention stats:", error);
       res.status(500).json({ error: "Failed to fetch mention stats" });
+    }
+  });
+
+  // Get consolidated posting and error stats for the activity dashboard
+  app.get("/api/agents/:agentId/stats", async (req, res) => {
+    try {
+      const { agentId } = req.params;
+      const [agent, postingStats, recentLogs] = await Promise.all([
+        storage.getAgent(agentId),
+        storage.getPostingHealthStats(agentId, 24),
+        storage.getActivityLogs(agentId, 500),
+      ]);
+
+      if (!agent) {
+        return res.status(404).json({ error: "Agent not found" });
+      }
+
+      const now = new Date();
+      const startOfToday = new Date(now);
+      startOfToday.setHours(0, 0, 0, 0);
+
+      const weekAgo = new Date(now);
+      weekAgo.setDate(weekAgo.getDate() - 6);
+      weekAgo.setHours(0, 0, 0, 0);
+
+      const successfulPosts = recentLogs.filter(
+        (log) => log.eventType === "post" && log.status === "success",
+      );
+      const errorLogs = recentLogs.filter((log) => {
+        const logTime = getActivityLogTime(log);
+        return logTime >= startOfToday && (
+          log.eventType === "error" ||
+          log.status === "failed" ||
+          log.status === "rate_limited"
+        );
+      });
+
+      const lastSuccessfulPost = successfulPosts
+        .slice()
+        .sort((left, right) => getActivityLogTime(right).getTime() - getActivityLogTime(left).getTime())[0];
+
+      const lastError = recentLogs
+        .filter((log) => log.eventType === "error" || log.status === "failed" || log.status === "rate_limited")
+        .slice()
+        .sort((left, right) => getActivityLogTime(right).getTime() - getActivityLogTime(left).getTime())[0];
+
+      const lastPostTime = agent.lastPostedAt
+        ? new Date(agent.lastPostedAt)
+        : lastSuccessfulPost
+          ? getActivityLogTime(lastSuccessfulPost)
+          : null;
+
+      const intervalMs = getAgentIntervalMs(agent.postFrequency, agent.postInterval);
+      const schedulerActive = agent.status === "deployed" && agent.postingEnabled;
+      const nextPostTime = schedulerActive
+        ? new Date((lastPostTime || now).getTime() + intervalMs)
+        : null;
+
+      res.json({
+        agentId,
+        agentName: agent.name,
+        postsToday: successfulPosts.filter((log) => getActivityLogTime(log) >= startOfToday).length,
+        postsThisWeek: successfulPosts.filter((log) => getActivityLogTime(log) >= weekAgo).length,
+        errorsToday: errorLogs.length,
+        failedPosts24h: postingStats.failedPosts,
+        rateLimitedToday: errorLogs.filter((log) => log.status === "rate_limited").length,
+        successRate: Math.round(postingStats.successRate),
+        lastPostTime: lastPostTime ? lastPostTime.toISOString() : null,
+        lastErrorTime: lastError ? getActivityLogTime(lastError).toISOString() : null,
+        nextPostTime: nextPostTime ? nextPostTime.toISOString() : null,
+        nextPostDue: Boolean(nextPostTime && nextPostTime.getTime() <= now.getTime()),
+        schedulerActive,
+        postingEnabled: agent.postingEnabled,
+        webhookEnabled: Boolean(agent.webhookEnabled && agent.webhookUrl),
+      });
+    } catch (error) {
+      console.error("Error fetching agent stats:", error);
+      res.status(500).json({ error: "Failed to fetch agent stats" });
     }
   });
 
