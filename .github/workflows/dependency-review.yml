@@ -1,0 +1,26 @@
+name: Dependency Review
+
+on:
+  pull_request:
+    branches: ["main", "master"]
+
+permissions:
+  contents: read
+  pull-requests: write   # allows posting a comment with the vulnerability report
+
+jobs:
+  dependency-review:
+    name: Review dependency changes for vulnerabilities
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          # Fail on HIGH or CRITICAL CVEs only — warn on MODERATE
+          fail-on-severity: high
+          # Post a summary comment on the PR
+          comment-summary-in-pr: always
+          # Allow these licenses (adjust as needed)
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, CC0-1.0

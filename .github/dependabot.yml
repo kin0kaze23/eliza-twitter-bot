@@ -1,0 +1,44 @@
+version: 2
+updates:
+  # GitHub Actions — keep action versions up to date
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Singapore"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  # npm — weekly patch/minor updates
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Singapore"
+    open-pull-requests-limit: 10
+    groups:
+      # Group all patch updates into one PR
+      patch-updates:
+        update-types:
+          - "patch"
+      # Group linting/formatting tools
+      dev-tooling:
+        patterns:
+          - "eslint*"
+          - "prettier*"
+          - "@types/*"
+          - "typescript*"
+          - "vitest*"
+          - "jest*"
+    ignore:
+      # Don't auto-update major versions — review those manually
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels:
+      - "dependencies"
