@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: mailto:kin0.k423@gmail.com
+    about: Report vulnerabilities privately via email.
