@@ -1,0 +1,11 @@
+# CODEOWNERS
+# These owners are automatically requested for review on every PR.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default: all files require review from @kin0kaze23
+*  @kin0kaze23
+
+# Security-sensitive files require explicit sign-off
+.github/workflows/  @kin0kaze23
+*.env*              @kin0kaze23
+SECURITY.md         @kin0kaze23
