@@ -28,7 +28,7 @@ jobs:
         run: |
           if [ -f pnpm-lock.yaml ]; then
             echo "manager=pnpm" >> "$GITHUB_OUTPUT"
-            echo "version=9" >> "$GITHUB_OUTPUT"
+            echo "version=20" >> "$GITHUB_OUTPUT"
           elif [ -f package-lock.json ]; then
             echo "manager=npm" >> "$GITHUB_OUTPUT"
             echo "version=20" >> "$GITHUB_OUTPUT"
