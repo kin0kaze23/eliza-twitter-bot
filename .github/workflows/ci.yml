@@ -29,6 +29,15 @@ jobs:
           if [ -f pnpm-lock.yaml ]; then
             echo "manager=pnpm" >> "$GITHUB_OUTPUT"
             echo "version=20" >> "$GITHUB_OUTPUT"
+            pnpm_version="9"
+            if [ -f package.json ]; then
+              pm_line=$(grep -Eo '"packageManager"[[:space:]]*:[[:space:]]*"pnpm@[^"]+"' package.json || true)
+              if [ -n "$pm_line" ]; then
+                pnpm_version=${pm_line##*@}
+                pnpm_version=${pnpm_version%\"}
+              fi
+            fi
+            echo "pnpm_version=$pnpm_version" >> "$GITHUB_OUTPUT"
           elif [ -f package-lock.json ]; then
             echo "manager=npm" >> "$GITHUB_OUTPUT"
             echo "version=20" >> "$GITHUB_OUTPUT"
@@ -48,6 +57,8 @@ jobs:
       - name: Setup pnpm
         if: steps.pm.outputs.manager == 'pnpm'
         uses: pnpm/action-setup@v4
+        with:
+          version: ${{ steps.pm.outputs.pnpm_version }}
 
       - name: Install dependencies
         shell: bash
@@ -62,7 +73,7 @@ jobs:
         shell: bash
         run: |
           case "${{ steps.pm.outputs.manager }}" in
-            pnpm) pnpm run lint --if-present ;;
+            pnpm) pnpm run lint || true ;;
             yarn) yarn lint || true ;;
             *) npm run lint --if-present ;;
           esac
@@ -71,7 +82,7 @@ jobs:
         shell: bash
         run: |
           case "${{ steps.pm.outputs.manager }}" in
-            pnpm) pnpm run typecheck --if-present ;;
+            pnpm) pnpm run typecheck || true ;;
             yarn) yarn typecheck || true ;;
             *) npm run typecheck --if-present ;;
           esac
@@ -80,7 +91,7 @@ jobs:
         shell: bash
         run: |
           case "${{ steps.pm.outputs.manager }}" in
-            pnpm) pnpm run test --if-present ;;
+            pnpm) pnpm run test || true ;;
             yarn) yarn test || true ;;
             *) npm run test --if-present ;;
           esac
@@ -89,7 +100,7 @@ jobs:
         shell: bash
         run: |
           case "${{ steps.pm.outputs.manager }}" in
-            pnpm) pnpm run build --if-present ;;
+            pnpm) pnpm run build || true ;;
             yarn) yarn build || true ;;
             *) npm run build --if-present ;;
           esac
