@@ -1,0 +1,17 @@
+area/github:
+  - .github/**/*
+
+area/docs:
+  - README.md
+  - docs/**/*
+  - SECURITY.md
+
+area/src:
+  - src/**/*
+  - app/**/*
+  - packages/**/*
+
+area/tests:
+  - test/**/*
+  - tests/**/*
+  - __tests__/**/*

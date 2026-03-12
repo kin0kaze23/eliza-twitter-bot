@@ -1,0 +1,44 @@
+name: CodeQL
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+  schedule:
+    - cron: "20 2 * * 1"
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect language
+        id: detect
+        shell: bash
+        run: |
+          if [ -f Cargo.toml ]; then
+            echo "language=rust" >> "$GITHUB_OUTPUT"
+          else
+            echo "language=javascript-typescript" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ steps.detect.outputs.language }}
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
